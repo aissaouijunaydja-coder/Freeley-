@@ -1338,10 +1338,14 @@ CONSIGNES DE RÉDACTION
 - Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
 - Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.`;
 
-      const res = await fetch("/api/generate", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 5000,
+          messages: [{ role: "user", content: prompt }],
+        }),
       });
 
       if (!res.ok) {
@@ -1350,10 +1354,10 @@ CONSIGNES DE RÉDACTION
       }
 
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) throw new Error(data.error.message);
 
-      const text = (data.content || "").trim();
-      if (!text) throw new Error("Réponse vide du serveur.");
+      const text = (data.content || []).map(i => i.text || "").join("\n").trim();
+      if (!text) throw new Error("Réponse vide — content: " + JSON.stringify(data.content));
 
       // Sauvegarder dans l'historique
       await saveToHistory({ contract: text }, form);
@@ -2970,7 +2974,7 @@ CONSIGNES :
 - Maximum 300 mots, style juridique français rigoureux
 - Ne laisse aucun champ vide`;
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -5584,7 +5588,7 @@ Structure OBLIGATOIRE :
 
 Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juridique précis. Maximum 500 mots.`;
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1500, messages:[{role:"user",content:prompt}] }),
@@ -5764,7 +5768,7 @@ Structure : Objet → Rappel des faits → Montant total dû avec calcul détail
 Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
 
   const callAI = async (prompt) => {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("/api/claude", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1200, messages:[{role:"user",content:prompt}] }),
@@ -6538,7 +6542,7 @@ Règles impératives :
 
 Réponds uniquement avec la description réécrite, sans guillemets ni formatage.`;
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -6832,7 +6836,7 @@ Ta tâche : Analyse le message et réponds UNIQUEMENT en JSON valide (sans backt
 
 Sois précis et réaliste. Si le message ne contient pas de changement clair, retourne un tableau modifications vide.`;
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
