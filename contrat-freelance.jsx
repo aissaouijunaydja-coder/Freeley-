@@ -1342,7 +1342,7 @@ CONSIGNES DE RÉDACTION
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 5000,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -2978,7 +2978,7 @@ CONSIGNES :
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 1000,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -5591,7 +5591,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
       const res = await fetch("/api/generate", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1500, messages:[{role:"user",content:prompt}] }),
+        body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:1500, messages:[{role:"user",content:prompt}] }),
       });
       const data = await res.json();
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
@@ -5771,7 +5771,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
     const res = await fetch("/api/generate", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1200, messages:[{role:"user",content:prompt}] }),
+      body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:1200, messages:[{role:"user",content:prompt}] }),
     });
     const data = await res.json();
     return (data.content||[]).map(i=>i.text||"").join("\n").trim();
@@ -6546,7 +6546,7 @@ Réponds uniquement avec la description réécrite, sans guillemets ni formatage
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 600,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -6840,7 +6840,7 @@ Sois précis et réaliste. Si le message ne contient pas de changement clair, re
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 1000,
           messages: [{ role: "user", content: prompt }],
         }),
