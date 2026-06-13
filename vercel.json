@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "API/generate.js": {
+      "memory": 1024,
+      "maxDuration": 30
+    },
+    "API/claude.js": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/generate", "destination": "/API/generate" },
+    { "source": "/api/claude", "destination": "/API/claude" }
+  ]
+}
