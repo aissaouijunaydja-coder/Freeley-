@@ -1338,14 +1338,10 @@ CONSIGNES DE RÉDACTION
 - Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
 - Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.`;
 
-      const res = await fetch("/api/claude", {
+      const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 5000,
-          messages: [{ role: "user", content: prompt }],
-        }),
+        body: JSON.stringify({ prompt }),
       });
 
       if (!res.ok) {
@@ -1354,10 +1350,10 @@ CONSIGNES DE RÉDACTION
       }
 
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
+      if (data.error) throw new Error(data.error);
 
-      const text = (data.content || []).map(i => i.text || "").join("\n").trim();
-      if (!text) throw new Error("Réponse vide — content: " + JSON.stringify(data.content));
+      const text = (data.content || "").trim();
+      if (!text) throw new Error("Réponse vide du serveur.");
 
       // Sauvegarder dans l'historique
       await saveToHistory({ contract: text }, form);
