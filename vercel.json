@@ -1,6 +1,7 @@
 {
-  "rewrites": [
-    { "source": "/api/generate", "destination": "/génerer_racine" },
-    { "source": "/api/claude", "destination": "/génerer_racine" }
-  ]
+  "functions": {
+    "api/*.js": {
+      "runtime": "@vercel/node"
+    }
+  }
 }
