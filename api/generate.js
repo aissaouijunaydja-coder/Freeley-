@@ -1,11 +1,6 @@
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Méthode non autorisée" });
-  }
-
-  const { prompt } = req.body;
-  if (!prompt || typeof prompt !== "string" || prompt.trim().length < 10) {
-    return res.status(400).json({ error: "Prompt invalide ou manquant." });
+    return res.status(405).json({ error: "Methode non autorisee" });
   }
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -14,6 +9,22 @@ export default async function handler(req, res) {
   }
 
   try {
+    const body = req.body;
+
+    // Mode 1: { prompt } — appel simple
+    // Mode 2: { messages, model, max_tokens } — appel complet
+    let messages, max_tokens, model;
+
+    if (body.prompt) {
+      messages = [{ role: "user", content: body.prompt }];
+      max_tokens = body.max_tokens || 5000;
+      model = "claude-sonnet-4-6";
+    } else {
+      messages = body.messages;
+      max_tokens = body.max_tokens || 1000;
+      model = body.model || "claude-sonnet-4-6";
+    }
+
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -21,30 +32,23 @@ export default async function handler(req, res) {
         "x-api-key": ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 5000,
-        messages: [{ role: "user", content: prompt }],
-      }),
+      body: JSON.stringify({ model, max_tokens, messages }),
     });
 
     if (!anthropicRes.ok) {
-      return res.status(502).json({ error: "Erreur lors de la génération." });
+      return res.status(502).json({ error: "Erreur Anthropic." });
     }
 
     const data = await anthropicRes.json();
+
+    // Retourner la réponse complète pour compatibilité
     const text = (data.content || [])
-      .map((block) => (block.type === "text" ? block.text : ""))
-      .join("\n")
-      .trim();
+      .map(b => b.type === "text" ? b.text : "")
+      .join("\n").trim();
 
-    if (!text) {
-      return res.status(502).json({ error: "Réponse vide reçue." });
-    }
-
-    return res.status(200).json({ content: text });
+    return res.status(200).json({ content: text, raw: data });
 
   } catch (err) {
-    return res.status(500).json({ error: "Erreur serveur inattendue." });
+    return res.status(500).json({ error: "Erreur serveur." });
   }
 }
