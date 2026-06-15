@@ -5550,7 +5550,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, hi
                   <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, wordBreak:"break-all" }}>{authUser.email}</div>
                 </div>
                 <button onClick={() => { setUserMenu(false); onProfile(); }} style={{
-                  display:"block", width:"100%", textAlign:"left",
+                  width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
                   cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.navy,
                   display:"flex", alignItems:"center", gap:8,
