@@ -2120,7 +2120,6 @@ CONSIGNES DE RÉDACTION
           onSave={handleSaveRating}
         />
       )}
-      />
     </Shell>
   );
 
