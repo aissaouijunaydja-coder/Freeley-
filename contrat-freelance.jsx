@@ -6121,13 +6121,22 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
       return;
     }
     setError(""); setLoading(true);
-    // Mock : on simule l'envoi puis connexion directe
-    await new Promise(r => setTimeout(r, 900));
-    setLoading(false);
-    setMagicSent(true);
-    setTimeout(() => {
-      onSuccess({ id: "mock-uid", email: email.trim() });
-    }, 1800);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/otp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ email: email.trim(), create_user: true }),
+      });
+      const data = await res.json();
+      if (data.error) { setError(data.error_description || "Erreur envoi email"); setLoading(false); return; }
+      setLoading(false);
+      setMagicSent(true);
+    } catch(e) {
+      setError("Erreur réseau"); setLoading(false);
+    }
   };
 
   const handleOAuth = async (provider) => {
