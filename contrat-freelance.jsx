@@ -6122,18 +6122,18 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
     }
     setError(""); setLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/otp`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ email: email.trim(), create_user: true }),
-      });
-      const data = await res.json();
-      if (data.error) { setError(data.error_description || "Erreur envoi email"); setLoading(false); return; }
-      setLoading(false);
-      setMagicSent(true);
+
+
+
+
+
+
+
+
+
+
+
+
     } catch(e) {
       setError("Erreur réseau"); setLoading(false);
     }
