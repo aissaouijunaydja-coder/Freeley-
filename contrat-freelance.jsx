@@ -6110,6 +6110,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
 
 function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const [email, setEmail]         = useState("");
+  const [password, setPassword]   = useState("");
   const [loading, setLoading]     = useState(false);
   const [oauthLoading, setOauthLoading] = useState(""); // "google" | "linkedin" | ""
   const [error, setError]         = useState("");
@@ -6286,13 +6287,25 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 <div style={{ flex:1, height:1, background:C.border }} />
               </div>
 
-              {/* ── Magic Link ── */}
+              {/* ── Email + Password ── */}
               <div style={{ marginBottom:12 }}>
                 <input
                   type="email"
                   value={email}
                   onChange={e => { setEmail(e.target.value); setError(""); }}
                   placeholder="Votre adresse email pro"
+                  onKeyDown={e => e.key === "Enter" && handleMagicLink()}
+                  style={inputBase}
+                  onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
+                  onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
+                />
+              </div>
+              <div style={{ marginBottom:12 }}>
+                <input
+                  type="password"
+                  value={password || ""}
+                  onChange={e => { setPassword(e.target.value); setError(""); }}
+                  placeholder="Mot de passe (6 caractères min.)"
                   onKeyDown={e => e.key === "Enter" && handleMagicLink()}
                   style={inputBase}
                   onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
