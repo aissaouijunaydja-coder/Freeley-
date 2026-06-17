@@ -6124,10 +6124,14 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
     }
     setError(""); setLoading(true);
     try {
-
-
-
-
+      let { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (error) {
+        const res2 = await supabase.auth.signUp({ email: email.trim(), password });
+        if (res2.error) { setError(res2.error.message); setLoading(false); return; }
+        data = res2.data;
+      }
+      if (data?.user) { setLoading(false); onSuccess(data.user); }
+      else { setError("Erreur connexion"); setLoading(false); }
 
 
 
