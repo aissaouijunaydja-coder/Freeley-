@@ -211,7 +211,7 @@ const saveToHistory = async (entry, form) => {
   const { data, error } = await supabase
     .from("contracts")
     .insert({
-      "ID de l'utilisateur": user.id,
+      user_id: user.id,
       titre: form.missionTitle || "Contrat",
       contenu: { ...entry, form, clientName: form.clientName, clientCompany: form.clientCompany, price: form.price, startDate: form.startDate, endDate: form.endDate },
       statut: "none",
