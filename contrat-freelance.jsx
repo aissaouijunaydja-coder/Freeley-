@@ -184,15 +184,11 @@ const rowToEntry = (row) => ({
 const getHistory = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
-  const token = _currentSession?.access_token || SUPABASE_KEY;
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/contrat?select=*&order=created_at.desc`, {
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${token}`,
-    },
-  });
-  const data = await res.json();
-  if (!Array.isArray(data)) return [];
+  const { data, error } = await supabase
+    .from("contrat")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error || !Array.isArray(data)) return [];
   return data.map(row => ({
     id: row.id,
     date: new Date(row.created_at).toLocaleDateString("fr-FR"),
@@ -212,38 +208,24 @@ const getHistory = async () => {
 const saveToHistory = async (entry, form) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const token = _currentSession?.access_token || SUPABASE_KEY;
-  const payload = {
-    "ID de l'utilisateur": user.id,
-    titre: form.missionTitle || "Contrat",
-    contenu: { ...entry, form, clientName: form.clientName, clientCompany: form.clientCompany, price: form.price, startDate: form.startDate, endDate: form.endDate },
-    statut: "none",
-  };
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/contrat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${token}`,
-      "Prefer": "return=representation",
-    },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  return Array.isArray(data) ? data[0] : data;
+  const { data, error } = await supabase
+    .from("contrat")
+    .insert({
+      "ID de l'utilisateur": user.id,
+      titre: form.missionTitle || "Contrat",
+      contenu: { ...entry, form, clientName: form.clientName, clientCompany: form.clientCompany, price: form.price, startDate: form.startDate, endDate: form.endDate },
+      statut: "none",
+    })
+    .select()
+    .single();
+  if (error) console.error("saveToHistory error:", error);
+  return data;
 };
 
 const deleteFromHistory = async (id) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
-  const token = _currentSession?.access_token || SUPABASE_KEY;
-  await fetch(`${SUPABASE_URL}/rest/v1/contrat?id=eq.${id}`, {
-    method: "DELETE",
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${token}`,
-    },
-  });
+  await supabase.from("contrat").delete().eq("id", id);
 };
 
 const getUserPlan = async () => {
