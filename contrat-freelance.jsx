@@ -212,9 +212,9 @@ const saveToHistory = async (entry, form) => {
     .from("contracts")
     .insert({
       user_id: user.id,
-      titre: form.missionTitle || "Contrat",
-      contenu: { ...entry, form, clientName: form.clientName, clientCompany: form.clientCompany, price: form.price, startDate: form.startDate, endDate: form.endDate },
-      statut: "none",
+      title: form.missionTitle || "Contrat",
+      content: { ...entry, form, clientName: form.clientName, clientCompany: form.clientCompany, price: form.price, startDate: form.startDate, endDate: form.endDate },
+      status: "none",
     })
     .select()
     .single();
