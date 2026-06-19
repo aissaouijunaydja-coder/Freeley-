@@ -185,7 +185,7 @@ const getHistory = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
   const { data, error } = await supabase
-    .from("contrat")
+    .from("contracts")
     .select("*")
     .order("created_at", { ascending: false });
   if (error || !Array.isArray(data)) return [];
@@ -209,7 +209,7 @@ const saveToHistory = async (entry, form) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
   const { data, error } = await supabase
-    .from("contrat")
+    .from("contracts")
     .insert({
       "ID de l'utilisateur": user.id,
       titre: form.missionTitle || "Contrat",
@@ -225,7 +225,7 @@ const saveToHistory = async (entry, form) => {
 const deleteFromHistory = async (id) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
-  await supabase.from("contrat").delete().eq("id", id);
+  await supabase.from("contracts").delete().eq("id", id);
 };
 
 const getUserPlan = async () => {
