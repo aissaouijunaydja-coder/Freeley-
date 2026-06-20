@@ -6006,21 +6006,17 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   };
 
   const handleOAuth = async (provider) => {
-    if (provider !== "google") {
-      setError("Cette connexion arrive bientôt !");
-      return;
-    }
     setOauthLoading(provider);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
+        provider: provider === "linkedin" ? "linkedin_oidc" : provider,
         options: {
           redirectTo: window.location.origin,
         },
       });
       if (error) { setError(error.message); setOauthLoading(""); }
     } catch(e) {
-      setError("Erreur connexion Google"); setOauthLoading("");
+      setError("Erreur connexion"); setOauthLoading("");
     }
   };
 
