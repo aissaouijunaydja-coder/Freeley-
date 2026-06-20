@@ -1043,8 +1043,26 @@ function AppInner() {
       s.onload = () => setPDFReady(true);
       document.head.appendChild(s);
     }
-    // Mock : pas de vraie session persistante, on démarre déconnecté
-    setAuthReady(true);
+    // Vérifie la session existante (ex: après redirect Google)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setAuthUser(session.user);
+        loadUserData(session.user);
+      }
+      setAuthReady(true);
+    });
+
+    // Écoute les changements de session (connexion/déconnexion)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setAuthUser(session.user);
+        loadUserData(session.user);
+      } else {
+        setAuthUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
     // Redirige vers "En cours" si relancé depuis l'écran de crash
     try {
       const goto = sessionStorage.getItem("freeley_goto");
