@@ -1054,6 +1054,10 @@ function AppInner() {
 
     // Écoute les changements de session (connexion/déconnexion)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === "PASSWORD_RECOVERY") {
+        setScreen("reset-password");
+        return;
+      }
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
@@ -1929,6 +1933,17 @@ CONSIGNES DE RÉDACTION
         onSignOut={handleSignOut}
         onGoHome={() => setScreen("app")}
       />
+    </Shell>
+  );
+
+  /* ── RESET PASSWORD ── */
+  if (screen === "reset-password") return (
+    <Shell>
+      <div style={{ maxWidth:420, margin:"80px auto", padding:"0 20px" }}>
+        <h2 style={{ fontFamily:"Georgia, serif", fontSize:24, color:"#1B2E4B", marginBottom:8 }}>Nouveau mot de passe</h2>
+        <p style={{ fontSize:13, color:"#8A8780", marginBottom:24 }}>Choisis un nouveau mot de passe pour ton compte.</p>
+        <ResetPasswordForm onSuccess={() => setScreen("app")} />
+      </div>
     </Shell>
   );
 
@@ -5966,6 +5981,31 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
         </div>
       </div>
     </div>
+  );
+}
+
+function ResetPasswordForm({ onSuccess }) {
+  const [pwd, setPwd] = React.useState("");
+  const [pwd2, setPwd2] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [done, setDone] = React.useState(false);
+  const handle = async () => {
+    if (pwd.length < 6) { setError("6 caractères min."); return; }
+    if (pwd !== pwd2) { setError("Mots de passe différents"); return; }
+    setLoading(true);
+    const { error: e } = await supabase.auth.updateUser({ password: pwd });
+    if (e) { setError(e.message); setLoading(false); return; }
+    setDone(true);
+    setTimeout(() => onSuccess(), 2000);
+  };
+  if (done) return React.createElement("p", { style: { color:"#2D6A4F" } }, "Mot de passe mis a jour !");
+  const s = { width:"100%", padding:"14px 16px", border:"1.5px solid #D8D4CB", borderRadius:12, fontSize:14, marginBottom:12, boxSizing:"border-box" };
+  return React.createElement("div", null,
+    React.createElement("input", { type:"password", placeholder:"Nouveau mot de passe", value:pwd, onChange:e=>setPwd(e.target.value), style:s }),
+    React.createElement("input", { type:"password", placeholder:"Confirmer", value:pwd2, onChange:e=>setPwd2(e.target.value), style:s }),
+    error && React.createElement("p", { style:{ color:"#C0392B", fontSize:12, marginBottom:12 } }, error),
+    React.createElement("button", { onClick:handle, disabled:loading, style:{ width:"100%", padding:"14px", background:"#1B2E4B", color:"white", border:"none", borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer" } }, loading ? "..." : "Enregistrer")
   );
 }
 
