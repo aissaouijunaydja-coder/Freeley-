@@ -5986,15 +5986,18 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
       return;
     }
     if (!password || password.length < 6) { setError("Mot de passe trop court (6 caractères min.)"); return; }
-    if (confirmPwd && confirmPwd !== password) { setError("Les mots de passe ne correspondent pas"); return; }
+    if (mode === "signup" && confirmPwd !== password) { setError("Les mots de passe ne correspondent pas"); return; }
     setError(""); setLoading(true);
     try {
-      let { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) {
-        const res2 = await supabase.auth.signUp({ email: email.trim(), password });
-        if (res2.error) { setError(res2.error.message); setLoading(false); return; }
-        data = res2.data;
+      let data, error;
+      if (mode === "signup") {
+        const res = await supabase.auth.signUp({ email: email.trim(), password });
+        data = res.data; error = res.error;
+      } else {
+        const res = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        data = res.data; error = res.error;
       }
+      if (error) { setError(error.message); setLoading(false); return; }
       if (data?.user) { setLoading(false); onSuccess(data.user); }
       else { setError("Erreur connexion"); setLoading(false); }
 
@@ -6090,13 +6093,21 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
           ) : (
             <>
               {/* ── Titre ── */}
-              <div style={{ marginBottom:28 }}>
+              <div style={{ marginBottom:20 }}>
                 <h2 style={{ fontFamily:T.display, fontSize:24, color:C.navy, fontWeight:700, marginBottom:6, lineHeight:1.2 }}>
-                  Sécurisez votre activité en 10 secondes 🛡️
+                  {mode === "signup" ? "Créez votre compte Freeley 🛡️" : "Bon retour parmi nous 👋"}
                 </h2>
                 <p style={{ fontFamily:T.body, fontSize:13, color:C.textL, lineHeight:1.65, margin:0 }}>
-                  Rejoignez les milliers de freelances qui protègent leurs missions avec Freeley.
+                  {mode === "signup" ? "Rejoignez les freelances qui protègent leurs missions avec Freeley." : "Connectez-vous pour accéder à vos contrats."}
                 </p>
+              </div>
+              <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+                <button onClick={() => setMode("login")} style={{ flex:1, padding:"10px", borderRadius:10, border:`2px solid ${mode === "login" ? C.navy : C.border}`, background: mode === "login" ? C.navy : "white", color: mode === "login" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                  Se connecter
+                </button>
+                <button onClick={() => setMode("signup")} style={{ flex:1, padding:"10px", borderRadius:10, border:`2px solid ${mode === "signup" ? C.navy : C.border}`, background: mode === "signup" ? C.navy : "white", color: mode === "signup" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                  Créer un compte
+                </button>
               </div>
 
               {/* ── OAuth Google ── */}
@@ -6173,6 +6184,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 />
                 <button type="button" onClick={() => setShowPwd(!showPwd)} style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", color:C.textL, fontSize:14, padding:0 }}>voir</button>
               </div>
+              {mode === "signup" && (
               <div style={{ marginBottom:12, position:"relative" }}>
                 <input
                   type={showPwd2 ? "text" : "password"}
@@ -6186,6 +6198,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 />
                 <button type="button" onClick={() => setShowPwd2(!showPwd2)} style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", color:C.textL, fontSize:14, padding:0 }}>voir</button>
               </div>
+              )}
 
               {error && (
                 <div style={{ padding:"9px 14px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, color:C.error, fontSize:12, fontFamily:T.body, marginBottom:12 }}>
