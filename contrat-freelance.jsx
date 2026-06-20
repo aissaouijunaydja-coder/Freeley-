@@ -8783,10 +8783,20 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
     }
   };
 
+  const [fileData, setFileData] = useState(null);
+  const [fileType, setFileType] = useState(null);
+
   const handleFileSelected = (e) => {
     const file = e.target.files?.[0];
-    if (file) setFileName(file.name);
-    // reset pour permettre re-sélection du même fichier
+    if (!file) return;
+    setFileName(file.name);
+    setFileType(file.type);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target.result.split(",")[1];
+      setFileData(base64);
+    };
+    reader.readAsDataURL(file);
     e.target.value = "";
   };
 
@@ -8827,29 +8837,31 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
     }
   };
 
-  const handleAnalyse = () => {
-    if (!fileName) return;
+  const [aiFindings, setAiFindings] = useState(null);
+
+  const handleAnalyse = async () => {
+    if (!fileName || !fileData) return;
     setPhase("loading");
-    setProgress(0);
-    setAnimFrame(0);
-
-    // Progress animation over 3 seconds
-    let current = 0;
-    let msgIndex = 0;
-    const total = 3000;
-    const tick = 60;
-
+    setProgress(0); setAnimFrame(0);
+    let current = 0; const total = 8000; const tick = 100;
     const interval = setInterval(() => {
       current += tick;
-      const pct = Math.min(100, Math.round((current / total) * 100));
-      setProgress(pct);
-      const newMsg = Math.min(loadingMessages.length - 1, Math.floor((current / total) * loadingMessages.length));
-      setAnimFrame(newMsg);
-      if (current >= total) {
-        clearInterval(interval);
-        setProgress(100);
-        setTimeout(() => setPhase("result"), 200);
-      }
+      setProgress(Math.min(90, Math.round((current/total)*90)));
+      setAnimFrame(Math.min(loadingMessages.length-1, Math.floor((current/total)*loadingMessages.length)));
+    }, tick);
+    try {
+      const mt = fileType && fileType.includes("pdf") ? "application/pdf" : (fileType || "image/jpeg");
+      const isImg = mt.startsWith("image/");
+      const src = isImg ? {type:"image",source:{type:"base64",media_type:mt,data:fileData}} : {type:"document",source:{type:"base64",media_type:"application/pdf",data:fileData}};
+      const res = await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,messages:[{role:"user",content:[src,{type:"text",text:"Analyse ce contrat en francais. Identifie clauses dangereuses, a negocier et positives. JSON: {findings:[{level:danger|warning|ok,article:nom,text:explication}]} Max 6."}]}]})})
+      const data = await res.json();
+      const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
+      const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
+      setAiFindings(parsed.findings||[]);
+    } catch(e) { setAiFindings(null); }
+    clearInterval(interval); setProgress(100);
+    setTimeout(()=>setPhase("result"),300);
+  };
     }, tick);
   };
 
