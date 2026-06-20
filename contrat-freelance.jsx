@@ -9324,7 +9324,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
 
               {/* Findings */}
               <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-                {findings.map((f, i) => (
+                {(aiFindings || findings).map((f, i) => (
                   <div key={i} className="fade-up" style={{
                     background:f.bg, border:`1.5px solid ${f.border}`,
                     borderRadius:10, padding:"14px 16px",
