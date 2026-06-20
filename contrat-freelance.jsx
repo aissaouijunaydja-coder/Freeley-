@@ -5988,11 +5988,22 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   };
 
   const handleOAuth = async (provider) => {
+    if (provider !== "google") {
+      setError("Cette connexion arrive bientôt !");
+      return;
+    }
     setOauthLoading(provider);
-    await new Promise(r => setTimeout(r, 800));
-    const mockEmail = provider === "google" ? "freelance@gmail.com" : "freelance@linkedin.com";
-    setOauthLoading("");
-    onSuccess({ id: "mock-uid", email: mockEmail });
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) { setError(error.message); setOauthLoading(""); }
+    } catch(e) {
+      setError("Erreur connexion Google"); setOauthLoading("");
+    }
   };
 
   const inputBase = {
