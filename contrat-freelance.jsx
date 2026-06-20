@@ -5987,6 +5987,8 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
 function ResetPasswordForm({ onSuccess }) {
   const [pwd, setPwd] = React.useState("");
   const [pwd2, setPwd2] = React.useState("");
+  const [show1, setShow1] = React.useState(false);
+  const [show2, setShow2] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [done, setDone] = React.useState(false);
@@ -6000,10 +6002,17 @@ function ResetPasswordForm({ onSuccess }) {
     setTimeout(() => onSuccess(), 2000);
   };
   if (done) return React.createElement("p", { style: { color:"#2D6A4F" } }, "Mot de passe mis a jour !");
-  const s = { width:"100%", padding:"14px 16px", border:"1.5px solid #D8D4CB", borderRadius:12, fontSize:14, marginBottom:12, boxSizing:"border-box" };
+  const s = { width:"100%", padding:"14px 44px 14px 16px", border:"1.5px solid #D8D4CB", borderRadius:12, fontSize:14, marginBottom:12, boxSizing:"border-box" };
+  const eyeBtn = (show, setShow) => React.createElement("button", { type:"button", onClick:()=>setShow(!show), style:{ position:"absolute", right:12, top:"50%", transform:"translateY(-60%)", background:"none", border:"none", cursor:"pointer", color:"#8A8780", fontSize:14, padding:0 } }, show ? "masquer" : "voir");
   return React.createElement("div", null,
-    React.createElement("input", { type:"password", placeholder:"Nouveau mot de passe", value:pwd, onChange:e=>setPwd(e.target.value), style:s }),
-    React.createElement("input", { type:"password", placeholder:"Confirmer", value:pwd2, onChange:e=>setPwd2(e.target.value), style:s }),
+    React.createElement("div", { style:{ position:"relative", marginBottom:0 } },
+      React.createElement("input", { type:show1?"text":"password", placeholder:"Nouveau mot de passe", value:pwd, onChange:e=>setPwd(e.target.value), style:s }),
+      eyeBtn(show1, setShow1)
+    ),
+    React.createElement("div", { style:{ position:"relative", marginBottom:0 } },
+      React.createElement("input", { type:show2?"text":"password", placeholder:"Confirmer le mot de passe", value:pwd2, onChange:e=>setPwd2(e.target.value), style:s }),
+      eyeBtn(show2, setShow2)
+    ),
     error && React.createElement("p", { style:{ color:"#C0392B", fontSize:12, marginBottom:12 } }, error),
     React.createElement("button", { onClick:handle, disabled:loading, style:{ width:"100%", padding:"14px", background:"#1B2E4B", color:"white", border:"none", borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer" } }, loading ? "..." : "Enregistrer")
   );
