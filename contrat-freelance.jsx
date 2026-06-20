@@ -6234,9 +6234,18 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 )}
               </button>
 
-              <p style={{ fontFamily:T.body, fontSize:11, color:C.textL, textAlign:"center", lineHeight:1.6, margin:"0 0 4px" }}>
-                Pas de mot de passe à retenir. Un lien sécurisé vous sera envoyé par email.
-              </p>
+              {mode === "login" && (
+                <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, textAlign:"center", lineHeight:1.6, margin:"8px 0 0" }}>
+                  <span onClick={async () => {
+                    if (!email.trim()) { setError("Entre ton email d'abord"); return; }
+                    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+                    if (error) setError(error.message);
+                    else setError("Email de réinitialisation envoyé ! Vérifie ta boite mail.");
+                  }} style={{ cursor:"pointer", color:C.navy, textDecoration:"underline", fontWeight:500 }}>
+                    Mot de passe oublié ?
+                  </span>
+                </p>
+              )}
             </>
           )}
         </div>
