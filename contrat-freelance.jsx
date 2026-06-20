@@ -6278,7 +6278,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, textAlign:"center", lineHeight:1.6, margin:"8px 0 0" }}>
                   <span onClick={async () => {
                     if (!email.trim()) { setError("Entre ton email d'abord"); return; }
-                    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+                    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: "https://freeley-ten.vercel.app" });
                     if (error) setError(error.message);
                     else setError("Email de réinitialisation envoyé ! Vérifie ta boite mail.");
                   }} style={{ cursor:"pointer", color:C.navy, textDecoration:"underline", fontWeight:500 }}>
