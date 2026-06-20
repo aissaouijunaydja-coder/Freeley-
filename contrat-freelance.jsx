@@ -5972,6 +5972,9 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
 function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const [email, setEmail]         = useState("");
   const [password, setPassword]   = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [showPwd, setShowPwd]       = useState(false);
+  const [showPwd2, setShowPwd2]     = useState(false);
   const [loading, setLoading]     = useState(false);
   const [oauthLoading, setOauthLoading] = useState(""); // "google" | "linkedin" | ""
   const [error, setError]         = useState("");
@@ -5982,6 +5985,8 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
       setError("Saisis une adresse email valide.");
       return;
     }
+    if (!password || password.length < 6) { setError("Mot de passe trop court (6 caractères min.)"); return; }
+    if (confirmPwd && confirmPwd !== password) { setError("Les mots de passe ne correspondent pas"); return; }
     setError(""); setLoading(true);
     try {
       let { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
@@ -6155,17 +6160,31 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
                 />
               </div>
-              <div style={{ marginBottom:12 }}>
+              <div style={{ marginBottom:12, position:"relative" }}>
                 <input
-                  type="password"
+                  type={showPwd ? "text" : "password"}
                   value={password || ""}
                   onChange={e => { setPassword(e.target.value); setError(""); }}
                   placeholder="Mot de passe (6 caractères min.)"
                   onKeyDown={e => e.key === "Enter" && handleMagicLink()}
-                  style={inputBase}
+                  style={{ ...inputBase, paddingRight:44 }}
                   onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
                   onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
                 />
+                <button type="button" onClick={() => setShowPwd(!showPwd)} style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", color:C.textL, fontSize:14, padding:0 }}>voir</button>
+              </div>
+              <div style={{ marginBottom:12, position:"relative" }}>
+                <input
+                  type={showPwd2 ? "text" : "password"}
+                  value={confirmPwd || ""}
+                  onChange={e => { setConfirmPwd(e.target.value); setError(""); }}
+                  placeholder="Confirmer le mot de passe"
+                  onKeyDown={e => e.key === "Enter" && handleMagicLink()}
+                  style={{ ...inputBase, paddingRight:44 }}
+                  onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
+                  onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
+                />
+                <button type="button" onClick={() => setShowPwd2(!showPwd2)} style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", color:C.textL, fontSize:14, padding:0 }}>voir</button>
               </div>
 
               {error && (
