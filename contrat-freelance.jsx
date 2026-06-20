@@ -8862,8 +8862,6 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
     clearInterval(interval); setProgress(100);
     setTimeout(()=>setPhase("result"),300);
   };
-    }, tick);
-  };
 
   const findings = [
     {
