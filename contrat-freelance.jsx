@@ -192,16 +192,16 @@ const getHistory = async () => {
   return data.map(row => ({
     id: row.id,
     date: new Date(row.created_at).toLocaleDateString("fr-FR"),
-    missionTitle: row.titre,
-    clientName: row.contenu?.clientName || "",
-    clientCompany: row.contenu?.clientCompany || "",
-    price: row.contenu?.price || "",
-    startDate: row.contenu?.startDate || "",
-    endDate: row.contenu?.endDate || "",
-    contract: row.contenu?.contract || "",
-    signatureStatus: row.statut || "none",
+    missionTitle: row.title || row.titre || "",
+    clientName: row.content?.clientName || row.contenu?.clientName || "",
+    clientCompany: row.content?.clientCompany || row.contenu?.clientCompany || "",
+    price: row.content?.price || row.contenu?.price || "",
+    startDate: row.content?.startDate || row.contenu?.startDate || "",
+    endDate: row.content?.endDate || row.contenu?.endDate || "",
+    contract: row.content?.contract || row.contenu?.contract || "",
+    signatureStatus: row.status || row.statut || "none",
     signatureRequestId: null,
-    form: row.contenu?.form || {},
+    form: row.content?.form || row.contenu?.form || {},
   }));
 };
 
