@@ -9324,7 +9324,17 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
 
               {/* Findings */}
               <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-                {(aiFindings || findings).map((f, i) => (
+                {(aiFindings ? aiFindings.map(f => ({
+                  ...f,
+                  color: f.level === "danger" ? "#DC2626" : f.level === "warning" ? "#D97706" : "#16A34A",
+                  bg: f.level === "danger" ? "#FEF2F2" : f.level === "warning" ? "#FFFBEB" : "#F0FDF4",
+                  border: f.level === "danger" ? "#FECACA" : f.level === "warning" ? "#FDE68A" : "#BBF7D0",
+                  dot: f.level === "danger" ? "#EF4444" : f.level === "warning" ? "#F59E0B" : "#22C55E",
+                  label: f.level === "danger" ? "DANGER" : f.level === "warning" ? "A NEGOCIER" : "CONFORME",
+                  labelBg: f.level === "danger" ? "#FEE2E2" : f.level === "warning" ? "#FEF3C7" : "#DCFCE7",
+                  labelColor: f.level === "danger" ? "#991B1B" : f.level === "warning" ? "#92400E" : "#166534",
+                  icon: f.level === "danger" ? "🔴" : f.level === "warning" ? "🟡" : "🟢",
+                })) : findings).map((f, i) => (
                   <div key={i} className="fade-up" style={{
                     background:f.bg, border:`1.5px solid ${f.border}`,
                     borderRadius:10, padding:"14px 16px",
