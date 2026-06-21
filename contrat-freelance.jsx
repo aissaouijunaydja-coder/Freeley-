@@ -8860,8 +8860,8 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
       setAiFindings(parsed.findings||[]);
     } catch(e) { setAiFindings(null); }
     clearInterval(interval); setProgress(100);
+    await handleExtraction();
     setTimeout(()=>setPhase("result"),300);
-    handleExtraction();
   };
 
   const [extractedData, setExtractedData] = useState(null);
