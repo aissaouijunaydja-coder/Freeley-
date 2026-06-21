@@ -2080,11 +2080,11 @@ CONSIGNES DE RÉDACTION
           onClose={() => setShowScannerModal(false)}
           onRequestCamera={requestCameraPermission}
           onImportToDashboard={async (extractedData) => {
-            if (extractedData && authUser) {
+            if (authUser) {
               const form = {
-                clientName: extractedData.client || "",
-                missionTitle: extractedData.mission || "Contrat importé",
-                price: extractedData.montant || "",
+                clientName: extractedData?.client || "Client inconnu",
+                missionTitle: extractedData?.mission || "Contrat importé",
+                price: extractedData?.montant || "",
                 startDate: "",
                 endDate: "",
                 missionDescription: "Contrat importé via scanner IA",
