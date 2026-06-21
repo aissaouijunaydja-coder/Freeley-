@@ -9723,11 +9723,11 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:18 }}>
                     {[
-                      { icon:"👤", label:"Client détecté", value:"Sophie Martin", color:"#5B21B6", bg:"#EDE9FE", border:"#C4B5FD" },
-                      { icon:"💼", label:"Type de mission", value:"Développement Web / Design", color:"#1D4ED8", bg:"#EFF6FF", border:"#BFDBFE" },
-                      { icon:"💰", label:"Montant global", value:"555 € HT", color:"#166534", bg:"#F0FDF4", border:"#86EFAC" },
-                      { icon:"💳", label:"Acompte requis (30%)", value:"167 €", color:"#92400E", bg:"#FFFBEB", border:"#FDE68A" },
-                      { icon:"📅", label:"Dates de la mission", value:"Du 15 juin au 15 sept. 2026", color:"#0F4C75", bg:"#F0F9FF", border:"#BAE6FD" },
+                      { icon:"👤", label:"Client détecté", value: extractedData?.client || "Non détecté", color:"#5B21B6", bg:"#EDE9FE", border:"#C4B5FD" },
+                      { icon:"💼", label:"Type de mission", value: extractedData?.mission || "Non détecté", color:"#1D4ED8", bg:"#EFF6FF", border:"#BFDBFE" },
+                      { icon:"💰", label:"Montant global", value: extractedData?.montant || "Non détecté", color:"#166534", bg:"#F0FDF4", border:"#86EFAC" },
+                      { icon:"💳", label:"Acompte requis (30%)", value: extractedData?.acompte || "Non détecté", color:"#92400E", bg:"#FFFBEB", border:"#FDE68A" },
+                      { icon:"📅", label:"Dates de la mission", value: extractedData?.dates || "Non détecté", color:"#0F4C75", bg:"#F0F9FF", border:"#BAE6FD" },
                     ].map((field, i) => (
                       <div key={i} style={{
                         display:"flex", alignItems:"center", gap:12,
