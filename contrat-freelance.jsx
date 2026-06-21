@@ -8861,6 +8861,23 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
     } catch(e) { setAiFindings(null); }
     clearInterval(interval); setProgress(100);
     setTimeout(()=>setPhase("result"),300);
+    handleExtraction();
+  };
+
+  const [extractedData, setExtractedData] = useState(null);
+
+  const handleExtraction = async () => {
+    if (!fileData) return;
+    try {
+      const mt = fileType && fileType.includes("pdf") ? "application/pdf" : (fileType || "image/jpeg");
+      const isImg = mt.startsWith("image/");
+      const src = isImg ? {type:"image",source:{type:"base64",media_type:mt,data:fileData}} : {type:"document",source:{type:"base64",media_type:"application/pdf",data:fileData}};
+      const res = await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:800,messages:[{role:"user",content:[src,{type:"text",text:"Extrait les infos cles de ce contrat. Reponds UNIQUEMENT en JSON: {client:string,mission:string,montant:string,acompte:string,dates:string}"}]}]})});
+      const data = await res.json();
+      const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
+      const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
+      setExtractedData(parsed);
+    } catch(e) { setExtractedData(null); }
   };
 
   const findings = [
