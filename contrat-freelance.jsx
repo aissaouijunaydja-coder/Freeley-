@@ -7531,7 +7531,7 @@ function ContractTimeline({ entry }) {
 /* ══════════════════════════════════════════ DEPOSIT GUARD ══ */
 function DepositGuard({ entry }) {
   const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 557;
-  const depositAmt = Math.round(rawPrice * 0.30) || 167;
+  const depositAmt = Math.round(rawPrice * 0.30) || 0;
 
   const [paid, setPaid]           = useState(false);
   const [progress, setProgress]   = useState(0);
@@ -7573,7 +7573,7 @@ function DepositGuard({ entry }) {
       }}>
 
         {/* Zone état */}
-        <div style={{
+        {depositAmt > 0 && <div style={{
           padding: "20px 22px 18px",
           background: paid
             ? "linear-gradient(135deg, #DCFCE7 0%, #F0FDF4 100%)"
@@ -7663,7 +7663,7 @@ function DepositGuard({ entry }) {
               </div>
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Zone actions — visible seulement si non payé */}
         {!paid && (
