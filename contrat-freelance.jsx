@@ -2079,7 +2079,20 @@ CONSIGNES DE RÉDACTION
         <ScannerModal
           onClose={() => setShowScannerModal(false)}
           onRequestCamera={requestCameraPermission}
-          onImportToDashboard={() => {
+          onImportToDashboard={async (extractedData) => {
+            if (extractedData && authUser) {
+              const form = {
+                clientName: extractedData.client || "",
+                missionTitle: extractedData.mission || "Contrat importé",
+                price: extractedData.montant || "",
+                startDate: "",
+                endDate: "",
+                missionDescription: "Contrat importé via scanner IA",
+              };
+              await saveToHistory({ contract: "Contrat scanné et analysé par IA" }, form);
+              const hist = await getHistory();
+              setHistory(hist);
+            }
             setShowScannerModal(false);
             setScreen("history");
           }}
@@ -9782,7 +9795,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
                       if (importSuccess) return;
                       setImportSuccess(true);
                       setTimeout(() => {
-                        if (onImportToDashboard) onImportToDashboard();
+                        if (onImportToDashboard) onImportToDashboard(extractedData);
                         onClose();
                       }, 1000);
                     }}
