@@ -1855,6 +1855,10 @@ CONSIGNES DE RÉDACTION
     setAuthUser(user);
     await loadUserData(user);
     setShowAuthModal(false);
+    // Si scanner ouvert, on le garde ouvert pour afficher les résultats
+    if (showScannerModal) {
+      return;
+    }
     // Si on vient de la profile-gate, aller direct sur le profil
     if (screen === "profile-gate") {
       setScreen("profile");
@@ -2079,7 +2083,7 @@ CONSIGNES DE RÉDACTION
         <ScannerModal
           onClose={() => setShowScannerModal(false)}
           onRequestCamera={requestCameraPermission}
-          onShowAuth={() => { setAuthMode("signup"); setShowAuthModal(true); }}
+          onShowAuth={() => { setAuthMode("signup"); setShowAuthModal(true); setShowScannerModal(true); }}
           onImportToDashboard={async (extractedData) => {
             if (authUser) {
               const form = {
