@@ -8770,6 +8770,18 @@ ${freelanceName}`;
 /* ══════════════════════════════════════════ SCANNER MODAL ══ */
 function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAuth }) {
   const [phase, setPhase]       = useState("upload");   // "upload" | "loading" | "result"
+
+  useEffect(() => {
+    if (phase === "auth-waiting") {
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) setPhase("result");
+      });
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user && phase === "auth-waiting") setPhase("result");
+      });
+      return () => subscription.unsubscribe();
+    }
+  }, [phase]);
   const [fileName, setFileName] = useState("");
   const [progress, setProgress] = useState(0);
   const [animFrame, setAnimFrame] = useState(0);
@@ -8877,7 +8889,8 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
     await handleExtraction();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      setPhase("auth-required");
+      if (onShowAuth) onShowAuth();
+      setPhase("auth-waiting");
       return;
     }
     setTimeout(()=>setPhase("result"),300);
