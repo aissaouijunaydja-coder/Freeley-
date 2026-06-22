@@ -1061,6 +1061,10 @@ function AppInner() {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
+        // Ne pas fermer le scanner si il est ouvert
+        if (!showScannerModal) {
+          // laisser handleAuthSuccess gérer la navigation
+        }
       } else {
         setAuthUser(null);
       }
@@ -1855,12 +1859,12 @@ CONSIGNES DE RÉDACTION
     setAuthUser(user);
     await loadUserData(user);
     setShowAuthModal(false);
-    // Si scanner ouvert, on le garde ouvert pour afficher les résultats
-    if (showScannerModal) {
+    // Si on vient du scanner, rouvrir le scanner
+    if (sessionStorage.getItem("freeley_from_scanner") === "1") {
+      sessionStorage.removeItem("freeley_from_scanner");
+      setShowScannerModal(true);
       return;
     }
-    // Si on vient de la profile-gate, aller direct sur le profil
-    if (screen === "profile-gate") {
       setScreen("profile");
     }
   };
@@ -2083,7 +2087,11 @@ CONSIGNES DE RÉDACTION
         <ScannerModal
           onClose={() => setShowScannerModal(false)}
           onRequestCamera={requestCameraPermission}
-          onShowAuth={() => { setAuthMode("signup"); setShowAuthModal(true); setShowScannerModal(true); }}
+          onShowAuth={() => { 
+            sessionStorage.setItem("freeley_from_scanner", "1");
+            setAuthMode("signup"); 
+            setShowAuthModal(true); 
+          }}
           onImportToDashboard={async (extractedData) => {
             if (authUser) {
               const form = {
