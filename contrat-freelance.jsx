@@ -2079,6 +2079,7 @@ CONSIGNES DE RÉDACTION
         <ScannerModal
           onClose={() => setShowScannerModal(false)}
           onRequestCamera={requestCameraPermission}
+          onShowAuth={() => { setAuthMode("signup"); setShowAuthModal(true); }}
           onImportToDashboard={async (extractedData) => {
             if (authUser) {
               const form = {
@@ -8767,7 +8768,7 @@ ${freelanceName}`;
 }
 
 /* ══════════════════════════════════════════ SCANNER MODAL ══ */
-function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
+function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAuth }) {
   const [phase, setPhase]       = useState("upload");   // "upload" | "loading" | "result"
   const [fileName, setFileName] = useState("");
   const [progress, setProgress] = useState(0);
@@ -8874,6 +8875,11 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
     } catch(e) { setAiFindings(null); }
     clearInterval(interval); setProgress(100);
     await handleExtraction();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setPhase("auth-required");
+      return;
+    }
     setTimeout(()=>setPhase("result"),300);
   };
 
@@ -9321,6 +9327,31 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera }) {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* ════════════ PHASE AUTH REQUIRED ════════════ */}
+          {phase === "auth-required" && (
+            <div style={{ padding:"40px 24px", textAlign:"center" }}>
+              <div style={{ fontSize:48, marginBottom:16 }}>🔒</div>
+              <h3 style={{ fontFamily:"Georgia, serif", fontSize:20, color:"#1B2E4B", marginBottom:8 }}>
+                Créez un compte pour voir le résultat
+              </h3>
+              <p style={{ fontFamily:"sans-serif", fontSize:13, color:"#8A8780", marginBottom:24, lineHeight:1.6 }}>
+                Votre contrat a été analysé par l'IA. Créez un compte gratuit pour accéder au rapport complet.
+              </p>
+              <button onClick={() => { onClose(); }} style={{
+                width:"100%", padding:"14px", background:"#1B2E4B", color:"white",
+                border:"none", borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer", marginBottom:10
+              }}>
+                Créer un compte gratuit
+              </button>
+              <button onClick={() => setPhase("upload")} style={{
+                width:"100%", padding:"12px", background:"none", color:"#8A8780",
+                border:"1.5px solid #D8D4CB", borderRadius:12, fontSize:13, cursor:"pointer"
+              }}>
+                Retour
+              </button>
             </div>
           )}
 
