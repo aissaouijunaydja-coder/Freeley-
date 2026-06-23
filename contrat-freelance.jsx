@@ -2115,6 +2115,7 @@ CONSIGNES DE RÉDACTION
           onClose={() => { setShowScannerModal(false); setScanResultsToShow(null); }}
           onRequestCamera={requestCameraPermission}
           initialResults={scanResultsToShow}
+          authUser={authUser}
           onShowAuth={() => {
             localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings, extractedData }));
             localStorage.setItem("freeley_scan_pending", "1");
@@ -8809,7 +8810,7 @@ ${freelanceName}`;
 }
 
 /* ══════════════════════════════════════════ SCANNER MODAL ══ */
-function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAuth, initialResults }) {
+function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAuth, initialResults, authUser }) {
   const [phase, setPhase]       = useState(initialResults ? "result" : "upload");   // "upload" | "loading" | "result"
 
   useEffect(() => {
@@ -8928,14 +8929,6 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
     } catch(e) { setAiFindings(null); }
     clearInterval(interval); setProgress(100);
     await handleExtraction();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings, extractedData }));
-      localStorage.setItem("freeley_from_scanner", "1");
-      if (onShowAuth) onShowAuth();
-      setPhase("auth-waiting");
-      return;
-    }
     setTimeout(()=>setPhase("result"),300);
   };
 
@@ -9877,9 +9870,18 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
 
                 {/* Grand bouton d'import */}
                 <div style={{ padding:"0 20px 20px" }}>
+                  {!authUser && (
+                    <div style={{ background:"#EFF6FF", border:"1.5px solid #BFDBFE", borderRadius:10, padding:"12px 16px", marginBottom:12, fontFamily:T.body, fontSize:12, color:"#1D4ED8", lineHeight:1.6 }}>
+                      💾 <strong>Créez un compte gratuit</strong> pour sauvegarder ces résultats et accéder à l'historique de vos analyses.
+                      <span onClick={() => { if (onShowAuth) onShowAuth(); }} style={{ display:"block", marginTop:6, cursor:"pointer", fontWeight:700, textDecoration:"underline" }}>
+                        S'inscrire gratuitement →
+                      </span>
+                    </div>
+                  )}
                   <button
                     onClick={() => {
                       if (importSuccess) return;
+                      if (!authUser) { if (onShowAuth) onShowAuth(); return; }
                       setImportSuccess(true);
                       setTimeout(() => {
                         if (onImportToDashboard) onImportToDashboard(extractedData);
