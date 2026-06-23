@@ -1860,9 +1860,9 @@ CONSIGNES DE RÉDACTION
     await loadUserData(user);
     setShowAuthModal(false);
     // Si on vient du scanner, rouvrir le scanner
-    console.log("handleAuthSuccess called, from_scanner:", sessionStorage.getItem("freeley_from_scanner"));
-    if (sessionStorage.getItem("freeley_from_scanner") === "1") {
-      sessionStorage.removeItem("freeley_from_scanner");
+    console.log("handleAuthSuccess called, from_scanner:", localStorage.getItem("freeley_from_scanner"));
+    if (localStorage.getItem("freeley_from_scanner") === "1") {
+      localStorage.removeItem("freeley_from_scanner");
       setScreen("history");
       return;
     }
@@ -2090,7 +2090,7 @@ CONSIGNES DE RÉDACTION
           onClose={() => setShowScannerModal(false)}
           onRequestCamera={requestCameraPermission}
           onShowAuth={() => { 
-            sessionStorage.setItem("freeley_from_scanner", "1");
+            localStorage.setItem("freeley_from_scanner", "1");
             setAuthMode("signup"); 
             setShowAuthModal(true); 
           }}
