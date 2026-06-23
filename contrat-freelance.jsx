@@ -1066,9 +1066,6 @@ function AppInner() {
           localStorage.removeItem("freeley_from_scanner");
           setScreen("scan-results");
         }
-          }
-          setScreen("history");
-        }
       } else {
         setAuthUser(null);
       }
