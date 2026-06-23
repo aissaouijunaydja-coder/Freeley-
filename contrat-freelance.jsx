@@ -1864,6 +1864,7 @@ CONSIGNES DE RÉDACTION
       sessionStorage.removeItem("freeley_from_scanner");
       setShowScannerModal(true);
       return;
+    }
     if (screen === "profile-gate") {
       setScreen("profile");
     }
