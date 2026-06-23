@@ -1049,9 +1049,11 @@ function AppInner() {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
-        console.log("getSession fired, from_scanner:", localStorage.getItem("freeley_from_scanner"));
-        if (localStorage.getItem("freeley_from_scanner") === "1") {
-          localStorage.removeItem("freeley_from_scanner");
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromScanner = urlParams.get("from") === "scanner" || localStorage.getItem("freeley_scan_pending") === "1";
+        if (fromScanner) {
+          localStorage.removeItem("freeley_scan_pending");
+          window.history.replaceState({}, "", window.location.pathname);
           setScreen("scan-results");
         }
       }
@@ -2113,10 +2115,11 @@ CONSIGNES DE RÉDACTION
           onClose={() => { setShowScannerModal(false); setScanResultsToShow(null); }}
           onRequestCamera={requestCameraPermission}
           initialResults={scanResultsToShow}
-          onShowAuth={() => { 
-            localStorage.setItem("freeley_from_scanner", "1");
-            setAuthMode("signup"); 
-            setShowAuthModal(true); 
+          onShowAuth={() => {
+            localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings, extractedData }));
+            localStorage.setItem("freeley_scan_pending", "1");
+            setAuthMode("signup");
+            setShowAuthModal(true);
           }}
           onImportToDashboard={async (extractedData) => {
             if (authUser) {
@@ -6120,7 +6123,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: provider === "linkedin" ? "linkedin_oidc" : provider,
         options: {
-          redirectTo: window.location.origin,
+          redirectTo: window.location.origin + (localStorage.getItem("freeley_scan_pending") === "1" ? "?from=scanner" : ""),
         },
       });
       if (error) { setError(error.message); setOauthLoading(""); }
