@@ -1049,6 +1049,11 @@ function AppInner() {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
+        console.log("getSession fired, from_scanner:", localStorage.getItem("freeley_from_scanner"));
+        if (localStorage.getItem("freeley_from_scanner") === "1") {
+          localStorage.removeItem("freeley_from_scanner");
+          setScreen("scan-results");
+        }
       }
       setAuthReady(true);
     });
