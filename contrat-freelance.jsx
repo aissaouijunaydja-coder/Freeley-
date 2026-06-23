@@ -1860,6 +1860,7 @@ CONSIGNES DE RÉDACTION
     await loadUserData(user);
     setShowAuthModal(false);
     // Si on vient du scanner, rouvrir le scanner
+    console.log("handleAuthSuccess called, from_scanner:", sessionStorage.getItem("freeley_from_scanner"));
     if (sessionStorage.getItem("freeley_from_scanner") === "1") {
       sessionStorage.removeItem("freeley_from_scanner");
       setScreen("history");
