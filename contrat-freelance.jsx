@@ -1061,9 +1061,9 @@ function AppInner() {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
-        // Ne pas fermer le scanner si il est ouvert
-        if (!showScannerModal) {
-          // laisser handleAuthSuccess gérer la navigation
+        if (localStorage.getItem("freeley_from_scanner") === "1") {
+          localStorage.removeItem("freeley_from_scanner");
+          setScreen("history");
         }
       } else {
         setAuthUser(null);
