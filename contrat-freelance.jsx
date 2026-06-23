@@ -943,6 +943,7 @@ function AppInner() {
 
   // Scanner modal state
   const [showScannerModal, setShowScannerModal] = useState(false);
+  const [scanResultsToShow, setScanResultsToShow] = useState(null);
 
   // ── Caméra : gestion des permissions (simulation iOS/Android) ──
   const [cameraPermission, setCameraPermission]             = useState("prompt"); // "prompt" | "granted" | "denied"
@@ -1063,6 +1064,15 @@ function AppInner() {
         loadUserData(session.user);
         if (localStorage.getItem("freeley_from_scanner") === "1") {
           localStorage.removeItem("freeley_from_scanner");
+          const scanResults = localStorage.getItem("freeley_scan_results");
+          if (scanResults) {
+            localStorage.removeItem("freeley_scan_results");
+            try {
+              const parsed = JSON.parse(scanResults);
+              setScanResultsToShow(parsed);
+              setShowScannerModal(true);
+            } catch(e) {}
+          }
           setScreen("history");
         }
       } else {
@@ -2087,8 +2097,9 @@ CONSIGNES DE RÉDACTION
       )}
       {showScannerModal && (
         <ScannerModal
-          onClose={() => setShowScannerModal(false)}
+          onClose={() => { setShowScannerModal(false); setScanResultsToShow(null); }}
           onRequestCamera={requestCameraPermission}
+          initialResults={scanResultsToShow}
           onShowAuth={() => { 
             localStorage.setItem("freeley_from_scanner", "1");
             setAuthMode("signup"); 
@@ -8782,8 +8793,8 @@ ${freelanceName}`;
 }
 
 /* ══════════════════════════════════════════ SCANNER MODAL ══ */
-function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAuth }) {
-  const [phase, setPhase]       = useState("upload");   // "upload" | "loading" | "result"
+function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAuth, initialResults }) {
+  const [phase, setPhase]       = useState(initialResults ? "result" : "upload");   // "upload" | "loading" | "result"
 
   useEffect(() => {
     if (phase === "auth-waiting") {
@@ -8877,7 +8888,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
     }
   };
 
-  const [aiFindings, setAiFindings] = useState(null);
+  const [aiFindings, setAiFindings] = useState(initialResults?.aiFindings || null);
 
   const handleAnalyse = async () => {
     if (!fileName || !fileData) return;
@@ -8903,6 +8914,8 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
     await handleExtraction();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
+      localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings, extractedData }));
+      localStorage.setItem("freeley_from_scanner", "1");
       if (onShowAuth) onShowAuth();
       setPhase("auth-waiting");
       return;
@@ -8910,7 +8923,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
     setTimeout(()=>setPhase("result"),300);
   };
 
-  const [extractedData, setExtractedData] = useState(null);
+  const [extractedData, setExtractedData] = useState(initialResults?.extractedData || null);
 
   const handleExtraction = async () => {
     if (!fileData) return;
