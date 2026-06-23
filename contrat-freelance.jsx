@@ -1862,7 +1862,7 @@ CONSIGNES DE RÉDACTION
     // Si on vient du scanner, rouvrir le scanner
     if (sessionStorage.getItem("freeley_from_scanner") === "1") {
       sessionStorage.removeItem("freeley_from_scanner");
-      setShowScannerModal(true);
+      setScreen("history");
       return;
     }
     if (screen === "profile-gate") {
