@@ -2117,6 +2117,7 @@ CONSIGNES DE RÉDACTION
           initialResults={scanResultsToShow}
           authUser={authUser}
           onShowAuth={() => {
+            setShowScannerModal(false);
             setAuthMode("signup");
             setShowAuthModal(true);
           }}
