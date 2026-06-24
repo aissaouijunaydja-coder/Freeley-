@@ -2324,6 +2324,20 @@ CONSIGNES DE RÉDACTION
       ) : step < 3 ? (
         <div style={{ maxWidth:680, margin:"0 auto", padding:"24px 16px 100px" }}>
 
+          {/* Scan results banner */}
+          {authUser && localStorage.getItem("freeley_scan_results") && (
+            <div className="fade-up" style={{
+              display:"flex", alignItems:"center", justifyContent:"space-between",
+              background:"#EFF6FF", border:"1px solid #BFDBFE",
+              borderRadius:8, padding:"10px 16px", marginBottom:16, fontFamily:T.body, fontSize:13,
+            }}>
+              <span style={{ color:"#1D4ED8" }}>🔍 Vous avez des résultats de scan en attente</span>
+              <span onClick={() => setScreen("scan-results")} style={{ fontSize:12, color:"#1D4ED8", cursor:"pointer", textDecoration:"underline", fontWeight:600 }}>
+                Voir les résultats →
+              </span>
+            </div>
+          )}
+
           {/* Status banner */}
           {!isPremium && (
             <div className="fade-up" style={{
