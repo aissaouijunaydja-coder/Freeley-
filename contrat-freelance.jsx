@@ -8938,7 +8938,9 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
       const data = await res.json();
       const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
       const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
-      setAiFindings(parsed.findings||[]);
+      const findings = parsed.findings||[];
+      setAiFindings(findings);
+      localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings: findings, extractedData: null }));
     } catch(e) { setAiFindings(null); }
     clearInterval(interval); setProgress(100);
     await handleExtraction();
@@ -8958,6 +8960,8 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
       const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
       const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
       setExtractedData(parsed);
+      const existing = JSON.parse(localStorage.getItem("freeley_scan_results") || "{}");
+      localStorage.setItem("freeley_scan_results", JSON.stringify({ ...existing, extractedData: parsed }));
     } catch(e) { setExtractedData(null); }
   };
 
