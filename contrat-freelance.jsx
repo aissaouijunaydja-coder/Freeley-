@@ -2117,8 +2117,6 @@ CONSIGNES DE RÉDACTION
           initialResults={scanResultsToShow}
           authUser={authUser}
           onShowAuth={() => {
-            localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings, extractedData }));
-            localStorage.setItem("freeley_scan_pending", "1");
             setAuthMode("signup");
             setShowAuthModal(true);
           }}
