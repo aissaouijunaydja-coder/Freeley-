@@ -1962,7 +1962,7 @@ CONSIGNES DE RÉDACTION
     const findings = r?.aiFindings || [];
     const ext = r?.extractedData || {};
     return (<Shell><div style={{maxWidth:520,margin:"0 auto",padding:"20px"}}>
-      <button onClick={()=>{localStorage.removeItem("freeley_scan_results");setScreen("app");}} style={{background:"none",border:"none",cursor:"pointer",color:"#1B2E4B",fontSize:13,marginBottom:16}}>← Retour</button>
+      <button onClick={()=>{ setScreen("app"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#1B2E4B",fontSize:13,marginBottom:16}}>← Retour</button>
       <h2 style={{fontFamily:"Georgia,serif",fontSize:22,color:"#1B2E4B",marginBottom:16}}>Resultats de votre scan</h2>
       {ext.client && <p style={{fontSize:13,color:"#8A8780",marginBottom:20}}>Client : {ext.client}</p>}
       {findings.map((f,i)=>(<div key={i} style={{background:f.level==="danger"?"#FEF2F2":f.level==="warning"?"#FFFBEB":"#F0FDF4",border:"1.5px solid "+(f.level==="danger"?"#FECACA":f.level==="warning"?"#FDE68A":"#BBF7D0"),borderRadius:12,padding:"14px 16px",marginBottom:12}}>
@@ -1971,6 +1971,9 @@ CONSIGNES DE RÉDACTION
         <div style={{fontSize:13,color:"#4A4A4A",lineHeight:1.6}}>{f.text}</div>
       </div>))}
       {findings.length===0 && <p style={{color:"#8A8780",fontSize:13}}>Aucun resultat.</p>}
+      <button onClick={()=>{ localStorage.removeItem("freeley_scan_results"); setHasScanResults(false); setScreen("app"); }} style={{ marginTop:24, width:"100%", padding:"12px", background:"none", border:"1.5px solid #FECACA", borderRadius:10, color:"#DC2626", fontFamily:"sans-serif", fontSize:13, cursor:"pointer" }}>
+        🗑 Supprimer ces résultats
+      </button>
     </div></Shell>);
   }
   if (screen === "reset-password") return (
