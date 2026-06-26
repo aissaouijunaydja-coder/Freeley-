@@ -944,6 +944,7 @@ function AppInner() {
   // Scanner modal state
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [scanResultsToShow, setScanResultsToShow] = useState(null);
+  const [hasScanResults, setHasScanResults] = useState(!!localStorage.getItem("freeley_scan_results"));
 
   // ── Caméra : gestion des permissions (simulation iOS/Android) ──
   const [cameraPermission, setCameraPermission]             = useState("prompt"); // "prompt" | "granted" | "denied"
@@ -2325,7 +2326,7 @@ CONSIGNES DE RÉDACTION
         <div style={{ maxWidth:680, margin:"0 auto", padding:"24px 16px 100px" }}>
 
           {/* Scan results banner */}
-          {authUser && localStorage.getItem("freeley_scan_results") && (
+          {authUser && hasScanResults && (
             <div className="fade-up" style={{
               display:"flex", alignItems:"center", justifyContent:"space-between",
               background:"#EFF6FF", border:"1px solid #BFDBFE",
