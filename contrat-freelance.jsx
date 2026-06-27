@@ -954,6 +954,12 @@ function AppInner() {
     setScreen(s);
   };
 
+  useEffect(() => {
+    const handler = () => goToScreen("scan-results");
+    window.addEventListener("freeley-goto-scan", handler);
+    return () => window.removeEventListener("freeley-goto-scan", handler);
+  }, []);
+
   // ── Caméra : gestion des permissions (simulation iOS/Android) ──
   const [cameraPermission, setCameraPermission]             = useState("prompt"); // "prompt" | "granted" | "denied"
   const [showCameraPermissionModal, setShowCameraPermissionModal] = useState(false);
@@ -7976,6 +7982,14 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
           </span>
         </div>
       </div>
+
+      {/* Scan results link */}
+      {localStorage.getItem("freeley_scan_results") && (
+        <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:8, padding:"10px 16px", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"space-between", fontFamily:T.body, fontSize:13 }}>
+          <span style={{ color:"#1D4ED8" }}>🔍 Analyse de contrat en attente</span>
+          <span onClick={() => window.dispatchEvent(new CustomEvent("freeley-goto-scan"))} style={{ color:"#1D4ED8", fontWeight:700, cursor:"pointer", textDecoration:"underline", fontSize:12 }}>Voir →</span>
+        </div>
+      )}
 
       {/* Filter badges */}
       {history.length > 0 && (
