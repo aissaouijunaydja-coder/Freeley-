@@ -1060,7 +1060,7 @@ function AppInner() {
       document.head.appendChild(s);
     }
     // Vérifie la session existante (ex: après redirect Google)
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
