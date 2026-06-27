@@ -1979,19 +1979,7 @@ CONSIGNES DE RÉDACTION
         <div style={{fontSize:13,color:"#4A4A4A",lineHeight:1.6}}>{f.text}</div>
       </div>))}
       {findings.length===0 && <p style={{color:"#8A8780",fontSize:13}}>Aucun resultat.</p>}
-      {authUser && (
-        <button onClick={async () => {
-          const form = { missionTitle: ext.mission || "Analyse de contrat", clientName: ext.client || "", price: ext.montant || "", missionDescription: "Analyse IA de contrat scanné" };
-          await saveToHistory({ contract: JSON.stringify(findings) }, form);
-          const hist = await getHistory();
-          setHistory(hist);
-          localStorage.removeItem("freeley_scan_results");
-          setHasScanResults(false);
-          goToScreen("history");
-        }} style={{ marginTop:16, width:"100%", padding:"14px", background:"#1B2E4B", color:"white", border:"none", borderRadius:10, fontFamily:"sans-serif", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-          💾 Sauvegarder dans mon historique
-        </button>
-      )}
+
       <button onClick={()=>{ localStorage.removeItem("freeley_scan_results"); setHasScanResults(false); goToScreen("app"); }} style={{ marginTop:10, width:"100%", padding:"12px", background:"none", border:"1.5px solid #FECACA", borderRadius:10, color:"#DC2626", fontFamily:"sans-serif", fontSize:13, cursor:"pointer" }}>
         🗑 Supprimer ces résultats
       </button>
