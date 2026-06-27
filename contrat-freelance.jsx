@@ -1071,6 +1071,30 @@ function AppInner() {
           window.history.replaceState({}, "", window.location.pathname);
           goToScreen("scan-results");
         }
+        if (localStorage.getItem("freeley_pending_import") === "1") {
+          localStorage.removeItem("freeley_pending_import");
+          const scanData = localStorage.getItem("freeley_scan_results");
+          if (scanData) {
+            try {
+              const parsed = JSON.parse(scanData);
+              const ext = parsed.extractedData || {};
+              const form = {
+                clientName: ext.client || "Client inconnu",
+                missionTitle: ext.mission || "Contrat importé",
+                price: ext.montant || "",
+                startDate: "",
+                endDate: "",
+                missionDescription: "Contrat importé via scanner IA",
+              };
+              await saveToHistory({ contract: "Contrat scanné et analysé par IA" }, form);
+              const hist = await getHistory();
+              setHistory(hist);
+              localStorage.removeItem("freeley_scan_results");
+              setHasScanResults(false);
+            } catch(e) {}
+          }
+          goToScreen("history");
+        }
       }
       setAuthReady(true);
     });
@@ -9925,7 +9949,11 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
                   <button
                     onClick={() => {
                       if (importSuccess) return;
-                      if (!authUser) { if (onShowAuth) onShowAuth(); return; }
+                      if (!authUser) {
+                        localStorage.setItem("freeley_pending_import", "1");
+                        if (onShowAuth) onShowAuth();
+                        return;
+                      }
                       setImportSuccess(true);
                       setTimeout(() => {
                         if (onImportToDashboard) onImportToDashboard(extractedData);
