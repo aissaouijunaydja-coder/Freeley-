@@ -1909,6 +1909,13 @@ CONSIGNES DE RÉDACTION
     setShowAuthModal(false);
     // Si on vient du scanner, rouvrir le scanner
     console.log("handleAuthSuccess called, from_scanner:", localStorage.getItem("freeley_from_scanner"));
+    // Restaurer le formulaire en cours si sauvegardé (priorité sur scanner)
+    const pendingForm2 = localStorage.getItem("freeley_pending_form");
+    if (pendingForm2) {
+      localStorage.removeItem("freeley_from_scanner");
+      goToScreen("app");
+      return;
+    }
     if (localStorage.getItem("freeley_from_scanner") === "1") {
       localStorage.removeItem("freeley_from_scanner");
       goToScreen("history");
