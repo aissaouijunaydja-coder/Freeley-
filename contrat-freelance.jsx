@@ -1077,7 +1077,12 @@ function AppInner() {
           window.history.replaceState({}, "", window.location.pathname);
           goToScreen("scan-results");
         }
-        localStorage.removeItem("freeley_screen");
+        // Restaurer formulaire sauvegardé après OAuth Google
+        if (localStorage.getItem("freeley_pending_form")) {
+          goToScreen("app");
+        } else {
+          localStorage.removeItem("freeley_screen");
+        }
         if (localStorage.getItem("freeley_pending_import") === "1") {
           localStorage.removeItem("freeley_pending_import");
           const scanData = localStorage.getItem("freeley_scan_results");
