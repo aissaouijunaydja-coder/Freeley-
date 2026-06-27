@@ -1080,6 +1080,8 @@ function AppInner() {
         // Restaurer formulaire sauvegardé après OAuth Google
         if (localStorage.getItem("freeley_pending_form")) {
           goToScreen("app");
+          setAuthReady(true);
+          return;
         } else {
           localStorage.removeItem("freeley_screen");
         }
