@@ -903,8 +903,14 @@ class ErrorBoundary extends React.Component {
 
 /* ══════════════════════════════════════════════════════════ APP ══ */
 function AppInner() {
-  const [step, setStep]           = useState(0);
-  const [form, setForm]           = useState(initialForm);
+  const [step, setStep]           = useState(() => {
+    const s = localStorage.getItem("freeley_pending_step");
+    return s ? Number(s) : 0;
+  });
+  const [form, setForm]           = useState(() => {
+    const f = localStorage.getItem("freeley_pending_form");
+    try { return f ? JSON.parse(f) : initialForm; } catch(e) { return initialForm; }
+  });
   const [errors, setErrors]       = useState({});
   const [contract, setContract]   = useState("");
   const [loading, setLoading]     = useState(false);
