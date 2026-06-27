@@ -922,7 +922,7 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","profile-gate"].includes(saved) ? saved : "app";
   });
   const [history, setHistory]     = useState([]);
   const [historyView, setHistoryView] = useState(null);
