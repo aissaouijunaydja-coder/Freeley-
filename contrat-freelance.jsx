@@ -1168,7 +1168,11 @@ function AppInner() {
     setErrors({});
     if (step < 2) { setStep(s => s + 1); return; }
     // Obliger la connexion avant de générer
-    if (!authUser) { setShowAuthModal(true); setAuthMode("signup"); return; }
+    if (!authUser) {
+  localStorage.setItem("freeley_pending_form", JSON.stringify(form));
+  localStorage.setItem("freeley_pending_step", String(step));
+  setShowAuthModal(true); setAuthMode("signup"); return;
+}
     // Limite gratuite → pop-up abonnement
     if (!isPremium && contractsUsed >= FREE_LIMIT) { setShowSubscriptionModal(true); return; }
     generateContract();
@@ -1902,6 +1906,19 @@ CONSIGNES DE RÉDACTION
     if (localStorage.getItem("freeley_from_scanner") === "1") {
       localStorage.removeItem("freeley_from_scanner");
       goToScreen("history");
+      return;
+    }
+    // Restaurer le formulaire en cours si sauvegardé
+    const pendingForm = localStorage.getItem("freeley_pending_form");
+    const pendingStep = localStorage.getItem("freeley_pending_step");
+    if (pendingForm) {
+      try {
+        setForm(JSON.parse(pendingForm));
+        setStep(Number(pendingStep) || 0);
+      } catch(e) {}
+      localStorage.removeItem("freeley_pending_form");
+      localStorage.removeItem("freeley_pending_step");
+      goToScreen("app");
       return;
     }
     if (screen === "profile-gate") {
