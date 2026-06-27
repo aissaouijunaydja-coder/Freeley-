@@ -1996,23 +1996,43 @@ CONSIGNES DE RÉDACTION
 
   /* ── RESET PASSWORD ── */
   if (screen === "scan-results") {
-    const r = (() => { try { return JSON.parse(localStorage.getItem("freeley_scan_results")||"null"); } catch(e){return null;} })();
-    const findings = r?.aiFindings || [];
-    const ext = r?.extractedData || {};
+    const scanList = (() => { try { return JSON.parse(localStorage.getItem("freeley_scan_list")||"[]"); } catch(e){return [];} })();
+    const [selectedScan, setSelectedScanIdx] = [scanList[0], 0];
     return (<Shell><div style={{maxWidth:520,margin:"0 auto",padding:"20px"}}>
-      <button onClick={()=>{ goToScreen("app"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#1B2E4B",fontSize:13,marginBottom:16}}>← Retour</button>
-      <h2 style={{fontFamily:"Georgia,serif",fontSize:22,color:"#1B2E4B",marginBottom:16}}>Resultats de votre scan</h2>
-      {ext.client && <p style={{fontSize:13,color:"#8A8780",marginBottom:20}}>Client : {ext.client}</p>}
-      {findings.map((f,i)=>(<div key={i} style={{background:f.level==="danger"?"#FEF2F2":f.level==="warning"?"#FFFBEB":"#F0FDF4",border:"1.5px solid "+(f.level==="danger"?"#FECACA":f.level==="warning"?"#FDE68A":"#BBF7D0"),borderRadius:12,padding:"14px 16px",marginBottom:12}}>
-        <div style={{fontWeight:700,color:f.level==="danger"?"#DC2626":f.level==="warning"?"#D97706":"#16A34A",fontSize:12,marginBottom:4}}>{f.level==="danger"?"DANGER":f.level==="warning"?"A NEGOCIER":"CONFORME"}</div>
-        <div style={{fontWeight:600,fontSize:14,color:"#1B2E4B",marginBottom:4}}>{f.article}</div>
-        <div style={{fontSize:13,color:"#4A4A4A",lineHeight:1.6}}>{f.text}</div>
-      </div>))}
-      {findings.length===0 && <p style={{color:"#8A8780",fontSize:13}}>Aucun resultat.</p>}
-
-      <button onClick={()=>{ localStorage.removeItem("freeley_scan_results"); setHasScanResults(false); goToScreen("app"); }} style={{ marginTop:10, width:"100%", padding:"12px", background:"none", border:"1.5px solid #FECACA", borderRadius:10, color:"#DC2626", fontFamily:"sans-serif", fontSize:13, cursor:"pointer" }}>
-        🗑 Supprimer ces résultats
-      </button>
+      <button onClick={()=>{ goToScreen("history"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#1B2E4B",fontSize:13,marginBottom:16}}>← Retour à l'historique</button>
+      <h2 style={{fontFamily:"Georgia,serif",fontSize:22,color:"#1B2E4B",marginBottom:8}}>Mes analyses de contrats</h2>
+      <p style={{fontSize:13,color:"#8A8780",marginBottom:20}}>{scanList.length} analyse{scanList.length > 1 ? "s" : ""} sauvegardée{scanList.length > 1 ? "s" : ""}</p>
+      {scanList.map((scan, idx) => {
+        const findings = scan.aiFindings || [];
+        const ext = scan.extractedData || {};
+        const dangers = findings.filter(f=>f.level==="danger").length;
+        const warnings = findings.filter(f=>f.level==="warning").length;
+        return (
+          <details key={idx} style={{marginBottom:12, border:"1.5px solid #D8D4CB", borderRadius:12, overflow:"hidden"}}>
+            <summary style={{padding:"14px 16px", cursor:"pointer", fontFamily:"sans-serif", fontSize:14, fontWeight:600, color:"#1B2E4B", background:"#FAFAFA", listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+              <span>🔍 {ext.mission || "Analyse de contrat"} · {scan.date || ""}</span>
+              <span style={{fontSize:12}}>{dangers > 0 ? `🔴 ${dangers}` : ""} {warnings > 0 ? `🟡 ${warnings}` : ""} {dangers === 0 && warnings === 0 ? "🟢" : ""}</span>
+            </summary>
+            <div style={{padding:"14px 16px"}}>
+              {ext.client && <p style={{fontSize:12,color:"#8A8780",marginBottom:12}}>Client : {ext.client}</p>}
+              {findings.map((f,i)=>(<div key={i} style={{background:f.level==="danger"?"#FEF2F2":f.level==="warning"?"#FFFBEB":"#F0FDF4",border:"1.5px solid "+(f.level==="danger"?"#FECACA":f.level==="warning"?"#FDE68A":"#BBF7D0"),borderRadius:10,padding:"12px 14px",marginBottom:10}}>
+                <div style={{fontWeight:700,color:f.level==="danger"?"#DC2626":f.level==="warning"?"#D97706":"#16A34A",fontSize:11,marginBottom:3}}>{f.level==="danger"?"DANGER":f.level==="warning"?"A NEGOCIER":"CONFORME"}</div>
+                <div style={{fontWeight:600,fontSize:13,color:"#1B2E4B",marginBottom:3}}>{f.article}</div>
+                <div style={{fontSize:12,color:"#4A4A4A",lineHeight:1.6}}>{f.text}</div>
+              </div>))}
+              <button onClick={()=>{
+                const newList = scanList.filter((_,i)=>i!==idx);
+                localStorage.setItem("freeley_scan_list", JSON.stringify(newList));
+                if (newList.length === 0) { localStorage.removeItem("freeley_scan_results"); setHasScanResults(false); goToScreen("history"); }
+                else { window.location.reload(); }
+              }} style={{marginTop:8, padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer"}}>
+                🗑 Supprimer cette analyse
+              </button>
+            </div>
+          </details>
+        );
+      })}
+      {scanList.length === 0 && <p style={{color:"#8A8780",fontSize:13}}>Aucune analyse sauvegardée.</p>}
     </div></Shell>);
   }
   if (screen === "reset-password") return (
@@ -8991,6 +9011,9 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
       const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
       const findings = parsed.findings||[];
       setAiFindings(findings);
+      const existing = JSON.parse(localStorage.getItem("freeley_scan_list") || "[]");
+      existing.unshift({ aiFindings: findings, extractedData: null, date: new Date().toLocaleDateString("fr-FR") });
+      localStorage.setItem("freeley_scan_list", JSON.stringify(existing.slice(0, 10)));
       localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings: findings, extractedData: null }));
     } catch(e) { setAiFindings(null); }
     clearInterval(interval); setProgress(100);
@@ -9011,8 +9034,11 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
       const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
       const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
       setExtractedData(parsed);
-      const existing = JSON.parse(localStorage.getItem("freeley_scan_results") || "{}");
-      localStorage.setItem("freeley_scan_results", JSON.stringify({ ...existing, extractedData: parsed }));
+      const existingRes = JSON.parse(localStorage.getItem("freeley_scan_results") || "{}");
+      const updatedRes = { ...existingRes, extractedData: parsed };
+      localStorage.setItem("freeley_scan_results", JSON.stringify(updatedRes));
+      const scanList = JSON.parse(localStorage.getItem("freeley_scan_list") || "[]");
+      if (scanList.length > 0) { scanList[0] = updatedRes; localStorage.setItem("freeley_scan_list", JSON.stringify(scanList)); }
     } catch(e) { setExtractedData(null); }
   };
 
