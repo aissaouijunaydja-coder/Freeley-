@@ -1078,18 +1078,7 @@ function AppInner() {
             try {
               const parsed = JSON.parse(scanData);
               const ext = parsed.extractedData || {};
-              const form = {
-                clientName: ext.client || "Client inconnu",
-                missionTitle: ext.mission || "Contrat importé",
-                price: ext.montant || "",
-                startDate: "",
-                endDate: "",
-                missionDescription: "Contrat importé via scanner IA",
-              };
-              await saveToHistory({ contract: "Contrat scanné et analysé par IA" }, form);
-              const hist = await getHistory();
-              setHistory(hist);
-              localStorage.removeItem("freeley_scan_results");
+                  localStorage.removeItem("freeley_scan_results");
               setHasScanResults(false);
             } catch(e) {}
           }
@@ -2185,19 +2174,6 @@ CONSIGNES DE RÉDACTION
             setShowAuthModal(true);
           }}
           onImportToDashboard={async (extractedData) => {
-            if (authUser) {
-              const form = {
-                clientName: extractedData?.client || "Client inconnu",
-                missionTitle: extractedData?.mission || "Contrat importé",
-                price: extractedData?.montant || "",
-                startDate: "",
-                endDate: "",
-                missionDescription: "Contrat importé via scanner IA",
-              };
-              await saveToHistory({ contract: "Contrat scanné et analysé par IA" }, form);
-              const hist = await getHistory();
-              setHistory(hist);
-            }
             setShowScannerModal(false);
             goToScreen("history");
           }}
