@@ -920,7 +920,10 @@ function AppInner() {
   const [showPaywall, setPaywall] = useState(false);
   const [isPremium, setPremium]   = useState(false);
   const [premiumPlan, setPlan]    = useState(null);
-  const [screen, setScreen]       = useState("app");
+  const [screen, setScreen] = useState(() => {
+    const saved = localStorage.getItem("freeley_screen");
+    return saved && ["history","profile","pricing","scan-results"].includes(saved) ? saved : "app";
+  });
   const [history, setHistory]     = useState([]);
   const [historyView, setHistoryView] = useState(null);
   const [animDone, setAnimDone]   = useState(false);
@@ -945,6 +948,11 @@ function AppInner() {
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [scanResultsToShow, setScanResultsToShow] = useState(null);
   const [hasScanResults, setHasScanResults] = useState(!!localStorage.getItem("freeley_scan_results"));
+
+  const goToScreen = (s) => {
+    localStorage.setItem("freeley_screen", s);
+    setScreen(s);
+  };
 
   // ── Caméra : gestion des permissions (simulation iOS/Android) ──
   const [cameraPermission, setCameraPermission]             = useState("prompt"); // "prompt" | "granted" | "denied"
@@ -1055,7 +1063,7 @@ function AppInner() {
         if (fromScanner) {
           localStorage.removeItem("freeley_scan_pending");
           window.history.replaceState({}, "", window.location.pathname);
-          setScreen("scan-results");
+          goToScreen("scan-results");
         }
       }
       setAuthReady(true);
@@ -1064,7 +1072,7 @@ function AppInner() {
     // Écoute les changements de session (connexion/déconnexion)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (_event === "PASSWORD_RECOVERY") {
-        setScreen("reset-password");
+        goToScreen("reset-password");
         return;
       }
       if (session?.user) {
@@ -1073,7 +1081,7 @@ function AppInner() {
         console.log("onAuthStateChange fired, from_scanner:", localStorage.getItem("freeley_from_scanner"));
         if (localStorage.getItem("freeley_from_scanner") === "1") {
           localStorage.removeItem("freeley_from_scanner");
-          setScreen("scan-results");
+          goToScreen("scan-results");
         }
       } else {
         setAuthUser(null);
@@ -1086,7 +1094,7 @@ function AppInner() {
       const goto = sessionStorage.getItem("freeley_goto");
       if (goto === "encours") {
         sessionStorage.removeItem("freeley_goto");
-        setScreen("history");
+        goToScreen("history");
       }
     } catch(_) {}
   }, []);
@@ -1151,7 +1159,7 @@ function AppInner() {
     setPremium(true); setPlan(plan);
     setPaywall(false);
     setShowSubscriptionModal(false);
-    setScreen("app");
+    goToScreen("app");
     generateContract();
   };
 
@@ -1873,11 +1881,11 @@ CONSIGNES DE RÉDACTION
     console.log("handleAuthSuccess called, from_scanner:", localStorage.getItem("freeley_from_scanner"));
     if (localStorage.getItem("freeley_from_scanner") === "1") {
       localStorage.removeItem("freeley_from_scanner");
-      setScreen("history");
+      goToScreen("history");
       return;
     }
     if (screen === "profile-gate") {
-      setScreen("profile");
+      goToScreen("profile");
     }
   };
 
@@ -1911,10 +1919,10 @@ CONSIGNES DE RÉDACTION
     profile,
     onAuthClick: () => { setAuthMode("login"); setShowAuthModal(true); },
     onSignOut: handleSignOut,
-    onPricing: () => setScreen("pricing"),
-    onHome: () => { setScreen("app"); setStep(0); setContract(""); setForm(initialForm); },
-    onHistory: () => setScreen("history"),
-    onProfile: () => authUser ? setScreen("profile") : setScreen("profile-gate"),
+    onPricing: () => goToScreen("pricing"),
+    onHome: () => { goToScreen("app"); setStep(0); setContract(""); setForm(initialForm); },
+    onHistory: () => goToScreen("history"),
+    onProfile: () => authUser ? goToScreen("profile") : setScreen("profile-gate"),
     onOpenRecouvrement: () => setShowRecouvrementModal(true),
     onOpenNda: () => setShowNdaModal(true),
   };
@@ -1932,7 +1940,7 @@ CONSIGNES DE RÉDACTION
           // Après connexion, AuthModal appelle handleAuthSuccess qui set authUser
           // On redirige ensuite vers profile
         }}
-        onBack={() => setScreen("app")}
+        onBack={() => goToScreen("app")}
       />
     </Shell>
   );
@@ -1946,12 +1954,12 @@ CONSIGNES DE RÉDACTION
         profile={profile}
         updateProfile={updateProfile}
         setProfile={setProfile}
-        onBack={() => setScreen("app")}
+        onBack={() => goToScreen("app")}
         authUser={authUser}
         premiumPlan={premiumPlan}
         isPremium={isPremium}
         onSignOut={handleSignOut}
-        onGoHome={() => setScreen("app")}
+        onGoHome={() => goToScreen("app")}
       />
     </Shell>
   );
@@ -1962,7 +1970,7 @@ CONSIGNES DE RÉDACTION
     const findings = r?.aiFindings || [];
     const ext = r?.extractedData || {};
     return (<Shell><div style={{maxWidth:520,margin:"0 auto",padding:"20px"}}>
-      <button onClick={()=>{ setScreen("app"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#1B2E4B",fontSize:13,marginBottom:16}}>← Retour</button>
+      <button onClick={()=>{ goToScreen("app"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#1B2E4B",fontSize:13,marginBottom:16}}>← Retour</button>
       <h2 style={{fontFamily:"Georgia,serif",fontSize:22,color:"#1B2E4B",marginBottom:16}}>Resultats de votre scan</h2>
       {ext.client && <p style={{fontSize:13,color:"#8A8780",marginBottom:20}}>Client : {ext.client}</p>}
       {findings.map((f,i)=>(<div key={i} style={{background:f.level==="danger"?"#FEF2F2":f.level==="warning"?"#FFFBEB":"#F0FDF4",border:"1.5px solid "+(f.level==="danger"?"#FECACA":f.level==="warning"?"#FDE68A":"#BBF7D0"),borderRadius:12,padding:"14px 16px",marginBottom:12}}>
@@ -1971,7 +1979,20 @@ CONSIGNES DE RÉDACTION
         <div style={{fontSize:13,color:"#4A4A4A",lineHeight:1.6}}>{f.text}</div>
       </div>))}
       {findings.length===0 && <p style={{color:"#8A8780",fontSize:13}}>Aucun resultat.</p>}
-      <button onClick={()=>{ localStorage.removeItem("freeley_scan_results"); setHasScanResults(false); setScreen("app"); }} style={{ marginTop:24, width:"100%", padding:"12px", background:"none", border:"1.5px solid #FECACA", borderRadius:10, color:"#DC2626", fontFamily:"sans-serif", fontSize:13, cursor:"pointer" }}>
+      {authUser && (
+        <button onClick={async () => {
+          const form = { missionTitle: ext.mission || "Analyse de contrat", clientName: ext.client || "", price: ext.montant || "", missionDescription: "Analyse IA de contrat scanné" };
+          await saveToHistory({ contract: JSON.stringify(findings) }, form);
+          const hist = await getHistory();
+          setHistory(hist);
+          localStorage.removeItem("freeley_scan_results");
+          setHasScanResults(false);
+          goToScreen("history");
+        }} style={{ marginTop:16, width:"100%", padding:"14px", background:"#1B2E4B", color:"white", border:"none", borderRadius:10, fontFamily:"sans-serif", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+          💾 Sauvegarder dans mon historique
+        </button>
+      )}
+      <button onClick={()=>{ localStorage.removeItem("freeley_scan_results"); setHasScanResults(false); goToScreen("app"); }} style={{ marginTop:10, width:"100%", padding:"12px", background:"none", border:"1.5px solid #FECACA", borderRadius:10, color:"#DC2626", fontFamily:"sans-serif", fontSize:13, cursor:"pointer" }}>
         🗑 Supprimer ces résultats
       </button>
     </div></Shell>);
@@ -1981,7 +2002,7 @@ CONSIGNES DE RÉDACTION
       <div style={{ maxWidth:420, margin:"80px auto", padding:"0 20px" }}>
         <h2 style={{ fontFamily:"Georgia, serif", fontSize:24, color:"#1B2E4B", marginBottom:8 }}>Nouveau mot de passe</h2>
         <p style={{ fontSize:13, color:"#8A8780", marginBottom:24 }}>Choisis un nouveau mot de passe pour ton compte.</p>
-        <ResetPasswordForm onSuccess={() => setScreen("app")} />
+        <ResetPasswordForm onSuccess={() => goToScreen("app")} />
       </div>
     </Shell>
   );
@@ -2011,7 +2032,7 @@ CONSIGNES DE RÉDACTION
         history={history}
         historyView={historyView}
         setHistoryView={setHistoryView}
-        onBack={() => setScreen("app")}
+        onBack={() => goToScreen("app")}
         onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract)}
         onDelete={async (id) => { await deleteFromHistory(id); const hist = await getHistory(); setHistory(hist); if (historyView?.id === id) setHistoryView(null); }}
         onDuplicate={async (entry) => {
@@ -2022,7 +2043,7 @@ CONSIGNES DE RÉDACTION
         }}
         jsPDFReady={jsPDFReady}
         isPremium={isPremium}
-        onUpgrade={() => { setScreen("pricing"); }}
+        onUpgrade={() => { goToScreen("pricing"); }}
         onRelance={openRelanceModal}
         onRateClient={openRatingModal}
       />
@@ -2043,7 +2064,7 @@ CONSIGNES DE RÉDACTION
     <Shell>
       {AuthModalEl}
       <Header {...headerProps} />
-      <PricingPage onSelect={handlePurchase} onBack={() => setScreen("app")} />
+      <PricingPage onSelect={handlePurchase} onBack={() => goToScreen("app")} />
     </Shell>
   );
 
@@ -2051,7 +2072,7 @@ CONSIGNES DE RÉDACTION
   if (showPaywall) return (
     <Shell>
       {AuthModalEl}
-      <Header {...headerProps} onPricing={() => { setPaywall(false); setScreen("pricing"); }} onHistory={() => { setPaywall(false); setScreen("history"); }} />
+      <Header {...headerProps} onPricing={() => { setPaywall(false); goToScreen("pricing"); }} onHistory={() => { setPaywall(false); goToScreen("history"); }} />
       <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:"calc(100vh - 64px)", padding:24 }}>
         <div className="fade-up" style={{ maxWidth:500, width:"100%", background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 40px", boxShadow:"0 24px 64px #1B2E4B0F" }}>
           <div style={{ textAlign:"center", marginBottom:36 }}>
@@ -2140,7 +2161,7 @@ CONSIGNES DE RÉDACTION
               setHistory(hist);
             }
             setShowScannerModal(false);
-            setScreen("history");
+            goToScreen("history");
           }}
         />
       )}
@@ -2149,7 +2170,7 @@ CONSIGNES DE RÉDACTION
           form={form}
           depositPct={invoiceDepositPct}
           onClose={() => setShowTactileSign(false)}
-          onGoToProfile={() => { setShowTactileSign(false); setScreen("profile"); }}
+          onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
         />
       )}
       {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} />}
@@ -2280,7 +2301,7 @@ CONSIGNES DE RÉDACTION
         onRecouvrement={() => setShowRecouvrementModal(true)}
         onScanner={() => setShowScannerModal(true)}
         onInvoice={() => setShowInvoiceModal(true)}
-        onProfile={() => authUser ? setScreen("profile") : setScreen("profile-gate")}
+        onProfile={() => authUser ? goToScreen("profile") : setScreen("profile-gate")}
       />
 
       {/* ── ⚡ Relance Toast ── */}
@@ -2336,7 +2357,7 @@ CONSIGNES DE RÉDACTION
               borderRadius:8, padding:"10px 16px", marginBottom:16, fontFamily:T.body, fontSize:13,
             }}>
               <span style={{ color:"#1D4ED8" }}>🔍 Vous avez des résultats de scan en attente</span>
-              <span onClick={() => setScreen("scan-results")} style={{ fontSize:12, color:"#1D4ED8", cursor:"pointer", textDecoration:"underline", fontWeight:600 }}>
+              <span onClick={() => goToScreen("scan-results")} style={{ fontSize:12, color:"#1D4ED8", cursor:"pointer", textDecoration:"underline", fontWeight:600 }}>
                 Voir les résultats →
               </span>
             </div>
@@ -2353,7 +2374,7 @@ CONSIGNES DE RÉDACTION
               <span style={{ color: contractsLeft === 0 ? "#DC2626" : contractsLeft === 1 ? "#D97706" : "#16A34A" }}>
                 {contractsLeft === 0 ? "Limite gratuite atteinte" : contractsLeft === 1 ? "Dernier contrat gratuit disponible" : `${contractsLeft} contrats gratuits restants`}
               </span>
-              <span onClick={() => setScreen("pricing")} style={{ fontSize:12, color:C.navy, cursor:"pointer", textDecoration:"underline", fontWeight:500 }}>
+              <span onClick={() => goToScreen("pricing")} style={{ fontSize:12, color:C.navy, cursor:"pointer", textDecoration:"underline", fontWeight:500 }}>
                 Voir les tarifs →
               </span>
             </div>
