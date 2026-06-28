@@ -1085,7 +1085,7 @@ function AppInner() {
         // Restaurer formulaire depuis IndexedDB après OAuth Google
         await new Promise((resolve) => {
           try {
-            const req = indexedDB.open("freeley_db", 1);
+            const req = indexedDB.open("freeley_db", 2);
             req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
             req.onsuccess = e => {
               const db = e.target.result;
@@ -1222,7 +1222,7 @@ function AppInner() {
     if (!authUser) {
       // Sauvegarder directement dans IndexedDB
       try {
-        const req = indexedDB.open("freeley_db", 1);
+        const req = indexedDB.open("freeley_db", 2);
         req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
         req.onsuccess = e => {
           const db = e.target.result;
@@ -6267,7 +6267,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
           };
           const formData = getCookie("freeley_pending_form");
           const stepData = getCookie("freeley_pending_step");
-          const req = indexedDB.open("freeley_db", 1);
+          const req = indexedDB.open("freeley_db", 2);
           req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
           req.onsuccess = e => {
             const db = e.target.result;
