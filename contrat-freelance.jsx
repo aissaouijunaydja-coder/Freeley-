@@ -934,6 +934,7 @@ function AppInner() {
     const saved = localStorage.getItem("freeley_screen");
     return saved && ["history","profile","pricing","scan-results","profile-gate"].includes(saved) ? saved : "app";
   });
+  const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
   const [historyView, setHistoryView] = useState(null);
   const [animDone, setAnimDone]   = useState(false);
@@ -2001,6 +2002,16 @@ CONSIGNES DE RÉDACTION
   };
 
   /* ── Attente session ── */
+  // Forcer connexion au démarrage
+  if (authReady && !authUser && !showAuthModal) {
+    setTimeout(() => { setShowAuthModal(true); setAuthMode("login"); }, 100);
+  }
+
+  // Forcer connexion au démarrage
+  if (authReady && !authUser && !showAuthModal) {
+    setTimeout(() => { setShowAuthModal(true); setAuthMode("login"); }, 100);
+  }
+
   if (!authReady) return (
     <Shell>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
