@@ -907,7 +907,14 @@ function AppInner() {
     const s = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
     return s ? Number(s) : 0;
   });
-  const [form, setForm]           = useState(initialForm);
+  const [form, setForm]           = useState(() => {
+    // Effacer le cookie si on arrive sans OAuth (pas de hash #access_token)
+    if (!window.location.hash.includes("access_token")) {
+      document.cookie = "freeley_pending_form=;path=/;max-age=0";
+      document.cookie = "freeley_pending_step=;path=/;max-age=0";
+    }
+    return initialForm;
+  });
   const [errors, setErrors]       = useState({});
   const [contract, setContract]   = useState("");
   const [loading, setLoading]     = useState(false);
