@@ -904,11 +904,11 @@ class ErrorBoundary extends React.Component {
 /* ══════════════════════════════════════════════════════════ APP ══ */
 function AppInner() {
   const [step, setStep]           = useState(() => {
-    const s = localStorage.getItem("freeley_pending_step");
+    const s = sessionStorage.getItem("freeley_pending_step");
     return s ? Number(s) : 0;
   });
   const [form, setForm]           = useState(() => {
-    const f = localStorage.getItem("freeley_pending_form");
+    const f = sessionStorage.getItem("freeley_pending_form");
     try { return f ? JSON.parse(f) : initialForm; } catch(e) { return initialForm; }
   });
   const [errors, setErrors]       = useState({});
@@ -1078,7 +1078,7 @@ function AppInner() {
           goToScreen("scan-results");
         }
         // Restaurer formulaire sauvegardé après OAuth Google
-        if (localStorage.getItem("freeley_pending_form")) {
+        if (sessionStorage.getItem("freeley_pending_form")) {
           goToScreen("app");
           setAuthReady(true);
           return;
@@ -1182,8 +1182,8 @@ function AppInner() {
     if (step < 2) { setStep(s => s + 1); return; }
     // Obliger la connexion avant de générer
     if (!authUser) {
-  localStorage.setItem("freeley_pending_form", JSON.stringify(form));
-  localStorage.setItem("freeley_pending_step", String(step));
+  sessionStorage.setItem("freeley_pending_form", JSON.stringify(form));
+  sessionStorage.setItem("freeley_pending_step", String(step));
   setShowAuthModal(true); setAuthMode("signup"); return;
 }
     // Limite gratuite → pop-up abonnement
@@ -1917,7 +1917,7 @@ CONSIGNES DE RÉDACTION
     // Si on vient du scanner, rouvrir le scanner
     console.log("handleAuthSuccess called, from_scanner:", localStorage.getItem("freeley_from_scanner"));
     // Restaurer le formulaire en cours si sauvegardé (priorité sur scanner)
-    const pendingForm2 = localStorage.getItem("freeley_pending_form");
+    const pendingForm2 = sessionStorage.getItem("freeley_pending_form");
     if (pendingForm2) {
       localStorage.removeItem("freeley_from_scanner");
       goToScreen("app");
@@ -1929,15 +1929,15 @@ CONSIGNES DE RÉDACTION
       return;
     }
     // Restaurer le formulaire en cours si sauvegardé
-    const pendingForm = localStorage.getItem("freeley_pending_form");
-    const pendingStep = localStorage.getItem("freeley_pending_step");
+    const pendingForm = sessionStorage.getItem("freeley_pending_form");
+    const pendingStep = sessionStorage.getItem("freeley_pending_step");
     if (pendingForm) {
       try {
         setForm(JSON.parse(pendingForm));
         setStep(Number(pendingStep) || 0);
       } catch(e) {}
-      localStorage.removeItem("freeley_pending_form");
-      localStorage.removeItem("freeley_pending_step");
+      sessionStorage.removeItem("freeley_pending_form");
+      sessionStorage.removeItem("freeley_pending_step");
       goToScreen("app");
       return;
     }
