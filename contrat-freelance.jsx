@@ -6220,13 +6220,25 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const handleOAuth = async (provider) => {
     setOauthLoading(provider);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: provider === "linkedin" ? "linkedin_oidc" : provider,
         options: {
           redirectTo: window.location.origin + (localStorage.getItem("freeley_scan_pending") === "1" ? "?from=scanner" : ""),
+          skipBrowserRedirect: true,
         },
       });
-      if (error) { setError(error.message); setOauthLoading(""); }
+      if (error) { setError(error.message); setOauthLoading(""); return; }
+      // Ouvrir popup au lieu de rediriger
+      const popup = window.open(data.url, "oauth_popup", "width=500,height=600,scrollbars=yes");
+      // Écouter la fermeture du popup
+      const timer = setInterval(async () => {
+        if (popup.closed) {
+          clearInterval(timer);
+          setOauthLoading("");
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user && onSuccess) onSuccess(session.user);
+        }
+      }, 500);
     } catch(e) {
       setError("Erreur connexion"); setOauthLoading("");
     }
