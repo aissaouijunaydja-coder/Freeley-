@@ -6252,14 +6252,20 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
       // Sauvegarder form dans IndexedDB avant redirect Google
       await new Promise((resolve) => {
         try {
+          const getCookie = (name) => {
+            const c = document.cookie.split("; ").find(r=>r.startsWith(name+"="));
+            return c ? decodeURIComponent(c.split("=")[1]) : "";
+          };
+          const formData = getCookie("freeley_pending_form");
+          const stepData = getCookie("freeley_pending_step");
           const req = indexedDB.open("freeley_db", 1);
           req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
           req.onsuccess = e => {
             const db = e.target.result;
             const tx = db.transaction("pending", "readwrite");
             const store = tx.objectStore("pending");
-            store.put(localStorage.getItem("freeley_pending_form") || "", "form");
-            store.put(localStorage.getItem("freeley_pending_step") || "0", "step");
+            store.put(formData || "", "form");
+            store.put(stepData || "0", "step");
             tx.oncomplete = () => resolve();
           };
           req.onerror = () => resolve();
