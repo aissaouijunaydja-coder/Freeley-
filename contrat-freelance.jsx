@@ -1082,6 +1082,35 @@ function AppInner() {
           goToScreen("scan-results");
         }
         // Restaurer formulaire sauvegardé après OAuth Google
+        // Restaurer formulaire depuis IndexedDB après OAuth Google
+        await new Promise((resolve) => {
+          try {
+            const req = indexedDB.open("freeley_db", 1);
+            req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
+            req.onsuccess = e => {
+              const db = e.target.result;
+              const tx = db.transaction("pending", "readonly");
+              const store = tx.objectStore("pending");
+              const getForm = store.get("form");
+              const getStep = store.get("step");
+              tx.oncomplete = () => {
+                const f = getForm.result;
+                const s = getStep.result;
+                if (f) {
+                  try { setForm(JSON.parse(f)); setStep(Number(s) || 0); } catch(e) {}
+                  // Effacer IndexedDB
+                  const tx2 = db.transaction("pending", "readwrite");
+                  tx2.objectStore("pending").delete("form");
+                  tx2.objectStore("pending").delete("step");
+                  goToScreen("app");
+                  setAuthReady(true);
+                }
+                resolve();
+              };
+            };
+            req.onerror = () => resolve();
+          } catch(e) { resolve(); }
+        });
         localStorage.removeItem("freeley_screen");
         if (localStorage.getItem("freeley_pending_import") === "1") {
           localStorage.removeItem("freeley_pending_import");
@@ -6220,25 +6249,29 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const handleOAuth = async (provider) => {
     setOauthLoading(provider);
     try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      // Sauvegarder form dans IndexedDB avant redirect Google
+      await new Promise((resolve) => {
+        try {
+          const req = indexedDB.open("freeley_db", 1);
+          req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
+          req.onsuccess = e => {
+            const db = e.target.result;
+            const tx = db.transaction("pending", "readwrite");
+            const store = tx.objectStore("pending");
+            store.put(localStorage.getItem("freeley_pending_form") || "", "form");
+            store.put(localStorage.getItem("freeley_pending_step") || "0", "step");
+            tx.oncomplete = () => resolve();
+          };
+          req.onerror = () => resolve();
+        } catch(e) { resolve(); }
+      });
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: provider === "linkedin" ? "linkedin_oidc" : provider,
         options: {
           redirectTo: window.location.origin + (localStorage.getItem("freeley_scan_pending") === "1" ? "?from=scanner" : ""),
-          skipBrowserRedirect: true,
         },
       });
-      if (error) { setError(error.message); setOauthLoading(""); return; }
-      // Ouvrir popup au lieu de rediriger
-      const popup = window.open(data.url, "oauth_popup", "width=500,height=600,scrollbars=yes");
-      // Écouter la fermeture du popup
-      const timer = setInterval(async () => {
-        if (popup.closed) {
-          clearInterval(timer);
-          setOauthLoading("");
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user && onSuccess) onSuccess(session.user);
-        }
-      }, 500);
+      if (error) { setError(error.message); setOauthLoading(""); }
     } catch(e) {
       setError("Erreur connexion"); setOauthLoading("");
     }
