@@ -1220,10 +1220,19 @@ function AppInner() {
     if (step < 2) { setStep(s => s + 1); return; }
     // Obliger la connexion avant de générer
     if (!authUser) {
-  document.cookie = "freeley_pending_form=" + encodeURIComponent(JSON.stringify(form)) + ";path=/;max-age=3600";
-  document.cookie = "freeley_pending_step=" + encodeURIComponent(String(step)) + ";path=/;max-age=3600";
-  setShowAuthModal(true); setAuthMode("signup"); return;
-}
+      // Sauvegarder directement dans IndexedDB
+      try {
+        const req = indexedDB.open("freeley_db", 1);
+        req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
+        req.onsuccess = e => {
+          const db = e.target.result;
+          const tx = db.transaction("pending", "readwrite");
+          tx.objectStore("pending").put(JSON.stringify(form), "form");
+          tx.objectStore("pending").put(String(step), "step");
+        };
+      } catch(e) {}
+      setShowAuthModal(true); setAuthMode("signup"); return;
+    }
     // Limite gratuite → pop-up abonnement
     if (!isPremium && contractsUsed >= FREE_LIMIT) { setShowSubscriptionModal(true); return; }
     generateContract();
