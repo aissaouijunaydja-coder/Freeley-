@@ -907,10 +907,7 @@ function AppInner() {
     const s = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
     return s ? Number(s) : 0;
   });
-  const [form, setForm]           = useState(() => {
-    const f = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null);
-    try { return f ? JSON.parse(f) : initialForm; } catch(e) { return initialForm; }
-  });
+  const [form, setForm]           = useState(initialForm);
   const [errors, setErrors]       = useState({});
   const [contract, setContract]   = useState("");
   const [loading, setLoading]     = useState(false);
@@ -1078,13 +1075,7 @@ function AppInner() {
           goToScreen("scan-results");
         }
         // Restaurer formulaire sauvegardé après OAuth Google
-        if ((document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null)) {
-          goToScreen("app");
-          setAuthReady(true);
-          return;
-        } else {
-          localStorage.removeItem("freeley_screen");
-        }
+        localStorage.removeItem("freeley_screen");
         if (localStorage.getItem("freeley_pending_import") === "1") {
           localStorage.removeItem("freeley_pending_import");
           const scanData = localStorage.getItem("freeley_scan_results");
@@ -1115,6 +1106,17 @@ function AppInner() {
         if (localStorage.getItem("freeley_from_scanner") === "1") {
           localStorage.removeItem("freeley_from_scanner");
           goToScreen("scan-results");
+          return;
+        }
+        // Restaurer formulaire après OAuth Google
+        const _pf = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null);
+        const _ps = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
+        if (_pf) {
+          try { setForm(JSON.parse(_pf)); setStep(Number(_ps) || 0); } catch(e) {}
+          document.cookie = "freeley_pending_form=;path=/;max-age=0";
+          document.cookie = "freeley_pending_step=;path=/;max-age=0";
+          goToScreen("app");
+          return;
         }
       } else {
         setAuthUser(null);
