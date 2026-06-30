@@ -1519,7 +1519,14 @@ CONSIGNES DE RÉDACTION
   };
 
   const downloadPDF = (overrideForm, overrideContract) => {
-    const pForm = overrideForm || form;
+    const rawForm = overrideForm || form;
+    const pForm = {
+      freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
+      freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
+      clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
+      endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
+      ...rawForm,
+    };
     const pContract = overrideContract || contract;
     if (!jsPDFReady || !window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!overrideForm) setPdfLoad(true);
@@ -1634,7 +1641,7 @@ CONSIGNES DE RÉDACTION
       cy += 5;
       doc.setFont("helvetica","bold"); doc.setFontSize(14);
       doc.setTextColor(...NAVY);
-      const missionLines = doc.splitTextToSize(pForm.missionTitle.toUpperCase(), cw - 4);
+      const missionLines = doc.splitTextToSize((pForm.missionTitle || "Mission").toUpperCase(), cw - 4);
       missionLines.forEach(l => { doc.text(l, ML + 2, cy); cy += 9; });
       cy += 3;
 
@@ -1952,7 +1959,7 @@ CONSIGNES DE RÉDACTION
       }
 
       doc.save(`Contrat_${safe(pForm.missionTitle)}_${safe(pForm.clientName)}.pdf`);
-    } catch(err) { console.error(err); alert("Erreur PDF. Utilise le bouton Copier."); }
+    } catch(err) { console.error(err); alert("Erreur PDF : " + (err.message || "inconnue") + " — Utilise le bouton Copier en attendant."); }
     if (!overrideForm) setPdfLoad(false);
   };
 
