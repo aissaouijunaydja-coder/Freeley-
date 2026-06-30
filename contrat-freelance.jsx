@@ -237,8 +237,8 @@ const upgradePlan = async (plan) => {};
 const initialForm = {
   freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
   freelanceEmail: "",
-  clientName: "", clientCompany: "", clientAddress: "", clientEmail: "",
-  missionTitle: "", missionDescription: "", startDate: "", endDate: "",
+  clientName: "", clientCompany: "", clientAddress: "", clientEmail: "", typeClient: "professionnel",
+  missionTitle: "", missionDescription: "", categorieMetier: "autre", startDate: "", endDate: "",
   price: "", paymentTerms: "Comptant", revisions: "2", latePaymentPenalty: true,
 };
 
@@ -1291,10 +1291,12 @@ Adresse Prestataire: ${form.freelanceAddress}
 Email Prestataire  : ${form.freelanceEmail || "—"}
 
 Client             : ${form.clientName}${form.clientCompany ? " — " + form.clientCompany : ""}
+Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}
 Adresse Client     : ${form.clientAddress}
 Email Client       : ${form.clientEmail || "—"}
 
 Titre de la mission: ${form.missionTitle}
+Domaine d'activité : ${form.categorieMetier === "artisanat" ? "Métier manuel / artisanat" : form.categorieMetier === "digital" ? "Digital / Tech / Création" : form.categorieMetier === "conseil" ? "Conseil / Formation / Services" : "Autre / prestation générale"}
 Description        : ${form.missionDescription}
 Période            : du ${d1} au ${d2}
 Honoraires HT      : ${form.price} €
@@ -1326,21 +1328,28 @@ Rédige les dates de début/fin. Puis inclus OBLIGATOIREMENT cette clause de rec
 
 ARTICLE 4 — HONORAIRES, MODALITÉS DE PAIEMENT ET ACOMPTE
 Montant total HT : ${form.price} €
-Conditions : ${paymentTermsLabel}
 Inclure OBLIGATOIREMENT :
 - Un acompte de 30 % soit ${acompteAmount} € HT dû à la signature du présent contrat, dont le versement conditionne le démarrage de la mission ;
-- Le solde de 70 % soit ${soldeAmount} € HT dû ${paymentTermsLabel} ;
-${form.latePaymentPenalty ? `- La clause légale de pénalités de retard : "Conformément aux articles L441-10 et L441-11 du Code de commerce, toute somme non réglée à l'échéance portera de plein droit, sans mise en demeure préalable, des pénalités de retard calculées au taux directeur de la Banque Centrale Européenne (taux REFI) majoré de dix (10) points de pourcentage, appliqué au montant TTC de la facture impayée et courant dès le lendemain de la date d'échéance. En sus, une indemnité forfaitaire de quarante euros (40 €) pour frais de recouvrement sera exigible de plein droit (art. D441-5 C.com.). Si les frais de recouvrement effectivement engagés excèdent ce montant forfaitaire, le Prestataire se réserve le droit de réclamer une indemnisation complémentaire sur justificatifs."` : ""}
+- Le solde de 70 % soit ${soldeAmount} € HT exigible UNIQUEMENT à la livraison/recette finale de la mission (ne JAMAIS indiquer "comptant à la commande" ou "à la signature" pour le solde puisqu'un acompte est demandé — aligne la date d'exigibilité du solde sur la fin de la période d'exécution, soit le ${d2}) ;
+${form.latePaymentPenalty
+  ? (form.typeClient === "particulier"
+    ? `- Le client étant un PARTICULIER (B2C), la clause de pénalités de retard doit IMPÉRATIVEMENT utiliser le taux d'intérêt légal en vigueur en France applicable aux consommateurs (et non le Code de commerce ni l'indemnité forfaitaire de 40 €, strictement réservés aux professionnels) : "En cas de retard de paiement, des pénalités calculées au taux d'intérêt légal en vigueur seront appliquées de plein droit sur les sommes dues, conformément au droit de la consommation."`
+    : `- La clause légale de pénalités de retard réservée aux professionnels : "Conformément aux articles L441-10 et L441-11 du Code de commerce, toute somme non réglée à l'échéance portera de plein droit, sans mise en demeure préalable, des pénalités de retard calculées au taux directeur de la Banque Centrale Européenne (taux REFI) majoré de dix (10) points de pourcentage, appliqué au montant TTC de la facture impayée et courant dès le lendemain de la date d'échéance. En sus, une indemnité forfaitaire de quarante euros (40 €) pour frais de recouvrement sera exigible de plein droit (art. D441-5 C.com.). Si les frais de recouvrement effectivement engagés excèdent ce montant forfaitaire, le Prestataire se réserve le droit de réclamer une indemnisation complémentaire sur justificatifs."`)
+  : `- Indique explicitement : "Pénalités de retard : Non stipulées."`}
 - Toutes les sommes sont exprimées hors taxes ; la TVA applicable, le cas échéant, sera ajoutée au taux en vigueur.
 
 ARTICLE 5 — RÉVISIONS ET MODIFICATIONS DU PÉRIMÈTRE
 Nombre de révisions incluses : ${form.revisions}. Clause de gestion du "scope creep" : toute demande hors périmètre fait l'objet d'un avenant écrit et facturé au tarif horaire du Prestataire.
 
-ARTICLE 6 — PROPRIÉTÉ INTELLECTUELLE ET CESSION DES DROITS SUSPENDUE AU PAIEMENT
-Rédige cette clause en deux temps :
+ARTICLE 6 — ${form.categorieMetier === "artisanat" ? "GARANTIE DE BONNE EXÉCUTION ET CONFORMITÉ AUX NORMES MÉTIER" : "PROPRIÉTÉ INTELLECTUELLE ET CESSION DES DROITS SUSPENDUE AU PAIEMENT"}
+${form.categorieMetier === "artisanat"
+  ? `Le métier étant manuel/artisanal (bâtiment, électricité, plomberie, logistique...), NE PAS rédiger d'article sur la propriété intellectuelle. Rédige à la place une clause de "Garantie de bonne exécution et conformité aux normes métier" : le Prestataire garantit la conformité de son intervention aux normes en vigueur applicables à son métier (le cas échéant, citer la norme NF C 15-100 pour l'électricité ou la norme sectorielle pertinente), s'engage à respecter les règles de l'art et les obligations de sécurité, et reste responsable des malfaçons selon les garanties légales applicables (garantie de parfait achèvement, garantie biennale ou décennale selon la nature des travaux).`
+  : form.categorieMetier === "conseil"
+  ? `Le métier étant du conseil/formation/services intellectuels, rédige un article de "Propriété intellectuelle et Confidentialité (NDA)" : les livrables (rapports, supports, recommandations) restent la propriété du Prestataire jusqu'au paiement intégral ; le Prestataire est tenu à une obligation de confidentialité stricte sur les informations du Client, et inversement le Client s'engage à ne pas divulguer les méthodologies propres du Prestataire. Précise qu'il s'agit d'une obligation de moyens et non de résultat.`
+  : `Rédige cette clause en deux temps :
 (a) Droits du Prestataire pendant la mission : le Prestataire conserve tous ses droits de propriété intellectuelle sur les livrables jusqu'au paiement intégral ;
 (b) Cession conditionnelle et suspensive : "Le transfert définitif et irrévocable de l'ensemble des droits de propriété intellectuelle afférents aux livrables — droits de reproduction, de représentation, d'adaptation, de traduction, sous toutes formes et sur tous supports, connus ou à naître, pour le monde entier et pour toute la durée légale de protection — est STRICTEMENT SUBORDONNÉ au paiement intégral et effectif du montant total des honoraires dus au titre du présent contrat, toutes factures confondues. En cas de non-paiement, total ou partiel, le Client ne disposera d'aucun droit d'utilisation sur les livrables et devra en cesser immédiatement l'exploitation sous peine de contrefaçon (art. L335-2 et s. CPI)."
-Cite les articles L111-1, L122-1 et L131-1 du Code de la propriété intellectuelle.
+Cite les articles L111-1, L122-1 et L131-1 du Code de la propriété intellectuelle.`}
 
 ARTICLE 7 — CONFIDENTIALITÉ ET NON-SOLICITATION
 Clause de confidentialité réciproque pendant la mission et 3 ans après. Clause de non-sollicitation du personnel du Prestataire pendant 24 mois.
@@ -1362,7 +1371,7 @@ ARTICLE 12 — DISPOSITIONS GÉNÉRALES
 Intégralité de l'accord, divisibilité des clauses, absence de renonciation, hiérarchie des documents contractuels.
 
 ARTICLE 13 — SIGNATURES
-Bloc de signature avec : "Lu et approuvé — Bon pour accord", Nom, Qualité, Date, Lieu, Signature — pour chacune des deux parties. Espace de signature physique (ligne de tirets). Mention : "Parapher chaque page."
+Bloc de signature avec : "Lu et approuvé — Bon pour accord", Nom, Qualité, Date, Lieu, Signature — pour chacune des deux parties. Espace de signature physique (ligne de tirets). Mention : "Parapher chaque page." Termine impérativement par la mention : "Contrat établi et signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie."
 
 ══════════════════════════════════════════════
 CONSIGNES DE RÉDACTION
@@ -2623,6 +2632,14 @@ CONSIGNES DE RÉDACTION
                 );
               })()}
               <Field label="Adresse du client *" value={form.clientAddress} onChange={v=>update("clientAddress",v)} placeholder="5 avenue Victor Hugo, 69001 Lyon" error={errors.clientAddress} delay={4} />
+              <ToggleGroup
+                label="Type de client *"
+                options={["professionnel","particulier"]}
+                labels={["Une Entreprise / Pro (B2B)","Un Particulier (B2C)"]}
+                value={form.typeClient}
+                onChange={v=>update("typeClient",v)}
+                tooltip="Détermine les clauses légales applicables : indemnité de recouvrement et taux BCE pour les professionnels, taux d'intérêt légal pour les particuliers."
+              />
             </div>
           )}
 
@@ -2655,6 +2672,14 @@ CONSIGNES DE RÉDACTION
 
               <Field label="Titre de la mission *" value={form.missionTitle} onChange={v=>update("missionTitle",v)} placeholder="Création d'un site web e-commerce" error={errors.missionTitle} delay={2} />
               <DescriptionField value={form.missionDescription} onChange={v=>update("missionDescription",v)} error={errors.missionDescription} missionTitle={form.missionTitle} />
+              <ToggleGroup
+                label="Domaine d'activité *"
+                options={["artisanat","digital","conseil","autre"]}
+                labels={["🛠️ Métier Manuel / Artisanat","💻 Digital / Tech / Création","🧠 Conseil / Formation / Services","🔮 Autre / Général"]}
+                value={form.categorieMetier}
+                onChange={v=>update("categorieMetier",v)}
+                tooltip="Adapte automatiquement les clauses du contrat : propriété intellectuelle pour le digital, garantie de conformité aux normes pour l'artisanat, confidentialité pour le conseil."
+              />
               <div className="fade-up fade-up-4" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:16 }}>
                 <Field label="Date de début *" value={form.startDate} onChange={v=>update("startDate",v)} type="date" error={errors.startDate} />
                 <Field label="Date de fin *" value={form.endDate} onChange={v=>update("endDate",v)} type="date" error={errors.endDate} />
@@ -2722,7 +2747,9 @@ CONSIGNES DE RÉDACTION
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color: form.latePaymentPenalty ? "#16A34A" : C.textL, lineHeight:1.5 }}>
                       {form.latePaymentPenalty
-                        ? "Taux BCE + 10 pts · Indemnité 40€ · Art. L441-10 C.com. — Fortement recommandé"
+                        ? (form.typeClient === "particulier"
+                          ? "✓ Clause activée — Taux d'intérêt légal en vigueur applicable aux consommateurs"
+                          : "Taux BCE + 10 pts · Indemnité 40€ · Art. L441-10 C.com. — Fortement recommandé")
                         : "Active cette clause pour protéger ton paiement en cas de retard client"}
                     </div>
                   </div>
