@@ -9075,13 +9075,30 @@ function CameraCapture({ onCapture, onClose }) {
   const streamRef = useRef(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+  const [capturing, setCapturing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "environment",
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+        focusMode: "continuous",
+      },
+      audio: false,
+    })
       .then(stream => {
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = stream;
+        // Activer l'autofocus continu si supporté
+        try {
+          const track = stream.getVideoTracks()[0];
+          const caps = track.getCapabilities ? track.getCapabilities() : {};
+          if (caps.focusMode && caps.focusMode.includes("continuous")) {
+            track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+          }
+        } catch(e) {}
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.play();
@@ -9099,22 +9116,26 @@ function CameraCapture({ onCapture, onClose }) {
 
   const handleCapture = () => {
     const video = videoRef.current;
-    if (!video) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const base64 = ev.target.result.split(",")[1];
-        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-        onCapture({ base64, type: "image/jpeg", name: `Photo_Scan_${Date.now()}.jpg` });
-      };
-      reader.readAsDataURL(blob);
-    }, "image/jpeg", 0.92);
+    if (!video || capturing) return;
+    setCapturing(true);
+    // Petit délai pour laisser l'autofocus se stabiliser avant la capture
+    setTimeout(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) { setCapturing(false); return; }
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const base64 = ev.target.result.split(",")[1];
+          if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+          onCapture({ base64, type: "image/jpeg", name: `Photo_Scan_${Date.now()}.jpg` });
+        };
+        reader.readAsDataURL(blob);
+      }, "image/jpeg", 0.95);
+    }, 600);
   };
 
   return (
@@ -9138,6 +9159,13 @@ function CameraCapture({ onCapture, onClose }) {
             width:"100%", height:"100%", objectFit:"cover",
           }} />
           <div style={{
+            position:"absolute", top:24, left:0, right:0, textAlign:"center",
+            color:"#fff", fontSize:13, fontFamily:"sans-serif",
+            textShadow:"0 1px 4px rgba(0,0,0,0.6)", padding:"0 20px",
+          }}>
+            {capturing ? "📸 Capture en cours… ne bouge pas" : "Cadre bien le document et garde le téléphone stable"}
+          </div>
+          <div style={{
             position:"absolute", bottom:0, left:0, right:0,
             padding:"24px 20px 36px", display:"flex",
             alignItems:"center", justifyContent:"space-between",
@@ -9147,11 +9175,12 @@ function CameraCapture({ onCapture, onClose }) {
               background:"rgba(255,255,255,0.15)", border:"none", color:"#fff",
               width:44, height:44, borderRadius:"50%", fontSize:18, cursor:"pointer",
             }}>✕</button>
-            <button onClick={handleCapture} disabled={!ready} style={{
+            <button onClick={handleCapture} disabled={!ready || capturing} style={{
               width:68, height:68, borderRadius:"50%",
-              background:"#fff", border:"4px solid rgba(255,255,255,0.4)",
-              cursor: ready ? "pointer" : "not-allowed",
+              background: capturing ? "#FFD700" : "#fff", border:"4px solid rgba(255,255,255,0.4)",
+              cursor: (ready && !capturing) ? "pointer" : "not-allowed",
               opacity: ready ? 1 : 0.5,
+              transition:"background 0.2s",
             }} />
             <div style={{ width:44 }} />
           </div>
