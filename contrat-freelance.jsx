@@ -1956,6 +1956,44 @@ CONSIGNES DE RÉDACTION
     if (!overrideForm) setPdfLoad(false);
   };
 
+  const downloadScanReportPDF = (findings, label) => {
+    if (!findings || !findings.length) { alert("Aucun résultat à télécharger."); return; }
+    if (!jsPDFReady || !window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+    const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80];
+    const DANGER = [200, 60, 60], WARN = [200, 150, 40], OK = [39, 119, 63];
+    const today = new Date().toLocaleDateString("fr-FR");
+    let y = 20;
+
+    doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 32, "F");
+    doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 32, PW, 32);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(255,255,255);
+    doc.text("Rapport d'analyse de contrat", ML, 16);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
+    doc.text(`${label || "Analyse"} — généré le ${today} via Freeley`, ML, 24);
+
+    y = 46;
+    findings.forEach((f, i) => {
+      if (y > 260) { doc.addPage(); y = 20; }
+      const color = f.level === "danger" ? DANGER : f.level === "warning" ? WARN : OK;
+      const lbl = f.level === "danger" ? "RISQUE" : f.level === "warning" ? "À NÉGOCIER" : "POSITIF";
+      doc.setFillColor(...color); doc.roundedRect(ML, y, 28, 6, 1, 1, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(255,255,255);
+      doc.text(lbl, ML + 14, y + 4, { align: "center" });
+      doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...DARK);
+      doc.text(f.article || `Point ${i+1}`, ML + 32, y + 4.5);
+      y += 10;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(80,80,80);
+      const lines = doc.splitTextToSize(f.text || "", cw);
+      doc.text(lines, ML, y);
+      y += lines.length * 4.6 + 8;
+    });
+
+    doc.save(`Analyse_Contrat_Freeley_${Date.now()}.pdf`);
+  };
+
   const contractsLeft = Math.max(0, FREE_LIMIT - contractsUsed);
 
   const handleAuthSuccess = async (user) => {
@@ -2105,14 +2143,19 @@ CONSIGNES DE RÉDACTION
                 <div style={{fontWeight:600,fontSize:13,color:"#1B2E4B",marginBottom:3}}>{f.article}</div>
                 <div style={{fontSize:12,color:"#4A4A4A",lineHeight:1.6}}>{f.text}</div>
               </div>))}
+              <div style={{display:"flex", gap:8, marginTop:8}}>
+              <button onClick={()=>downloadScanReportPDF(findings, ext.mission || "Analyse de contrat")} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer"}}>
+                ⬇ Télécharger PDF
+              </button>
               <button onClick={()=>{
                 const newList = scanList.filter((_,i)=>i!==idx);
                 localStorage.setItem("freeley_scan_list", JSON.stringify(newList));
                 if (newList.length === 0) { localStorage.removeItem("freeley_scan_results"); setHasScanResults(false); goToScreen("history"); }
                 else { window.location.reload(); }
-              }} style={{marginTop:8, padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer"}}>
+              }} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer"}}>
                 🗑 Supprimer cette analyse
               </button>
+              </div>
             </div>
           </details>
         );
@@ -8976,6 +9019,97 @@ ${freelanceName}`;
 }
 
 /* ══════════════════════════════════════════ SCANNER MODAL ══ */
+function CameraCapture({ onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [error, setError] = useState("");
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+      .then(stream => {
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+        setReady(true);
+      })
+      .catch(err => {
+        setError("Impossible d'accéder à la caméra : " + (err.message || "permission refusée"));
+      });
+    return () => {
+      cancelled = true;
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  const handleCapture = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const base64 = ev.target.result.split(",")[1];
+        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+        onCapture({ base64, type: "image/jpeg", name: `Photo_Scan_${Date.now()}.jpg` });
+      };
+      reader.readAsDataURL(blob);
+    }, "image/jpeg", 0.92);
+  };
+
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:10001,
+      background:"#000", display:"flex", flexDirection:"column",
+      alignItems:"center", justifyContent:"center",
+    }}>
+      {error ? (
+        <div style={{ color:"#fff", textAlign:"center", padding:24, maxWidth:340 }}>
+          <div style={{ fontSize:32, marginBottom:12 }}>📷</div>
+          <div style={{ fontSize:15, marginBottom:20, lineHeight:1.5 }}>{error}</div>
+          <button onClick={onClose} style={{
+            padding:"12px 24px", background:"#fff", color:"#000",
+            border:"none", borderRadius:10, fontWeight:600, cursor:"pointer",
+          }}>Fermer</button>
+        </div>
+      ) : (
+        <>
+          <video ref={videoRef} playsInline muted style={{
+            width:"100%", height:"100%", objectFit:"cover",
+          }} />
+          <div style={{
+            position:"absolute", bottom:0, left:0, right:0,
+            padding:"24px 20px 36px", display:"flex",
+            alignItems:"center", justifyContent:"space-between",
+            background:"linear-gradient(transparent, rgba(0,0,0,0.6))",
+          }}>
+            <button onClick={onClose} style={{
+              background:"rgba(255,255,255,0.15)", border:"none", color:"#fff",
+              width:44, height:44, borderRadius:"50%", fontSize:18, cursor:"pointer",
+            }}>✕</button>
+            <button onClick={handleCapture} disabled={!ready} style={{
+              width:68, height:68, borderRadius:"50%",
+              background:"#fff", border:"4px solid rgba(255,255,255,0.4)",
+              cursor: ready ? "pointer" : "not-allowed",
+              opacity: ready ? 1 : 0.5,
+            }} />
+            <div style={{ width:44 }} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAuth, initialResults, authUser }) {
   const [phase, setPhase]       = useState(initialResults ? "result" : "upload");   // "upload" | "loading" | "result"
 
@@ -9055,20 +9189,23 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
     requestFilePermission();
   };
 
+  const [showRealCamera, setShowRealCamera] = useState(false);
+
   const handlePhotoScan = () => {
-    const doScan = () => {
-      setPhotoScanning(true);
-      setFileName("");
-      setTimeout(() => {
-        setPhotoScanning(false);
-        setFileName("Contrat_Numérisé_Photo.pdf");
-      }, 1500);
-    };
+    const doScan = () => setShowRealCamera(true);
     if (onRequestCamera) {
       onRequestCamera(doScan);
     } else {
       doScan();
     }
+  };
+
+  const handleCameraCapture = ({ base64, type, name }) => {
+    setShowRealCamera(false);
+    setPhotoScanning(false);
+    setFileName(name);
+    setFileType(type);
+    setFileData(base64);
   };
 
   const [aiFindings, setAiFindings] = useState(initialResults?.aiFindings || null);
@@ -9170,8 +9307,53 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
   const scoreBg     = "#FFFBEB";
   const scoreBorder = "#FDE68A";
 
+  const downloadScanPDF = (overrideFindings) => {
+    const findings = overrideFindings || aiFindings;
+    if (!findings || !findings.length) { alert("Aucun résultat à télécharger."); return; }
+    if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+    const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80];
+    const DANGER = [200, 60, 60], WARN = [200, 150, 40], OK = [39, 119, 63];
+    const today = new Date().toLocaleDateString("fr-FR");
+    let y = 20;
+
+    doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 32, "F");
+    doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 32, PW, 32);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(255,255,255);
+    doc.text("Rapport d'analyse de contrat", ML, 16);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
+    doc.text(`Généré le ${today} via Freeley — analyse IA`, ML, 24);
+
+    y = 46;
+    findings.forEach((f, i) => {
+      if (y > 260) { doc.addPage(); y = 20; }
+      const color = f.level === "danger" ? DANGER : f.level === "warning" ? WARN : OK;
+      const label = f.level === "danger" ? "RISQUE" : f.level === "warning" ? "À NÉGOCIER" : "POSITIF";
+      doc.setFillColor(...color); doc.roundedRect(ML, y, 28, 6, 1, 1, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(255,255,255);
+      doc.text(label, ML + 14, y + 4, { align: "center" });
+      doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...DARK);
+      doc.text(f.article || `Point ${i+1}`, ML + 32, y + 4.5);
+      y += 10;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(80,80,80);
+      const lines = doc.splitTextToSize(f.text || "", cw);
+      doc.text(lines, ML, y);
+      y += lines.length * 4.6 + 8;
+    });
+
+    doc.save(`Analyse_Contrat_Freeley_${Date.now()}.pdf`);
+  };
+
   return (
     <>
+    {showRealCamera && (
+      <CameraCapture
+        onCapture={handleCameraCapture}
+        onClose={() => setShowRealCamera(false)}
+      />
+    )}
     {/* ── Input fichier caché ── */}
     <input
       ref={fileInputRef}
@@ -9759,6 +9941,18 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
                   </div>
                 ))}
               </div>
+
+              {/* Bouton télécharger PDF du rapport de scan */}
+              <button
+                onClick={() => downloadScanPDF()}
+                style={{
+                  width:"100%", padding:"12px 16px", marginBottom:20,
+                  background:C.gold, color:C.navyD, border:"none",
+                  borderRadius:10, cursor:"pointer",
+                  fontFamily:T.body, fontSize:13, fontWeight:700,
+                  display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                }}
+              >⬇ Télécharger le rapport PDF</button>
 
               {/* ════ SECTION PROFESSIONNALISER ════ */}
               <div style={{
