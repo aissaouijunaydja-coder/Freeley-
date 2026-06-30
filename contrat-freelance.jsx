@@ -239,7 +239,7 @@ const initialForm = {
   freelanceEmail: "",
   clientName: "", clientCompany: "", clientAddress: "", clientEmail: "", typeClient: "professionnel",
   missionTitle: "", missionDescription: "", categorieMetier: "autre", startDate: "", endDate: "",
-  price: "", paymentTerms: "Comptant", revisions: "2", latePaymentPenalty: true,
+  price: "", paymentTerms: "Comptant", revisions: "2", latePaymentPenalty: true, acomptePourcentage: "0",
 };
 
 const validate = (step, form) => {
@@ -1277,8 +1277,9 @@ function AppInner() {
       const paymentTermsLabel = form.paymentTerms === "Comptant"
         ? "comptant à la commande (100 % à la signature)"
         : `${form.paymentTerms} jours nets à compter de la date de facturation`;
-      const acompteAmount = Math.round(Number(form.price) * 0.3);
-      const soldeAmount   = Math.round(Number(form.price) * 0.7);
+      const acomptePct = Number(form.acomptePourcentage) || 0;
+      const acompteAmount = Math.round(Number(form.price) * acomptePct / 100);
+      const soldeAmount   = Math.round(Number(form.price) * (100 - acomptePct) / 100);
 
       const prompt = `Tu es un avocat d'affaires français spécialisé en droit des contrats de prestation intellectuelle et en propriété intellectuelle. Rédige un CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT complet, à la fois rigoureux sur le plan juridique et protecteur pour le Prestataire, en français, en utilisant EXACTEMENT les informations fournies ci-dessous.
 
@@ -1329,8 +1330,10 @@ Rédige les dates de début/fin. Puis inclus OBLIGATOIREMENT cette clause de rec
 ARTICLE 4 — HONORAIRES, MODALITÉS DE PAIEMENT ET ACOMPTE
 Montant total HT : ${form.price} €
 Inclure OBLIGATOIREMENT :
-- Un acompte de 30 % soit ${acompteAmount} € HT dû à la signature du présent contrat, dont le versement conditionne le démarrage de la mission ;
-- Le solde de 70 % soit ${soldeAmount} € HT exigible UNIQUEMENT à la livraison/recette finale de la mission (ne JAMAIS indiquer "comptant à la commande" ou "à la signature" pour le solde puisqu'un acompte est demandé — aligne la date d'exigibilité du solde sur la fin de la période d'exécution, soit le ${d2}) ;
+${acomptePct > 0
+  ? `- Un acompte de ${acomptePct} % soit ${acompteAmount} € HT dû à la signature du présent contrat, dont le versement conditionne le démarrage de la mission (condition suspensive) ;
+- Le solde de ${100 - acomptePct} % soit ${soldeAmount} € HT exigible à la livraison/recette finale de la mission, payable selon le délai convenu (${paymentTermsLabel}). Ne JAMAIS indiquer que le solde est "comptant à la commande" ou "à la signature" puisqu'un acompte est demandé ;`
+  : `- Aucun acompte n'est demandé. La totalité des honoraires, soit 100 % du montant (${form.price} € HT), est due selon le délai de paiement convenu : ${paymentTermsLabel} ;`}
 ${form.latePaymentPenalty
   ? (form.typeClient === "particulier"
     ? `- Le client étant un PARTICULIER (B2C), la clause de pénalités de retard doit IMPÉRATIVEMENT utiliser le taux d'intérêt légal en vigueur en France applicable aux consommateurs (et non le Code de commerce ni l'indemnité forfaitaire de 40 €, strictement réservés aux professionnels) : "En cas de retard de paiement, des pénalités calculées au taux d'intérêt légal en vigueur seront appliquées de plein droit sur les sommes dues, conformément au droit de la consommation."`
@@ -1534,6 +1537,7 @@ CONSIGNES DE RÉDACTION
       freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
       clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
       endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
+      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre",
       ...rawForm,
     };
     const pContract = overrideContract || contract;
@@ -1701,16 +1705,20 @@ CONSIGNES DE RÉDACTION
       doc.text("RÉCAPITULATIF DES CONDITIONS FINANCIÈRES ET OPÉRATIONNELLES", ML, cy);
       cy += 3;
 
+      const acomptePctPdf = Number(pForm.acomptePourcentage) || 0;
       const tableRows = [
         ["Mission",          pForm.missionTitle],
         ["Période",          `Du ${d1} au ${d2}`],
         ["Honoraires HT",    `${Number(pForm.price).toLocaleString("fr-FR")} €`],
-        ["Acompte (30 %)",   `${Math.round(Number(pForm.price)*0.3).toLocaleString("fr-FR")} € — dû à la signature`],
-        ["Solde (70 %)",     `${Math.round(Number(pForm.price)*0.7).toLocaleString("fr-FR")} € — dû selon conditions paiement`],
-        ["Délai de paiement",pForm.paymentTerms === "Comptant" ? "Comptant à la commande" : `${pForm.paymentTerms} jours nets`],
-        ["Révisions incluses",`${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`],
-        ["Pénalités de retard", pForm.latePaymentPenalty ? "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)" : "Non stipulées"],
       ];
+      if (acomptePctPdf > 0) {
+        tableRows.push([`Acompte (${acomptePctPdf} %)`, `${Math.round(Number(pForm.price)*acomptePctPdf/100).toLocaleString("fr-FR")} € — dû à la signature`]);
+        tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${Math.round(Number(pForm.price)*(100-acomptePctPdf)/100).toLocaleString("fr-FR")} € — dû à la livraison`]);
+      }
+      tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant" ? "Comptant à la commande" : `${pForm.paymentTerms} jours nets`]);
+      tableRows.push(["Révisions incluses", `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
+      tableRows.push(["Pénalités de retard", pForm.latePaymentPenalty ? (pForm.typeClient === "particulier" ? "Oui — Taux d'intérêt légal (consommateur)" : "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)") : "Non stipulées"]);
+
 
       // En-tête tableau bleu
       doc.setFillColor(...NAVY); doc.rect(ML, cy, cw, 8, "F");
@@ -2704,8 +2712,17 @@ CONSIGNES DE RÉDACTION
               </div>
 
               <Field label="Prix total HT (€) *" value={form.price} onChange={v=>update("price",v)} placeholder="800" type="number" error={errors.price} delay={2} prefix="€" />
+              <div className="fade-up fade-up-3" style={{ marginBottom:4 }}>
+                <ToggleGroup label="Acompte à la commande (optionnel)" options={["0","10","20","30","40","50"]} labels={["Aucun (0%)","10%","20%","30%","40%","50%"]} value={form.acomptePourcentage} onChange={v=>update("acomptePourcentage",v)} tooltip="Pourcentage payé par le client avant le début de la mission pour valider la commande." />
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5, marginTop:-8, marginBottom:14 }}>
+                  Pourcentage payé par le client avant le début de la mission pour valider la commande.
+                </div>
+              </div>
               <div className="fade-up fade-up-3">
                 <ToggleGroup label="Délai de paiement" options={["Comptant","15","30","45","60"]} labels={["Comptant","15 jours","30 jours","45 jours","60 jours"]} value={form.paymentTerms} onChange={v=>update("paymentTerms",v)} tooltip="Comptant = paiement immédiat à la commande. Sinon, délai après réception de facture. 30 jours est le standard en France (max 60 jours)." />
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5, marginTop:-8, marginBottom:14 }}>
+                  Temps accordé au client pour régler le solde restant une fois la mission terminée et la facture reçue.
+                </div>
               </div>
               <div className="fade-up fade-up-4">
                 <ToggleGroup label="Révisions incluses" options={["1","2","3","Illimitées"]} labels={["1","2","3","Illimitées"]} value={form.revisions} onChange={v=>update("revisions",v)} tooltip="Nombre de retours client inclus dans le prix. Au-delà, tu peux facturer des modifications supplémentaires." />
