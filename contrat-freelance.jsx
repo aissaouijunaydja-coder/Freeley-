@@ -234,6 +234,62 @@ const getUserPlan = async () => {
 
 const upgradePlan = async (plan) => {};
 
+// ─── Signature à distance ───
+
+// Le freelance signe et prépare l'envoi au client : sauvegarde le contrat + sa signature, retourne l'id public
+const createSignatureRequest = async (entry, form, freelanceSignature) => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase
+    .from("contracts")
+    .insert({
+      user_id: user.id,
+      title: form.missionTitle || "Contrat",
+      content: {
+        ...entry, form,
+        clientName: form.clientName, clientCompany: form.clientCompany,
+        price: form.price, startDate: form.startDate, endDate: form.endDate,
+        contract: entry.contract,
+        freelanceSignature: freelanceSignature || null,
+        clientSignature: null,
+        signedByFreelanceAt: new Date().toISOString(),
+      },
+      status: "pending_client",
+    })
+    .select()
+    .single();
+  if (error) { console.error("createSignatureRequest error:", error); return null; }
+  return data;
+};
+
+// Le client (sans compte) charge le contrat à signer via l'id public
+const getContractForSigning = async (contractId) => {
+  const { data, error } = await supabase
+    .from("contracts")
+    .select("id, title, content, status")
+    .eq("id", contractId)
+    .single();
+  if (error) { console.error("getContractForSigning error:", error); return null; }
+  return data;
+};
+
+// Le client signe : on enregistre sa signature et on passe le statut à "signed"
+const submitClientSignature = async (contractId, clientSignature) => {
+  const { data: existing, error: e1 } = await supabase
+    .from("contracts")
+    .select("content")
+    .eq("id", contractId)
+    .single();
+  if (e1) { console.error(e1); return false; }
+  const newContent = { ...(existing.content || {}), clientSignature, signedByClientAt: new Date().toISOString() };
+  const { error: e2 } = await supabase
+    .from("contracts")
+    .update({ content: newContent, status: "signed" })
+    .eq("id", contractId);
+  if (e2) { console.error(e2); return false; }
+  return true;
+};
+
 const initialForm = {
   freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
   freelanceEmail: "",
@@ -1011,6 +1067,9 @@ function AppInner() {
 
   // Tactile signature modal state
   const [showTactileSign, setShowTactileSign] = useState(false);
+  const [remoteSignLoading, setRemoteSignLoading] = useState(false);
+  const [remoteSignLink, setRemoteSignLink] = useState("");
+  const [remoteSignCopied, setRemoteSignCopied] = useState(false);
 
   // ── Notation client (fin de mission) ──
   const [ratingModal, setRatingModal] = useState(null); // { clientName, clientEmail, clientCompany }
@@ -1497,6 +1556,35 @@ CONSIGNES DE RÉDACTION
     } finally {
       clearTimeout(t1);
       clearTimeout(t2);
+    }
+  };
+
+  const handleRemoteSign = async () => {
+    setRemoteSignLoading(true);
+    try {
+      const entry = {
+        contract,
+        missionTitle: form.missionTitle,
+        clientName: form.clientName,
+        clientCompany: form.clientCompany,
+        price: form.price,
+        startDate: form.startDate,
+        endDate: form.endDate,
+      };
+      const saved = await createSignatureRequest(entry, form, null);
+      if (!saved || !saved.id) {
+        alert("Impossible de créer le lien de signature. Vérifie ta connexion.");
+        setRemoteSignLoading(false);
+        return;
+      }
+      const link = `${window.location.origin}${window.location.pathname}?sign=${saved.id}`;
+      setRemoteSignLink(link);
+      // Rafraîchir l'historique
+      setHistory(await getHistory());
+    } catch(e) {
+      alert("Erreur : " + (e.message || "inconnue"));
+    } finally {
+      setRemoteSignLoading(false);
     }
   };
 
@@ -3110,6 +3198,44 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 onMouseOver={e=>{ e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow="0 8px 24px #6366F160"; }}
                 onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 4px 14px #6366F140"; }}
               >✍️ Signer et envoyer au client</button>
+
+              {/* ── Signature à distance ── */}
+              {!remoteSignLink ? (
+                <button
+                  onClick={handleRemoteSign}
+                  disabled={remoteSignLoading}
+                  style={{
+                    padding:"11px 16px",
+                    background: remoteSignLoading ? "#2A4167" : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
+                    color: remoteSignLoading ? "#8BA3C0" : C.white, border:"none", borderRadius:8,
+                    cursor: remoteSignLoading ? "wait" : "pointer",
+                    fontSize:13, fontFamily:T.body, fontWeight:700,
+                    display:"flex", alignItems:"center", gap:8,
+                    width:"100%", justifyContent:"center",
+                  }}
+                >{remoteSignLoading ? "Création du lien…" : "📲 Envoyer au client pour signature à distance"}</button>
+              ) : (
+                <div style={{ width:"100%", background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
+                  <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:8 }}>✓ Lien de signature prêt !</div>
+                  <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:12 }}>
+                    Envoie ce lien à ton client (SMS, email, WhatsApp). Il pourra lire et signer le contrat depuis son téléphone. Tu seras notifié dans ton historique une fois signé.
+                  </div>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(remoteSignLink); setRemoteSignCopied(true); setTimeout(()=>setRemoteSignCopied(false), 2500); }}
+                      style={{ flex:1, minWidth:120, padding:"10px", background: remoteSignCopied ? "#15803D" : "#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:8, cursor:"pointer", fontSize:12.5, fontWeight:600 }}
+                    >{remoteSignCopied ? "✓ Copié !" : "📋 Copier le lien"}</button>
+                    <a
+                      href={`sms:?body=${encodeURIComponent("Bonjour, merci de signer le contrat via ce lien sécurisé : " + remoteSignLink)}`}
+                      style={{ flex:1, minWidth:120, padding:"10px", background:"#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:8, textAlign:"center", fontSize:12.5, fontWeight:600, textDecoration:"none" }}
+                    >💬 Envoyer par SMS</a>
+                    <a
+                      href={`mailto:${form.clientEmail || ""}?subject=${encodeURIComponent("Signature du contrat — " + (form.missionTitle||""))}&body=${encodeURIComponent("Bonjour,\n\nMerci de signer le contrat via ce lien sécurisé :\n" + remoteSignLink + "\n\nCordialement.")}`}
+                      style={{ flex:1, minWidth:120, padding:"10px", background:"#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:8, textAlign:"center", fontSize:12.5, fontWeight:600, textDecoration:"none" }}
+                    >✉️ Envoyer par email</a>
+                  </div>
+                </div>
+              )}
 
               {/* ── Bouton lien de négociation ── */}
               <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-start", gap:4, width:"100%" }}>
@@ -12482,10 +12608,138 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
 }
 
 /* ══════════════════════════════════════════════════════════ ROOT EXPORT ══ */
+function ClientSignaturePage({ contractId }) {
+  const [loading, setLoading] = useState(true);
+  const [contractData, setContractData] = useState(null);
+  const [error, setError] = useState("");
+  const [signing, setSigning] = useState(false);
+  const [done, setDone] = useState(false);
+  const canvasRef = useRef(null);
+  const [hasStrokes, setHasStrokes] = useState(false);
+  const drawing = useRef(false);
+
+  useEffect(() => {
+    getContractForSigning(contractId)
+      .then(data => {
+        if (!data) { setError("Contrat introuvable ou lien expiré."); }
+        else if (data.status === "signed") { setError("Ce contrat a déjà été signé. Merci !"); }
+        else { setContractData(data); }
+        setLoading(false);
+      })
+      .catch(() => { setError("Erreur de chargement."); setLoading(false); });
+  }, [contractId]);
+
+  // Dessin signature
+  const getPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return { x: (touch.clientX - rect.left) * (canvas.width / rect.width), y: (touch.clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const startDraw = (e) => { e.preventDefault(); drawing.current = true; const ctx = canvasRef.current.getContext("2d"); const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const draw = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const p = getPos(e);
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    setHasStrokes(true);
+  };
+  const endDraw = () => { drawing.current = false; };
+  const clearCanvas = () => { const c = canvasRef.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); setHasStrokes(false); };
+
+  const handleSign = async () => {
+    if (!hasStrokes) return;
+    setSigning(true);
+    const sig = canvasRef.current.toDataURL("image/png");
+    const ok = await submitClientSignature(contractId, sig);
+    setSigning(false);
+    if (ok) setDone(true);
+    else setError("Erreur lors de l'enregistrement. Réessaie.");
+  };
+
+  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+
+  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1B2E4B", fontSize:15 }}>Chargement du contrat…</div></div>;
+
+  if (error) return (
+    <div style={{ ...wrap, justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:32, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
+        <div style={{ fontSize:38, marginBottom:12 }}>{error.includes("déjà") ? "✅" : "⚠️"}</div>
+        <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>{error}</div>
+      </div>
+    </div>
+  );
+
+  if (done) return (
+    <div style={{ ...wrap, justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
+        <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Contrat signé !</div>
+        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Ta signature a bien été enregistrée. Le prestataire en est informé et recevra le contrat signé.</div>
+      </div>
+    </div>
+  );
+
+  const content = contractData?.content || {};
+  const contractText = content.contract || "";
+
+  return (
+    <div style={wrap}>
+      <div style={{ width:"100%", maxWidth:560 }}>
+        <div style={{ textAlign:"center", marginBottom:20 }}>
+          <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
+          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique du contrat</div>
+        </div>
+
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>CONTRAT À SIGNER</div>
+          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
+            {contractText || "Contenu du contrat indisponible."}
+          </div>
+        </div>
+
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Ta signature</div>
+          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signe ci-dessous avec ton doigt (ou ta souris) pour accepter les termes de ce contrat.</div>
+          <canvas
+            ref={canvasRef}
+            width={520} height={180}
+            onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+            onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+            style={{ width:"100%", height:180, border:"2px dashed #C9A961", borderRadius:10, background:"#FFFDF9", touchAction:"none", cursor:"crosshair" }}
+          />
+          <div style={{ display:"flex", gap:10, marginTop:14 }}>
+            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:13, color:"#5A6B80", fontWeight:500 }}>Effacer</button>
+            <button
+              onClick={handleSign}
+              disabled={!hasStrokes || signing}
+              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+            >{signing ? "Enregistrement…" : "✓ Signer le contrat"}</button>
+          </div>
+          <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
+            En signant, tu acceptes les termes de ce contrat. Signature horodatée et conservée conformément au droit français.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  // Lien de signature client : ?sign=<contractId>
+  const signParam = new URLSearchParams(window.location.search).get("sign");
+  if (signParam) {
+    return (
+      <ErrorBoundary>
+        <ClientSignaturePage contractId={signParam} />
+      </ErrorBoundary>
+    );
+  }
   return (
     <ErrorBoundary>
       <AppInner />
     </ErrorBoundary>
   );
 }
+
