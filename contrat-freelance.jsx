@@ -2148,11 +2148,14 @@ CONSIGNES DE RÉDACTION
     ? <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuthModal(false)} onSuccess={handleAuthSuccess} />
     : null;
 
+  const liveAlerts = React.useMemo(() => buildAlertsFromHistory(history), [history]);
+
   const headerProps = {
     isPremium, premiumPlan, left: contractsLeft,
     historyCount: history.length,
     authUser,
     profile,
+    alerts: liveAlerts,
     onAuthClick: () => { setAuthMode("login"); setShowAuthModal(true); },
     onSignOut: handleSignOut,
     onPricing: () => goToScreen("pricing"),
@@ -5426,9 +5429,55 @@ function Shell({ children }) {
 /* ══════════════════════════════════════════════════════════ ALERT CENTER ══ */
 const ALERTS_DATA = [];
 
-function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose }) {
+// Génère des alertes réelles à partir de l'historique des contrats
+function buildAlertsFromHistory(history) {
+  if (!Array.isArray(history) || !history.length) return [];
+  const alerts = [];
+  const now = new Date();
+  history.forEach(c => {
+    // Alerte 1 : mission terminée (date de fin passée) → relance paiement / recouvrement
+    if (c.endDate) {
+      const end = new Date(c.endDate);
+      if (!isNaN(end) && end < now) {
+        const daysLate = Math.floor((now - end) / (1000 * 60 * 60 * 24));
+        if (daysLate >= 0) {
+          alerts.push({
+            id: "recouvre_" + c.id,
+            read: false,
+            icon: "⚠️",
+            accentIcon: "#FEE2E2",
+            accentBorder: "#FCA5A5",
+            badgeBg: "#DC2626",
+            badgeText: "PAIEMENT",
+            title: "Paiement à relancer",
+            detail: `Mission « ${c.missionTitle || "Sans titre"} »${c.clientName ? " · " + c.clientName : ""} terminée depuis ${daysLate} j${c.price ? " · " + c.price + " €" : ""}`,
+            action: "recouvrement",
+          });
+        }
+      }
+    }
+    // Alerte 2 : contrat non signé
+    if (c.signatureStatus === "none" && c.date) {
+      alerts.push({
+        id: "sign_" + c.id,
+        read: false,
+        icon: "✍️",
+        accentIcon: "#FEF3C7",
+        accentBorder: "#FCD34D",
+        badgeBg: "#D97706",
+        badgeText: "SIGNATURE",
+        title: "Signature en attente",
+        detail: `Le contrat « ${c.missionTitle || "Sans titre"} » n'est pas encore signé électroniquement`,
+        action: "mission",
+      });
+    }
+  });
+  return alerts;
+}
+
+function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, initialAlerts = [] }) {
   const panelRef = useRef(null);
-  const [alerts, setAlerts] = useState(ALERTS_DATA);
+  const [alerts, setAlerts] = useState(initialAlerts);
 
   useEffect(() => {
     const handler = (e) => {
@@ -5633,14 +5682,14 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose }) 
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda }) {
+function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, alerts = [] }) {
   const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
   const profileName = [profile?.firstName, profile?.lastName].filter(Boolean).join(" ");
   const profileInitial = profileName ? profileName.charAt(0).toUpperCase() : authUser?.email?.charAt(0).toUpperCase() || "?";
 
-  const ALERT_COUNT = 0; // alertes dynamiques — zéro au démarrage
+  const ALERT_COUNT = alerts.filter(a => !a.read).length; // alertes dynamiques réelles
 
   /* ── Responsive breakpoint (JS-driven) ── */
   const [isMobile, setIsMobile] = React.useState(window.innerWidth < 600);
@@ -5750,6 +5799,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, hi
           {/* Panneau alertes */}
           {alertOpen && (
             <AlertCenter
+              initialAlerts={alerts}
               onClose={() => setAlertOpen(false)}
               onOpenRecouvrement={() => { setAlertOpen(false); if(onOpenRecouvrement) onOpenRecouvrement(); }}
               onOpenNda={() => { setAlertOpen(false); if(onOpenNda) onOpenNda(); }}
@@ -6162,7 +6212,13 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
 
               {/* Option Email */}
               <button
-                onClick={() => { setSendSuccess(sendModal.clientName); }}
+                onClick={() => {
+                  const subject = `Mise en demeure de paiement — ${sendModal.clientName}`;
+                  const body = sendModal.letter || "";
+                  const to = sendModal.clientEmail || "";
+                  window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                  setSendSuccess(sendModal.clientName);
+                }}
                 style={{ width:"100%", padding:"18px 20px", background:"linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)", border:"1.5px solid #93C5FD", borderRadius:14, cursor:"pointer", marginBottom:12, textAlign:"left", transition:"all 0.2s" }}
                 onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(59,130,246,0.25)";}}
                 onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="none";}}
@@ -6170,15 +6226,19 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                 <div style={{ display:"flex", alignItems:"center", gap:14 }}>
                   <div style={{ width:44, height:44, background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>📧</div>
                   <div>
-                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#1E3A8A", marginBottom:3 }}>Par Email Pro</div>
-                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Envoi automatique d'un courriel officiel avec la mise en demeure au format PDF en pièce jointe directement à {sendModal.clientName}.</div>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#1E3A8A", marginBottom:3 }}>Par Email</div>
+                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Ouvre ton application email avec la mise en demeure déjà rédigée, prête à envoyer à {sendModal.clientName}.</div>
                   </div>
                 </div>
               </button>
 
               {/* Option SMS */}
               <button
-                onClick={() => { setSendSuccess(sendModal.clientName); }}
+                onClick={() => {
+                  const msg = `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement. Cordialement.`;
+                  window.location.href = `sms:${sendModal.clientPhone || ""}?body=${encodeURIComponent(msg)}`;
+                  setSendSuccess(sendModal.clientName);
+                }}
                 style={{ width:"100%", padding:"18px 20px", background:"linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)", border:"1.5px solid #86EFAC", borderRadius:14, cursor:"pointer", textAlign:"left", transition:"all 0.2s" }}
                 onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(34,197,94,0.25)";}}
                 onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="none";}}
@@ -6186,8 +6246,8 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                 <div style={{ display:"flex", alignItems:"center", gap:14 }}>
                   <div style={{ width:44, height:44, background:"linear-gradient(135deg, #15803D 0%, #22C55E 100%)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>💬</div>
                   <div>
-                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#14532D", marginBottom:3 }}>Par SMS Professionnel</div>
-                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#16A34A", lineHeight:1.55 }}>Envoi d'une alerte SMS automatique et factuelle contenant le lien de régularisation Stripe direct sur le mobile de {sendModal.clientName}.</div>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#14532D", marginBottom:3 }}>Par SMS</div>
+                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#16A34A", lineHeight:1.55 }}>Ouvre ton application de messages avec un rappel factuel prêt à envoyer à {sendModal.clientName}.</div>
                   </div>
                 </div>
               </button>
