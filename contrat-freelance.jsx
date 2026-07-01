@@ -1003,6 +1003,11 @@ function AppInner() {
   const [signResult, setSignResult]     = useState(null);
   const [signLinkCopied, setSignLinkCopied] = useState("");
   const [negotLinkCopied, setNegotLinkCopied] = useState(false);
+  const [reviseOpen, setReviseOpen] = useState(false);
+  const [reviseMessage, setReviseMessage] = useState("");
+  const [reviseLoading, setReviseLoading] = useState(false);
+  const [reviseError, setReviseError] = useState("");
+  const [reviseSuccess, setReviseSuccess] = useState(false);
 
   // Tactile signature modal state
   const [showTactileSign, setShowTactileSign] = useState(false);
@@ -1492,6 +1497,49 @@ CONSIGNES DE RÉDACTION
     } finally {
       clearTimeout(t1);
       clearTimeout(t2);
+    }
+  };
+
+  const reviseContract = async () => {
+    if (!reviseMessage.trim()) { setReviseError("Colle d'abord le retour du client."); return; }
+    setReviseLoading(true);
+    setReviseError("");
+    setReviseSuccess(false);
+    try {
+      const prompt = `Tu es un avocat d'affaires français. Voici un contrat de prestation de services qui n'est PAS ENCORE SIGNÉ, donc modifiable librement.
+
+CONTRAT ACTUEL :
+${contract}
+
+RETOUR DU CLIENT (ses demandes de modification avant signature) :
+"${reviseMessage.trim()}"
+
+Ta tâche : réécris le contrat COMPLET en intégrant les demandes légitimes du client, tout en gardant le prestataire protégé. Garde exactement la même structure, la même mise en forme et le même style que le contrat original (mêmes articles numérotés, mêmes titres). Modifie uniquement ce qui est concerné par le retour du client. Si une demande est déraisonnable ou dangereuse pour le prestataire, adapte-la de façon équilibrée plutôt que de la refuser.
+
+Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire avant ou après, sans backticks.`;
+
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5",
+          max_tokens: 5000,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      const newContract = (data.content || []).map(i => i.text || "").join("").trim();
+      if (!newContract) throw new Error("Réponse vide");
+      setContract(newContract);
+      setReviseSuccess(true);
+      setReviseMessage("");
+      setTimeout(() => { setReviseSuccess(false); setReviseOpen(false); }, 2600);
+    } catch(e) {
+      setReviseError("Erreur lors de la révision. Vérifie ta connexion et réessaie.");
+    } finally {
+      setReviseLoading(false);
     }
   };
 
@@ -3099,6 +3147,60 @@ CONSIGNES DE RÉDACTION
                 }}>
                   Envoyez ce lien magique à votre client pour qu’il puisse relire le contrat et suggérer des modifications par article avant la signature finale.
                 </div>
+              </div>
+
+              {/* ── Réviser le contrat avant signature ── */}
+              <div style={{ width:"100%", background:"#122238", border:"1.5px solid #2A4167", borderRadius:12, padding:"16px 18px" }}>
+                {!reviseOpen ? (
+                  <button
+                    onClick={() => setReviseOpen(true)}
+                    style={{
+                      width:"100%", padding:"12px 18px", background:"transparent",
+                      color:"#C9A961", border:"1.5px solid #C9A961", borderRadius:8,
+                      cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600,
+                      display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                    }}
+                  >🪄 Le client veut des modifications ? Réviser le contrat</button>
+                ) : (
+                  <div>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#E8EEF5", marginBottom:4 }}>Révision avant signature</div>
+                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#8BA3C0", lineHeight:1.5, marginBottom:12 }}>
+                      Colle ici le retour du client. L'IA modifiera directement le contrat (pas d'avenant, puisqu'il n'est pas encore signé).
+                    </div>
+                    <textarea
+                      value={reviseMessage}
+                      onChange={e => setReviseMessage(e.target.value)}
+                      placeholder="Ex : Le client souhaite passer le délai de paiement à 45 jours et ajouter une révision supplémentaire."
+                      rows={4}
+                      style={{
+                        width:"100%", padding:"12px 14px", borderRadius:8,
+                        border:"1.5px solid #2A4167", background:"#0D1B2E", color:"#E8EEF5",
+                        fontFamily:T.body, fontSize:13, lineHeight:1.6, resize:"vertical",
+                        boxSizing:"border-box", outline:"none", marginBottom:12,
+                      }}
+                    />
+                    {reviseError && <div style={{ fontFamily:T.body, fontSize:12, color:"#FCA5A5", marginBottom:10 }}>{reviseError}</div>}
+                    {reviseSuccess && <div style={{ fontFamily:T.body, fontSize:12, color:"#6EE7B7", marginBottom:10, fontWeight:600 }}>✓ Contrat mis à jour ! Vérifie la nouvelle version ci-dessus.</div>}
+                    <div style={{ display:"flex", gap:10 }}>
+                      <button
+                        onClick={() => { setReviseOpen(false); setReviseMessage(""); setReviseError(""); }}
+                        disabled={reviseLoading}
+                        style={{ flex:"0 0 auto", padding:"11px 16px", background:"transparent", color:"#8BA3C0", border:"1.5px solid #2A4167", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13 }}
+                      >Annuler</button>
+                      <button
+                        onClick={reviseContract}
+                        disabled={reviseLoading}
+                        style={{
+                          flex:1, padding:"11px 18px",
+                          background: reviseLoading ? "#2A4167" : "linear-gradient(135deg, #B8965A 0%, #C9A961 100%)",
+                          color: reviseLoading ? "#8BA3C0" : "#0D1B2E", border:"none", borderRadius:8,
+                          cursor: reviseLoading ? "wait" : "pointer",
+                          fontFamily:T.body, fontSize:13, fontWeight:700,
+                        }}
+                      >{reviseLoading ? "L'IA révise le contrat…" : "✨ Appliquer les modifications"}</button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <button onClick={downloadPDF} disabled={pdfLoading || !jsPDFReady} style={{
@@ -7320,9 +7422,39 @@ Sois précis et réaliste. Si le message ne contient pas de changement clair, re
   };
 
   const handleSend = () => {
+    const clientEmail = entry?.form?.clientEmail?.trim() || "";
+    const subject = `Avenant au contrat — ${entry?.missionTitle || "notre mission"}`;
+    const body = (result?.avenantTexte || "").replace(/\\n/g, "\n");
+    window.location.href = `mailto:${clientEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     setPhase("sent");
     setSentToast(true);
     setTimeout(() => setSentToast(false), 3500);
+  };
+
+  const handleDownloadAvenant = () => {
+    if (!window.jspdf || !result?.avenantTexte) { alert("PDF en cours de chargement, réessaie."); return; }
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+      const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
+      const today = new Date().toLocaleDateString("fr-FR");
+      doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
+      doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
+      doc.text("AVENANT AU CONTRAT", ML, 15);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
+      doc.text(`Établi le ${today} via Freeley`, ML, 23);
+      let y = 42;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(40,40,40);
+      const txt = (result.avenantTexte || "").replace(/\\n/g, "\n");
+      const lines = doc.splitTextToSize(txt, cw);
+      lines.forEach(l => {
+        if (y > 275) { doc.addPage(); y = 20; }
+        doc.text(l, ML, y); y += 6;
+      });
+      doc.save(`Avenant_Freeley_${Date.now()}.pdf`);
+    } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
   };
 
   const handleReset = () => {
@@ -7572,6 +7704,19 @@ Sois précis et réaliste. Si le message ne contient pas de changement clair, re
               >← Recommencer</button>
 
               <button
+                onClick={handleDownloadAvenant}
+                style={{
+                  flex:"0 0 auto", padding:"12px 18px",
+                  background:C.white, border:"1.5px solid #C4B5FD",
+                  borderRadius:10, cursor:"pointer",
+                  fontFamily:T.body, fontSize:13, fontWeight:600, color:"#7C3AED",
+                  transition:"all 0.15s",
+                }}
+                onMouseOver={e=>{ e.currentTarget.style.background="#F5F3FF"; }}
+                onMouseOut={e=>{ e.currentTarget.style.background=C.white; }}
+              >⬇ PDF</button>
+
+              <button
                 onClick={handleSend}
                 style={{
                   flex:1, padding:"13px 18px",
@@ -7586,7 +7731,7 @@ Sois précis et réaliste. Si le message ne contient pas de changement clair, re
                 onMouseOver={e=>{ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 24px #15803D45"; }}
                 onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 5px 18px #15803D35"; }}
               >
-                ✉️ Envoyer l'avenant pour signature en 1 clic
+                ✉️ Envoyer l'avenant au client
               </button>
             </div>
           </div>
@@ -7600,7 +7745,7 @@ Sois précis et réaliste. Si le message ne contient pas de changement clair, re
               Avenant envoyé avec succès !
             </div>
             <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.65, marginBottom:22 }}>
-              {entry?.clientName || "Votre client"} va recevoir l'avenant par email pour signature électronique. Vous serez notifié dès qu'il l'aura signé.
+              Ton application email s'est ouverte avec l'avenant prêt à envoyer à {entry?.clientName || "ton client"}. Il ne te reste qu'à l'envoyer. Tu peux aussi télécharger le PDF pour le joindre.
             </div>
             <button
               onClick={handleReset}
