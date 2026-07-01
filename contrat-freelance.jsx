@@ -977,6 +977,9 @@ function AppInner() {
   const [cameraPermissionCallback, setCameraPermissionCallback]   = useState(null); // fn à appeler si accordé
   const [cameraPermissionDenied, setCameraPermissionDenied]       = useState(false);
 
+  // Magic fill réel : caméra + extraction IA
+  const [magicFillTarget, setMagicFillTarget] = useState(null); // "step0" | "step1" | null
+
   // Appelée par chaque bouton 📷 — gère le routage permission → scan
   const requestCameraPermission = (onGranted) => {
     if (cameraPermission === "granted") {
@@ -1194,24 +1197,80 @@ function AppInner() {
     if (errors[k]) setErrors(e => ({ ...e, [k]: undefined }));
   };
 
-  const magicFillStep0 = () => {
-    setScanStep0Loading(true);
-    setScanStep0Success(false);
-    setTimeout(() => {
-      setScanStep0Loading(false);
-      setScanStep0Success(true);
-      setTimeout(() => setScanStep0Success(false), 3500);
-    }, 1100);
-  };
+  const magicFillStep0 = () => setMagicFillTarget("step0");
+  const magicFillStep1 = () => setMagicFillTarget("step1");
 
-  const magicFillStep1 = () => {
-    setScanStep1Loading(true);
-    setScanStep1Success(false);
-    setTimeout(() => {
-      setScanStep1Loading(false);
-      setScanStep1Success(true);
-      setTimeout(() => setScanStep1Success(false), 3500);
-    }, 1100);
+  // Extraction réelle via Claude Vision après capture photo
+  const handleMagicFillCapture = async ({ base64, type }) => {
+    const target = magicFillTarget;
+    setMagicFillTarget(null);
+    if (target === "step0") { setScanStep0Loading(true); setScanStep0Success(false); }
+    else { setScanStep1Loading(true); setScanStep1Success(false); }
+
+    const champsDemandes = target === "step0"
+      ? `- freelanceName (nom complet du prestataire/freelance)
+- freelanceActivity (son activité/métier)
+- freelanceSiret (numéro SIRET si présent)
+- freelanceAddress (adresse postale du prestataire)
+- freelanceEmail (email du prestataire)
+- clientName (nom du client)
+- clientCompany (société du client si présente)
+- clientAddress (adresse du client)
+- clientEmail (email du client)`
+      : `- missionTitle (titre court de la mission)
+- missionDescription (description détaillée de la prestation)
+- price (montant total HT en chiffres uniquement, sans symbole)
+- startDate (date de début au format AAAA-MM-JJ)
+- endDate (date de fin au format AAAA-MM-JJ)`;
+
+    const prompt = `Tu analyses la photo d'un document professionnel (devis, facture, carte de visite, email, brief...). Extrais les informations pour remplir un formulaire de contrat freelance. Réponds UNIQUEMENT avec un objet JSON valide (aucun texte avant/après, pas de balises markdown) contenant EXACTEMENT ces clés :
+${champsDemandes}
+
+Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'invente jamais d'information.`;
+
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5",
+          max_tokens: 1500,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: type || "image/jpeg", data: base64 } },
+              { type: "text", text: prompt },
+            ],
+          }],
+        }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      let txt = (data.content || []).map(b => b.text || "").join("").trim();
+      txt = txt.replace(/```json|```/g, "").trim();
+      const extracted = JSON.parse(txt);
+      // Remplir uniquement les champs non vides
+      setForm(prev => {
+        const next = { ...prev };
+        Object.keys(extracted).forEach(k => {
+          if (extracted[k] && String(extracted[k]).trim() && k in next) {
+            next[k] = String(extracted[k]).trim();
+          }
+        });
+        return next;
+      });
+      if (target === "step0") {
+        setScanStep0Loading(false); setScanStep0Success(true);
+        setTimeout(() => setScanStep0Success(false), 3500);
+      } else {
+        setScanStep1Loading(false); setScanStep1Success(true);
+        setTimeout(() => setScanStep1Success(false), 3500);
+      }
+    } catch(e) {
+      if (target === "step0") setScanStep0Loading(false);
+      else setScanStep1Loading(false);
+      alert("Impossible de lire le document. Réessaie avec une photo plus nette ou remplis les champs manuellement.");
+    }
   };
 
   const handleNext = () => {
@@ -2324,6 +2383,12 @@ CONSIGNES DE RÉDACTION
       )}
       {showInvoiceModal && (
         <InvoiceModal form={form} profile={profile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} />
+      )}
+      {magicFillTarget && (
+        <CameraCapture
+          onCapture={handleMagicFillCapture}
+          onClose={() => setMagicFillTarget(null)}
+        />
       )}
       {showScannerModal && (
         <ScannerModal
