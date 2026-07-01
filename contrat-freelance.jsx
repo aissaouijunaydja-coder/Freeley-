@@ -8686,8 +8686,115 @@ ${freelanceName}`;
   };
 
   const handleFakeDownload = () => {
-    setDownloaded(true);
-    setTimeout(() => setDownloaded(false), 3000);
+    if (!window.jspdf) { alert("PDF en cours de chargement, réessaie dans un instant."); return; }
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const PW = 210, ML = 20, MR = 20, cw = PW - ML - MR;
+      const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80], GREY = [110, 110, 110];
+      const p = profile || {};
+      let y = 18;
+
+      // En-tête : logo + titre facture
+      if (p.logo) {
+        try { doc.addImage(p.logo, "PNG", ML, y, 26, 26); } catch(e) {}
+      }
+      doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(...NAVY);
+      doc.text("FACTURE", PW - MR, y + 8, { align: "right" });
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
+      doc.text(`N° ${invoiceNum}`, PW - MR, y + 15, { align: "right" });
+      doc.text(`Date : ${today}`, PW - MR, y + 20, { align: "right" });
+      y += 34;
+
+      doc.setDrawColor(...GOLD); doc.setLineWidth(0.6); doc.line(ML, y, PW - MR, y);
+      y += 10;
+
+      // Émetteur (freelance) et Client — deux colonnes
+      const colW = cw / 2 - 4;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+      doc.text("ÉMETTEUR", ML, y);
+      doc.text("CLIENT", ML + colW + 8, y);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...DARK);
+      let yL = y + 6, yR = y + 6;
+      const line = (txt, x, yy) => { if (txt) { const ls = doc.splitTextToSize(String(txt), colW); doc.text(ls, x, yy); return ls.length * 4.6; } return 0; };
+      yL += line(p.companyName || form.freelanceName, ML, yL);
+      yL += line(p.legalStatus, ML, yL);
+      yL += line(p.address || form.freelanceAddress, ML, yL);
+      yL += line(form.freelanceSiret ? "SIRET : " + form.freelanceSiret : (p.siret ? "SIRET : " + p.siret : ""), ML, yL);
+      yL += line(form.freelanceEmail, ML, yL);
+      yL += line(p.tvaNumber ? "TVA : " + p.tvaNumber : "", ML, yL);
+      const cx = ML + colW + 8;
+      yR += line(form.clientName, cx, yR);
+      yR += line(form.clientCompany, cx, yR);
+      yR += line(form.clientAddress, cx, yR);
+      yR += line(form.clientEmail, cx, yR);
+      y = Math.max(yL, yR) + 8;
+
+      // Tableau prestation
+      doc.setFillColor(...NAVY); doc.rect(ML, y, cw, 9, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255,255,255);
+      doc.text("DÉSIGNATION", ML + 3, y + 6);
+      doc.text("MONTANT", PW - MR - 3, y + 6, { align: "right" });
+      y += 9;
+
+      const label = isComptant ? "Paiement comptant" : `Acompte ${depositPct}%`;
+      const desc = `${label} — ${form.missionTitle || "Prestation de services"}`;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...DARK);
+      const descLines = doc.splitTextToSize(desc, cw - 45);
+      doc.text(descLines, ML + 3, y + 6);
+      doc.text(`${fmt(acompte)} €`, PW - MR - 3, y + 6, { align: "right" });
+      const rowH = Math.max(10, descLines.length * 4.6 + 4);
+      doc.setDrawColor(225,225,225); doc.line(ML, y + rowH, PW - MR, y + rowH);
+      y += rowH + 6;
+
+      // Totaux
+      const tvaApplicable = !!(p.tvaNumber && p.tvaNumber.trim());
+      const totalsX = PW - MR - 70;
+      const val = (lbl, amount, bold) => {
+        doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setFontSize(bold ? 11 : 9.5);
+        doc.setTextColor(...(bold ? NAVY : DARK));
+        doc.text(lbl, totalsX, y);
+        doc.text(`${fmt(amount)} €`, PW - MR, y, { align: "right" });
+        y += bold ? 8 : 6;
+      };
+      val("Total HT", acompte, false);
+      if (tvaApplicable) { val("TVA 20%", tva, false); val("Total TTC", ttc, true); }
+      else {
+        doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(...GREY);
+        doc.text("TVA non applicable, art. 293 B du CGI", totalsX, y); y += 6;
+        val("Total à payer", acompte, true);
+      }
+      y += 8;
+
+      // Coordonnées de paiement (IBAN)
+      doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, cw, p.iban ? 30 : 20, 2, 2, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+      doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 7);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
+      if (p.iban) {
+        doc.text(`IBAN : ${p.iban}`, ML + 4, y + 14);
+        if (p.bic) doc.text(`BIC : ${p.bic}`, ML + 4, y + 20);
+        if (p.bankName) doc.text(`Banque : ${p.bankName}`, ML + 4, y + 26);
+      } else {
+        doc.setTextColor(...GREY);
+        doc.text("Ajoute ton IBAN dans ton profil (onglet Facturation) pour l'afficher ici.", ML + 4, y + 14);
+      }
+      y += (p.iban ? 30 : 20) + 10;
+
+      // Pied de page
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
+      const foot = isComptant
+        ? "Règlement à réception de facture. Ce paiement conditionne le démarrage de la mission."
+        : `Acompte de ${depositPct}% conditionnant le démarrage de la mission. Le solde sera facturé à la livraison.`;
+      doc.text(doc.splitTextToSize(foot, cw), ML, y);
+
+      doc.save(`Facture_${invoiceNum}.pdf`);
+      setDownloaded(true);
+      setTimeout(() => setDownloaded(false), 3000);
+    } catch(err) {
+      console.error(err);
+      alert("Erreur lors de la génération de la facture : " + (err.message || "inconnue"));
+    }
   };
 
   return (
