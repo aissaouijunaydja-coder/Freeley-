@@ -1057,10 +1057,19 @@ function AppInner() {
   };
 
   // ── Profil freelance ──
-  const [profile, setProfile] = useState({
-    firstName: "", lastName: "", jobTitle: "", bio: "", tjm: "",
-    siret: "", linkedin: "", portfolio: "", github: "",
-    skills: [], photo: null, verified: false,
+  const [profile, setProfile] = useState(() => {
+    const base = {
+      firstName: "", lastName: "", jobTitle: "", bio: "", tjm: "",
+      siret: "", linkedin: "", portfolio: "", github: "",
+      skills: [], photo: null, verified: false,
+      companyName: "", legalStatus: "", tvaNumber: "", address: "",
+      iban: "", bic: "", bankName: "", logo: null,
+    };
+    try {
+      const saved = localStorage.getItem("freeley_profile");
+      if (saved) return { ...base, ...JSON.parse(saved) };
+    } catch(e) {}
+    return base;
   });
   const updateProfile = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
@@ -11637,12 +11646,21 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
   const fileInputRef = useRef(null);
+  const logoInputRef = useRef(null);
 
   const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => updateProfile("photo", ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => updateProfile("logo", ev.target.result);
     reader.readAsDataURL(file);
   };
 
@@ -11658,6 +11676,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   };
 
   const handleSave = () => {
+    try { localStorage.setItem("freeley_profile", JSON.stringify(profile)); } catch(e) {}
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -11672,6 +11691,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const sections = [
     { id:"identity", label:"Identité", icon:"👤" },
     { id:"metier", label:"Métier", icon:"💼" },
+    { id:"facturation", label:"Facturation", icon:"🧾" },
     { id:"liens", label:"Liens", icon:"🔗" },
   ];
 
@@ -11911,6 +11931,83 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* FACTURATION */}
+      {activeSection === "facturation" && (
+        <div className="fade-up" style={{ display:"flex", flexDirection:"column", gap:16 }}>
+
+          {/* Coordonnées bancaires */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>COORDONNÉES BANCAIRES</div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Ces informations apparaîtront sur tes factures pour que le client sache où te payer.</div>
+            <div style={{ marginBottom:14 }}>
+              <label style={labelStyle}>IBAN</label>
+              <input style={inputStyle} value={profile.iban} placeholder="FR76 3000 1007 9412 3456 7890 185" onChange={e => updateProfile("iban", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div>
+                <label style={labelStyle}>BIC / SWIFT</label>
+                <input style={inputStyle} value={profile.bic} placeholder="BNPAFRPP" onChange={e => updateProfile("bic", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+              </div>
+              <div>
+                <label style={labelStyle}>BANQUE</label>
+                <input style={inputStyle} value={profile.bankName} placeholder="BNP Paribas" onChange={e => updateProfile("bankName", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+              </div>
+            </div>
+          </div>
+
+          {/* Mentions légales */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>MENTIONS LÉGALES</div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Obligatoires sur tes contrats et factures en France.</div>
+            <div style={{ marginBottom:14 }}>
+              <label style={labelStyle}>RAISON SOCIALE / NOM COMMERCIAL</label>
+              <input style={inputStyle} value={profile.companyName} placeholder="Jean Dupont EI" onChange={e => updateProfile("companyName", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <label style={labelStyle}>STATUT JURIDIQUE</label>
+              <select style={{ ...inputStyle, cursor:"pointer" }} value={profile.legalStatus} onChange={e => updateProfile("legalStatus", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border}>
+                <option value="">Sélectionner…</option>
+                <option value="Micro-entreprise">Micro-entreprise (auto-entrepreneur)</option>
+                <option value="Entreprise Individuelle (EI)">Entreprise Individuelle (EI)</option>
+                <option value="EURL">EURL</option>
+                <option value="SASU">SASU</option>
+                <option value="SARL">SARL</option>
+                <option value="SAS">SAS</option>
+                <option value="Profession libérale">Profession libérale</option>
+              </select>
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <label style={labelStyle}>ADRESSE PROFESSIONNELLE</label>
+              <input style={inputStyle} value={profile.address} placeholder="12 rue de la République, 75001 Paris" onChange={e => updateProfile("address", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+            </div>
+            <div>
+              <label style={labelStyle}>N° TVA INTRACOMMUNAUTAIRE</label>
+              <input style={inputStyle} value={profile.tvaNumber} placeholder="FR 12 345678900 (laisser vide si non assujetti)" onChange={e => updateProfile("tvaNumber", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+              <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.4 }}>Micro-entreprise non assujettie ? Laisse vide : la mention « TVA non applicable, art. 293 B du CGI » sera ajoutée automatiquement.</div>
+            </div>
+          </div>
+
+          {/* Logo entreprise */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>LOGO PROFESSIONNEL</div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Ton logo apparaîtra en en-tête de tes contrats et factures.</div>
+            <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+              <div style={{ width:72, height:72, borderRadius:12, border:`1.5px dashed ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", background:C.creamD, flexShrink:0 }}>
+                {profile.logo ? <img src={profile.logo} alt="logo" style={{ width:"100%", height:"100%", objectFit:"contain" }} /> : <span style={{ fontSize:26 }}>🏢</span>}
+              </div>
+              <div style={{ flex:1 }}>
+                <input ref={logoInputRef} type="file" accept="image/*" style={{ display:"none" }} onChange={handleLogoUpload} />
+                <button onClick={() => logoInputRef.current?.click()} style={{ padding:"10px 18px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600 }}>
+                  {profile.logo ? "Changer le logo" : "Ajouter un logo"}
+                </button>
+                {profile.logo && <button onClick={() => updateProfile("logo", null)} style={{ marginLeft:8, padding:"10px 14px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Retirer</button>}
+                <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:8 }}>PNG, JPG — max 2 Mo</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
