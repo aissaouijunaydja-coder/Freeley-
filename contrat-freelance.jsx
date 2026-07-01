@@ -8610,7 +8610,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
 function InvoiceModal({ form, profile, onClose, depositPctProp, onDepositPctChange }) {
   const [downloaded, setDownloaded] = useState(false);
-  const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? 30);
+  const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
   const depositPct = depositPctProp ?? _depositPct;
   const setDepositPct = (v) => {
     setLocalDepositPct(v);
@@ -8894,12 +8894,12 @@ ${freelanceName}`;
           <div style={{ marginBottom:16 }}>
             <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:8 }}>TAUX D'ACOMPTE</div>
             <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-              {[30, 40, 50].map(pct => (
+              {[10, 20, 30, 40, 50].map(pct => (
                 <button
                   key={pct}
                   onClick={() => setDepositPct(pct)}
                   style={{
-                    flex:1, padding:"9px 0",
+                    flex:"1 1 30%", padding:"9px 0",
                     background: depositPct === pct ? C.navy : C.white,
                     border: `1.5px solid ${depositPct === pct ? C.navy : C.border}`,
                     borderRadius:8, cursor:"pointer",
@@ -9297,12 +9297,6 @@ ${freelanceName}`;
               : <><span style={{fontSize:15}}>⬇</span> Télécharger la facture PDF</>
             }
           </button>
-        </div>
-
-        <div style={{ padding:"0 24px 16px", textAlign:"center" }}>
-          <p style={{ fontFamily:T.body, fontSize:10, color:C.textL }}>
-            Génération PDF complète disponible dans la version finale.
-          </p>
         </div>
 
       </div>
