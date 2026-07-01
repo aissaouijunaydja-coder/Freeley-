@@ -2148,7 +2148,7 @@ CONSIGNES DE RÉDACTION
     ? <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuthModal(false)} onSuccess={handleAuthSuccess} />
     : null;
 
-  const liveAlerts = React.useMemo(() => buildAlertsFromHistory(history), [history]);
+  const liveAlerts = buildAlertsFromHistory(history);
 
   const headerProps = {
     isPremium, premiumPlan, left: contractsLeft,
