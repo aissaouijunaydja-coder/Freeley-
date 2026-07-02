@@ -1059,6 +1059,7 @@ function AppInner() {
   const [signResult, setSignResult]     = useState(null);
   const [signLinkCopied, setSignLinkCopied] = useState("");
   const [negotLinkCopied, setNegotLinkCopied] = useState(false);
+  const [alertsTick, setAlertsTick] = useState(0); // force le recalcul des alertes (badge cloche) après lecture
   const [reviseOpen, setReviseOpen] = useState(false);
   const [reviseMessage, setReviseMessage] = useState("");
   const [reviseLoading, setReviseLoading] = useState(false);
@@ -2314,6 +2315,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onProfile: () => authUser ? goToScreen("profile") : setScreen("profile-gate"),
     onOpenRecouvrement: () => setShowRecouvrementModal(true),
     onOpenNda: () => setShowNdaModal(true),
+    onAlertsChanged: () => setAlertsTick(t => t + 1),
     onOpenMission: (alert) => {
       const contractId = alert?.id ? alert.id.replace(/^(recouvre_|sign_)/, "") : null;
       const entry = contractId ? history.find(c => String(c.id) === String(contractId)) : null;
@@ -5732,6 +5734,7 @@ function buildAlertsFromHistory(history) {
             id: "recouvre_" + c.id,
             read: false,
             icon: "⚠️",
+            accentBg: "#FEF5F5",
             accentIcon: "#FEE2E2",
             accentBorder: "#FCA5A5",
             badgeBg: "#DC2626",
@@ -5749,6 +5752,7 @@ function buildAlertsFromHistory(history) {
         id: "sign_" + c.id,
         read: false,
         icon: "✍️",
+        accentBg: "#FFFBEB",
         accentIcon: "#FEF3C7",
         accentBorder: "#FCD34D",
         badgeBg: "#D97706",
@@ -5762,7 +5766,7 @@ function buildAlertsFromHistory(history) {
   return alerts;
 }
 
-function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, initialAlerts = [] }) {
+function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, initialAlerts = [], onAlertsChanged }) {
   const panelRef = useRef(null);
   const [alerts, setAlerts] = useState(initialAlerts);
 
@@ -5781,12 +5785,14 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
   const markAllRead = () => {
     markAllAlertsReadPersist(alerts.map(a => a.id));
     setAlerts(prev => prev.map(a => ({ ...a, read: true })));
+    if (onAlertsChanged) onAlertsChanged();
   };
 
   const handleAlertClick = (alert) => {
     // Marquer immédiatement comme lue AVANT la redirection (persistant)
     markAlertReadPersist(alert.id);
     setAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, read: true } : a));
+    if (onAlertsChanged) onAlertsChanged();
     // Puis déclencher l'action après un léger délai pour que l'animation soit visible
     setTimeout(() => {
       onClose();
@@ -5971,7 +5977,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, alerts = [] }) {
+function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
   const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -6108,6 +6114,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
               onOpenRecouvrement={() => { setAlertOpen(false); if(onOpenRecouvrement) onOpenRecouvrement(); }}
               onOpenNda={() => { setAlertOpen(false); if(onOpenNda) onOpenNda(); }}
               onOpenMission={(alert) => { setAlertOpen(false); if(onOpenMission) onOpenMission(alert); }}
+              onAlertsChanged={onAlertsChanged}
             />
           )}
         </div>
