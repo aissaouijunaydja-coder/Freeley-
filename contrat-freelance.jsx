@@ -2427,6 +2427,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         onBack={() => goToScreen("app")}
         onNewContract={() => { goToScreen("app"); setStep(0); setContract(""); setForm(initialForm); }}
         onOpenHistory={() => goToScreen("history")}
+        onOpenContract={(entry) => { setHistoryView(entry); goToScreen("history"); }}
       />
     </Shell>
   );
@@ -8563,7 +8564,7 @@ function DepositGuard({ entry }) {
 }
 
 /* ══════════════════════════════════════════ HISTORY PAGE ══ */
-function DashboardPage({ history, onBack, onNewContract, onOpenHistory }) {
+function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenContract }) {
   // Statuts de paiement stockés
   let payStatus = {};
   try { payStatus = JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) {}
@@ -8590,6 +8591,50 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory }) {
     const y = d && d[2] ? Number(d[2]) : null;
     return y === currentYear ? sum + (parseFloat(c.price) || 0) : sum;
   }, 0);
+  const panierMoyen = total > 0 ? caTotal / total : 0;
+
+  // Parser une date "JJ/MM/AAAA" (format de c.date) en objet Date
+  const parseFrDate = (s) => {
+    if (!s) return null;
+    const parts = s.split("/");
+    if (parts.length !== 3) return null;
+    return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+  };
+
+  // ── Évolution du CA sur 6 mois ──
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleDateString("fr-FR", { month: "short" }), total: 0 });
+  }
+  history.forEach(c => {
+    const d = parseFrDate(c.date);
+    if (!d) return;
+    const m = months.find(mo => mo.year === d.getFullYear() && mo.month === d.getMonth());
+    if (m) m.total += parseFloat(c.price) || 0;
+  });
+  const maxMonth = Math.max(1, ...months.map(m => m.total));
+
+  // ── Meilleurs clients ──
+  const clientsMap = {};
+  history.forEach(c => {
+    const key = c.clientName || "Client sans nom";
+    if (!clientsMap[key]) clientsMap[key] = { name: key, company: c.clientCompany || "", total: 0, count: 0 };
+    clientsMap[key].total += parseFloat(c.price) || 0;
+    clientsMap[key].count += 1;
+  });
+  const topClients = Object.values(clientsMap).sort((a, b) => b.total - a.total).slice(0, 5);
+  const maxClient = Math.max(1, ...topClients.map(c => c.total));
+
+  // ── Missions en cours (date de fin future) ──
+  const missionsEnCours = history.filter(c => {
+    if (!c.endDate) return false;
+    const end = new Date(c.endDate);
+    return !isNaN(end) && end >= now;
+  }).sort((a, b) => new Date(a.endDate) - new Date(b.endDate)).slice(0, 5);
+
+  // ── Activité récente (5 derniers) ──
+  const recent = [...history].slice(0, 5);
 
   const stat = (label, value, sub, color) => (
     <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06", flex:"1 1 200px", minWidth:0 }}>
@@ -8599,8 +8644,11 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory }) {
     </div>
   );
 
+  const cardStyle = { background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06" };
+  const cardTitle = { fontFamily:T.body, fontSize:11, letterSpacing:"0.1em", color:C.gold, fontWeight:700, marginBottom:16, textTransform:"uppercase" };
+
   return (
-    <div style={{ maxWidth:900, margin:"0 auto", padding:"24px 16px 80px" }}>
+    <div style={{ maxWidth:960, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
       <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Tableau de bord</div>
       <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:28 }}>Vue d'ensemble de ton activité freelance.</div>
@@ -8614,15 +8662,108 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory }) {
         </div>
       ) : (
         <>
+          {/* ── Stats principales ── */}
           <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
             {stat("Chiffre d'affaires total", `${fmt(caTotal)} €`, `${total} contrat${total>1?"s":""}`, C.navy)}
             {stat("Encaissé", `${fmt(caPaid)} €`, `${nbPaid} payé${nbPaid>1?"s":""}`, "#059669")}
             {stat("En attente", `${fmt(caPending)} €`, `${nbPending + nbLate} à encaisser`, "#D97706")}
           </div>
-          <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:28 }}>
+          <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
             {stat("CA " + currentYear, `${fmt(caThisYear)} €`, "année en cours", C.gold)}
             {stat("En retard", `${nbLate}`, nbLate > 0 ? "à relancer" : "tout est à jour", nbLate > 0 ? "#DC2626" : "#059669")}
-            {stat("Taux d'encaissement", caTotal > 0 ? `${Math.round(caPaid/caTotal*100)} %` : "—", "du CA total", C.navy)}
+            {stat("Panier moyen", `${fmt(Math.round(panierMoyen))} €`, "par contrat", C.navy)}
+          </div>
+
+          {/* ── Graphique évolution CA ── */}
+          <div style={{ ...cardStyle, marginBottom:16 }}>
+            <div style={cardTitle}>Évolution du chiffre d'affaires · 6 derniers mois</div>
+            <div style={{ display:"flex", alignItems:"flex-end", gap:10, height:140 }}>
+              {months.map((m, i) => (
+                <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:6, height:"100%", justifyContent:"flex-end" }}>
+                  <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, fontWeight:600 }}>{m.total > 0 ? fmt(m.total) + " €" : ""}</div>
+                  <div style={{
+                    width:"100%", maxWidth:36,
+                    height: `${Math.max(4, (m.total / maxMonth) * 92)}px`,
+                    background: i === months.length - 1 ? `linear-gradient(180deg, ${C.gold} 0%, ${C.navy} 100%)` : C.borderL,
+                    borderRadius:"5px 5px 2px 2px",
+                    transition:"height 0.3s ease",
+                  }} />
+                  <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textM, fontWeight:600, textTransform:"capitalize" }}>{m.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Meilleurs clients + Missions en cours ── */}
+          <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
+            <div style={{ ...cardStyle, flex:"1 1 320px", minWidth:0 }}>
+              <div style={cardTitle}>🏆 Meilleurs clients</div>
+              {topClients.length === 0 ? (
+                <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textL }}>Aucun client pour l'instant.</div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                  {topClients.map((cl, i) => (
+                    <div key={i}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                        <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600 }}>{cl.name}{cl.company ? ` · ${cl.company}` : ""}</span>
+                        <span style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, fontWeight:700 }}>{fmt(cl.total)} €</span>
+                      </div>
+                      <div style={{ height:6, background:C.creamD, borderRadius:4, overflow:"hidden" }}>
+                        <div style={{ height:"100%", width:`${Math.max(4, cl.total/maxClient*100)}%`, background:C.gold, borderRadius:4 }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ ...cardStyle, flex:"1 1 320px", minWidth:0 }}>
+              <div style={cardTitle}>🚀 Missions en cours</div>
+              {missionsEnCours.length === 0 ? (
+                <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textL }}>Aucune mission en cours actuellement.</div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {missionsEnCours.map((c, i) => {
+                    const end = new Date(c.endDate);
+                    const daysLeft = Math.ceil((end - now) / (1000*60*60*24));
+                    return (
+                      <div key={i} onClick={() => onOpenContract && onOpenContract(c)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor: onOpenContract ? "pointer" : "default", padding:"6px 0", borderBottom: i < missionsEnCours.length-1 ? `1px solid ${C.borderL}` : "none" }}>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
+                          <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName}</div>
+                        </div>
+                        <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color: daysLeft <= 3 ? "#DC2626" : "#059669", background: daysLeft <= 3 ? "#FEE2E2" : "#D1FAE5", borderRadius:20, padding:"3px 9px", flexShrink:0, marginLeft:8 }}>
+                          {daysLeft <= 0 ? "Aujourd'hui" : `${daysLeft} j`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Activité récente ── */}
+          <div style={{ ...cardStyle, marginBottom:28 }}>
+            <div style={cardTitle}>🕓 Activité récente</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+              {recent.map((c, i) => (
+                <div key={i} onClick={() => onOpenContract && onOpenContract(c)} style={{
+                  display:"flex", alignItems:"center", justifyContent:"space-between",
+                  padding:"11px 4px", cursor: onOpenContract ? "pointer" : "default",
+                  borderBottom: i < recent.length-1 ? `1px solid ${C.borderL}` : "none",
+                }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, minWidth:0 }}>
+                    <div style={{ width:32, height:32, borderRadius:9, background:C.creamD, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>📄</div>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
+                      <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName} · {c.date}</div>
+                    </div>
+                  </div>
+                  <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:700, flexShrink:0, marginLeft:8 }}>{fmt(parseFloat(c.price)||0)} €</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
