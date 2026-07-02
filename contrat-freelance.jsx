@@ -2293,7 +2293,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     ? <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuthModal(false)} onSuccess={handleAuthSuccess} />
     : null;
 
-  const liveAlerts = buildAlertsFromHistory(history);
+  const liveAlerts = (() => {
+    const readIds = getReadAlertIds();
+    return buildAlertsFromHistory(history).map(a => ({ ...a, read: readIds.includes(a.id) }));
+  })();
 
   const headerProps = {
     isPremium, premiumPlan, left: contractsLeft,
@@ -2311,6 +2314,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onProfile: () => authUser ? goToScreen("profile") : setScreen("profile-gate"),
     onOpenRecouvrement: () => setShowRecouvrementModal(true),
     onOpenNda: () => setShowNdaModal(true),
+    onOpenMission: (alert) => {
+      const contractId = alert?.id ? alert.id.replace(/^(recouvre_|sign_)/, "") : null;
+      const entry = contractId ? history.find(c => String(c.id) === String(contractId)) : null;
+      if (entry) { setHistoryView(entry); goToScreen("history"); }
+      else { goToScreen("history"); }
+    },
   };
 
   /* ── PROFILE GATE (visiteur anonyme) ── */
@@ -5689,6 +5698,24 @@ function Shell({ children }) {
 /* ══════════════════════════════════════════════════════════ ALERT CENTER ══ */
 const ALERTS_DATA = [];
 
+// Persistance du statut "lu" des alertes (localStorage)
+const getReadAlertIds = () => {
+  try { return JSON.parse(localStorage.getItem("freeley_read_alerts") || "[]"); } catch(e) { return []; }
+};
+const markAlertReadPersist = (id) => {
+  try {
+    const ids = getReadAlertIds();
+    if (!ids.includes(id)) { ids.push(id); localStorage.setItem("freeley_read_alerts", JSON.stringify(ids)); }
+  } catch(e) {}
+};
+const markAllAlertsReadPersist = (ids) => {
+  try {
+    const existing = getReadAlertIds();
+    const merged = Array.from(new Set([...existing, ...ids]));
+    localStorage.setItem("freeley_read_alerts", JSON.stringify(merged));
+  } catch(e) {}
+};
+
 // Génère des alertes réelles à partir de l'historique des contrats
 function buildAlertsFromHistory(history) {
   if (!Array.isArray(history) || !history.length) return [];
@@ -5752,18 +5779,19 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
   const unreadCount = alerts.filter(a => !a.read).length;
 
   const markAllRead = () => {
+    markAllAlertsReadPersist(alerts.map(a => a.id));
     setAlerts(prev => prev.map(a => ({ ...a, read: true })));
   };
 
   const handleAlertClick = (alert) => {
-    // Marquer immédiatement comme lue AVANT la redirection
+    // Marquer immédiatement comme lue AVANT la redirection (persistant)
+    markAlertReadPersist(alert.id);
     setAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, read: true } : a));
     // Puis déclencher l'action après un léger délai pour que l'animation soit visible
     setTimeout(() => {
       onClose();
-      if (alert.action === "recouvrement") onOpenRecouvrement();
-      else if (alert.action === "nda") onOpenNda();
-      else if (alert.action === "mission") onOpenMission();
+      if (alert.action === "nda") onOpenNda();
+      else onOpenMission(alert);
     }, 160);
   };
 
@@ -5896,7 +5924,8 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
                   fontFamily:T.body, fontSize:11,
                   color: isUnread ? C.textM : C.textL,
                   lineHeight:1.45,
-                  whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis",
+                  whiteSpace:"normal", wordBreak:"break-word",
+                  display:"-webkit-box", WebkitLineClamp:3, WebkitBoxOrient:"vertical", overflow:"hidden",
                   transition:"color 0.25s ease",
                 }}>{alert.detail}</div>
               </div>
@@ -5942,7 +5971,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, alerts = [] }) {
+function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, alerts = [] }) {
   const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -6078,7 +6107,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
               onClose={() => setAlertOpen(false)}
               onOpenRecouvrement={() => { setAlertOpen(false); if(onOpenRecouvrement) onOpenRecouvrement(); }}
               onOpenNda={() => { setAlertOpen(false); if(onOpenNda) onOpenNda(); }}
-              onOpenMission={() => { setAlertOpen(false); }}
+              onOpenMission={(alert) => { setAlertOpen(false); if(onOpenMission) onOpenMission(alert); }}
             />
           )}
         </div>
