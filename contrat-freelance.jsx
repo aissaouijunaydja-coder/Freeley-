@@ -988,7 +988,7 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results","profile-gate"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","profile-gate","dashboard","cgu"].includes(saved) ? saved : "app";
   });
   const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
@@ -2306,6 +2306,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onPricing: () => goToScreen("pricing"),
     onHome: () => { goToScreen("app"); setStep(0); setContract(""); setForm(initialForm); },
     onHistory: () => goToScreen("history"),
+    onDashboard: () => goToScreen("dashboard"),
+    onCGU: () => goToScreen("cgu"),
     onProfile: () => authUser ? goToScreen("profile") : setScreen("profile-gate"),
     onOpenRecouvrement: () => setShowRecouvrementModal(true),
     onOpenNda: () => setShowNdaModal(true),
@@ -2405,6 +2407,27 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   );
 
   /* ── HISTORY ── */
+  if (screen === "dashboard") return (
+    <Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <DashboardPage
+        history={history}
+        onBack={() => goToScreen("app")}
+        onNewContract={() => { goToScreen("app"); setStep(0); setContract(""); setForm(initialForm); }}
+        onOpenHistory={() => goToScreen("history")}
+      />
+    </Shell>
+  );
+
+  if (screen === "cgu") return (
+    <Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <CGUPage onBack={() => goToScreen("app")} />
+    </Shell>
+  );
+
   if (screen === "history") return (
     <Shell>
       {AuthModalEl}
@@ -5919,7 +5942,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, alerts = [] }) {
+function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, alerts = [] }) {
   const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -5955,6 +5978,21 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, hi
         ) : (
           <span style={{ fontFamily:T.body, fontSize:11, color:C.textL, whiteSpace:"nowrap" }}>{left}/2 gratuits</span>
         ))}
+
+        {/* Tableau de bord */}
+        <button onClick={onDashboard} title="Tableau de bord" style={{
+          display:"flex", alignItems:"center", gap:5,
+          padding: isMobile ? "7px 8px" : "7px 12px",
+          background:"transparent", border:`1.5px solid ${C.border}`,
+          color:C.textM, borderRadius:7, cursor:"pointer", fontSize:12, fontFamily:T.body, fontWeight:500,
+          transition:"all .18s", position:"relative", whiteSpace:"nowrap",
+        }}
+          onMouseOver={e=>{ e.currentTarget.style.borderColor=C.navy; e.currentTarget.style.color=C.navy; }}
+          onMouseOut={e=>{ e.currentTarget.style.borderColor=C.border; e.currentTarget.style.color=C.textM; }}
+        >
+          <span style={{ fontSize:14 }}>📊</span>
+          {!isMobile && "Tableau de bord"}
+        </button>
 
         {/* Mes contrats — icône + badge */}
         <button onClick={onHistory} title="Mes contrats" style={{
@@ -6084,6 +6122,15 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, hi
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
                 >👤 Mon Profil</button>
+                <button onClick={() => { setUserMenu(false); if(onCGU) onCGU(); }} style={{
+                  width:"100%", textAlign:"left",
+                  padding:"10px 16px", background:"none", border:"none",
+                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
+                  display:"flex", alignItems:"center", gap:8,
+                }}
+                  onMouseOver={e=>e.currentTarget.style.background=C.creamD}
+                  onMouseOut={e=>e.currentTarget.style.background="none"}
+                >📄 Conditions d'utilisation</button>
                 <button onClick={() => { setUserMenu(false); onSignOut(); }} style={{
                   display:"block", width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
@@ -8479,6 +8526,122 @@ function DepositGuard({ entry }) {
 }
 
 /* ══════════════════════════════════════════ HISTORY PAGE ══ */
+function DashboardPage({ history, onBack, onNewContract, onOpenHistory }) {
+  // Statuts de paiement stockés
+  let payStatus = {};
+  try { payStatus = JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) {}
+
+  const total = history.length;
+  let caTotal = 0, caPaid = 0, caPending = 0, nbPaid = 0, nbPending = 0, nbLate = 0;
+  const now = new Date();
+
+  history.forEach(c => {
+    const price = parseFloat(c.price) || 0;
+    caTotal += price;
+    const st = payStatus[c.id] || "pending";
+    if (st === "paid") { caPaid += price; nbPaid++; }
+    else {
+      caPending += price;
+      if (st === "late") nbLate++; else nbPending++;
+    }
+  });
+
+  const fmt = (n) => n.toLocaleString("fr-FR");
+  const currentYear = now.getFullYear();
+  const caThisYear = history.reduce((sum, c) => {
+    const d = c.date ? c.date.split("/") : null;
+    const y = d && d[2] ? Number(d[2]) : null;
+    return y === currentYear ? sum + (parseFloat(c.price) || 0) : sum;
+  }, 0);
+
+  const stat = (label, value, sub, color) => (
+    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06", flex:"1 1 200px", minWidth:0 }}>
+      <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.1em", color:C.textL, fontWeight:600, marginBottom:8, textTransform:"uppercase" }}>{label}</div>
+      <div style={{ fontFamily:T.display, fontSize:28, color: color || C.navy, fontWeight:700, lineHeight:1.1 }}>{value}</div>
+      {sub && <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginTop:6 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth:900, margin:"0 auto", padding:"24px 16px 80px" }}>
+      <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
+      <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Tableau de bord</div>
+      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:28 }}>Vue d'ensemble de ton activité freelance.</div>
+
+      {total === 0 ? (
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ fontSize:40, marginBottom:16 }}>📊</div>
+          <div style={{ fontFamily:T.display, fontSize:19, color:C.navy, marginBottom:8 }}>Aucune donnée pour l'instant</div>
+          <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:24, lineHeight:1.6 }}>Crée ton premier contrat pour voir tes statistiques apparaître ici.</div>
+          <button onClick={onNewContract} style={{ padding:"13px 28px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Créer un contrat</button>
+        </div>
+      ) : (
+        <>
+          <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
+            {stat("Chiffre d'affaires total", `${fmt(caTotal)} €`, `${total} contrat${total>1?"s":""}`, C.navy)}
+            {stat("Encaissé", `${fmt(caPaid)} €`, `${nbPaid} payé${nbPaid>1?"s":""}`, "#059669")}
+            {stat("En attente", `${fmt(caPending)} €`, `${nbPending + nbLate} à encaisser`, "#D97706")}
+          </div>
+          <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:28 }}>
+            {stat("CA " + currentYear, `${fmt(caThisYear)} €`, "année en cours", C.gold)}
+            {stat("En retard", `${nbLate}`, nbLate > 0 ? "à relancer" : "tout est à jour", nbLate > 0 ? "#DC2626" : "#059669")}
+            {stat("Taux d'encaissement", caTotal > 0 ? `${Math.round(caPaid/caTotal*100)} %` : "—", "du CA total", C.navy)}
+          </div>
+
+          <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
+            <button onClick={onNewContract} style={{ flex:1, minWidth:160, padding:"14px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>+ Nouveau contrat</button>
+            <button onClick={onOpenHistory} style={{ flex:1, minWidth:160, padding:"14px", background:C.white, color:C.navy, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Voir tous mes contrats</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CGUPage({ onBack }) {
+  const H = ({ children }) => <div style={{ fontFamily:T.display, fontSize:17, color:C.navy, fontWeight:700, marginTop:24, marginBottom:8 }}>{children}</div>;
+  const P = ({ children }) => <p style={{ fontFamily:T.body, fontSize:13.5, color:C.textM, lineHeight:1.7, marginBottom:10 }}>{children}</p>;
+  return (
+    <div style={{ maxWidth:760, margin:"0 auto", padding:"24px 16px 80px" }}>
+      <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
+      <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Conditions Générales d'Utilisation</div>
+      <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom:20 }}>Dernière mise à jour : {new Date().toLocaleDateString("fr-FR")}</div>
+
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"28px 26px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+        <H>1. Objet</H>
+        <P>Freeley est un outil d'aide à la génération de contrats de prestation de services, de factures et de documents associés, destiné aux travailleurs indépendants. Les présentes conditions régissent l'utilisation du service.</P>
+
+        <H>2. Nature du service</H>
+        <P>Freeley fournit des modèles de documents générés automatiquement, y compris à l'aide d'intelligence artificielle. Ces documents sont fournis à titre d'aide et ne constituent pas un conseil juridique. L'utilisateur reste seul responsable de la vérification, de l'adaptation et de la validité juridique des documents avant leur utilisation.</P>
+
+        <H>3. Absence de conseil juridique</H>
+        <P>Freeley n'est pas un cabinet d'avocats et ne fournit pas de prestations de conseil juridique. Pour toute situation complexe ou tout litige, il est recommandé de consulter un professionnel du droit. Freeley ne saurait être tenu responsable des conséquences liées à l'utilisation des documents générés.</P>
+
+        <H>4. Compte utilisateur</H>
+        <P>L'accès à certaines fonctionnalités nécessite la création d'un compte. L'utilisateur s'engage à fournir des informations exactes et à préserver la confidentialité de ses identifiants. Il est responsable de toute activité effectuée depuis son compte.</P>
+
+        <H>5. Données personnelles (RGPD)</H>
+        <P>Les données saisies (informations de contrat, profil, coordonnées) sont conservées de manière sécurisée et ne sont pas revendues à des tiers. L'utilisateur peut demander à tout moment la suppression de son compte et de ses données, conformément au Règlement Général sur la Protection des Données.</P>
+
+        <H>6. Signature électronique</H>
+        <P>Les signatures manuscrites tactiles et électroniques proposées par Freeley ont valeur de preuve conformément au droit français. L'utilisateur reconnaît que la valeur probante d'une signature dépend des conditions de son recueil.</P>
+
+        <H>7. Responsabilité</H>
+        <P>Freeley met tout en œuvre pour assurer la disponibilité et la fiabilité du service, sans garantie d'absence d'interruption ou d'erreur. La responsabilité de Freeley ne saurait être engagée pour les dommages indirects résultant de l'utilisation du service.</P>
+
+        <H>8. Propriété intellectuelle</H>
+        <P>Les documents que tu génères t'appartiennent. L'interface, le code et les modèles de Freeley restent la propriété de leurs auteurs et ne peuvent être reproduits sans autorisation.</P>
+
+        <H>9. Modification des CGU</H>
+        <P>Freeley se réserve le droit de modifier les présentes conditions. Les utilisateurs seront informés des modifications substantielles. L'utilisation continue du service vaut acceptation des conditions mises à jour.</P>
+
+        <H>10. Contact</H>
+        <P>Pour toute question relative aux présentes conditions, tu peux contacter l'équipe Freeley via les coordonnées indiquées sur le site.</P>
+      </div>
+    </div>
+  );
+}
+
 function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
