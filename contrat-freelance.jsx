@@ -9504,7 +9504,7 @@ ${freelanceName}`;
           </div>
         </div>
 
-        {/* ── Zone Paiement Rapide ── */}
+        {/* ── Zone Paiement ── */}
         <div style={{ padding:"0 24px 20px" }}>
           <div style={{
             background:"linear-gradient(135deg, #0F1C2D 0%, #1B2E4B 60%, #2A4167 100%)",
@@ -9524,80 +9524,22 @@ ${freelanceName}`;
             <div style={{
               display:"flex", alignItems:"center", gap:7, marginBottom:14,
             }}>
-              <span style={{ fontSize:13 }}>⚡</span>
+              <span style={{ fontSize:13 }}>🏦</span>
               <span style={{
                 fontFamily:T.body, fontSize:11, fontWeight:700,
                 letterSpacing:"0.12em", color:"#8BA3C0",
-              }}>PAIEMENT SÉCURISÉ VIA FREELEY</span>
+              }}>PAIEMENT PAR VIREMENT</span>
             </div>
 
             {/* Content row */}
             <div style={{ display:"flex", alignItems:"flex-start", gap:14 }}>
-
-              {/* QR Code SVG minimaliste */}
               <div style={{
-                background:C.white, borderRadius:8, padding:8,
+                background:C.white, borderRadius:8, padding:12,
                 flexShrink:0, boxShadow:"0 4px 12px #00000030",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                width:72, height:72, boxSizing:"border-box",
               }}>
-                <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  {/* Finder pattern top-left */}
-                  <rect x="4" y="4" width="22" height="22" rx="3" fill="#1B2E4B"/>
-                  <rect x="8" y="8" width="14" height="14" rx="1.5" fill="white"/>
-                  <rect x="11" y="11" width="8" height="8" rx="1" fill="#1B2E4B"/>
-                  {/* Finder pattern top-right */}
-                  <rect x="46" y="4" width="22" height="22" rx="3" fill="#1B2E4B"/>
-                  <rect x="50" y="8" width="14" height="14" rx="1.5" fill="white"/>
-                  <rect x="53" y="11" width="8" height="8" rx="1" fill="#1B2E4B"/>
-                  {/* Finder pattern bottom-left */}
-                  <rect x="4" y="46" width="22" height="22" rx="3" fill="#1B2E4B"/>
-                  <rect x="8" y="50" width="14" height="14" rx="1.5" fill="white"/>
-                  <rect x="11" y="53" width="8" height="8" rx="1" fill="#1B2E4B"/>
-                  {/* Data dots pattern (random-looking but static) */}
-                  <rect x="30" y="4"  width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="36" y="4"  width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="42" y="4"  width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="30" y="10" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="42" y="10" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="36" y="16" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="30" y="22" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="36" y="22" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="30" y="28" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="36" y="28" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="42" y="28" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="48" y="28" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="54" y="28" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="60" y="28" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="4"  y="30" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="10" y="30" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="22" y="30" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="30" y="34" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="42" y="34" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="54" y="34" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="60" y="34" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="4"  y="36" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="16" y="36" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="22" y="36" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="36" y="36" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="48" y="36" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="4"  y="42" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="10" y="42" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="30" y="42" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="36" y="42" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="54" y="42" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="60" y="42" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="30" y="48" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="42" y="48" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="48" y="48" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="60" y="48" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="36" y="54" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="42" y="54" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="54" y="54" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="30" y="60" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="48" y="60" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  <rect x="60" y="60" width="4" height="4" rx="1" fill="#1B2E4B"/>
-                  {/* Gold accent dot center */}
-                  <rect x="33" y="33" width="6" height="6" rx="2" fill="#B8965A"/>
-                </svg>
+                <span style={{ fontSize:32 }}>🏦</span>
               </div>
 
               {/* Description text */}
@@ -9607,13 +9549,14 @@ ${freelanceName}`;
                   lineHeight:1.65, margin:0,
                 }}>
                   {depositPct === 100
-                    ? <>Votre client flashe ce code pour régler la{" "}<span style={{ color:C.goldL, fontWeight:600 }}>totalité</span>{" "}de la prestation par{" "}<span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span>{" "}ou{" "}<span style={{ color:C.goldL, fontWeight:600 }}>Apple Pay</span>. Les fonds sont directement transférés sur votre compte Stripe.</>
-                    : <>Votre client flashe ce code pour régler l'acompte par{" "}<span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span>{" "}ou{" "}<span style={{ color:C.goldL, fontWeight:600 }}>Apple Pay</span>. Les fonds sont directement transférés sur votre compte Stripe.</>
+                    ? <>Ton client règle la <span style={{ color:C.goldL, fontWeight:600 }}>totalité</span> par virement bancaire, grâce à l'IBAN indiqué ci-dessus.</>
+                    : <>Ton client règle l'acompte par virement bancaire, grâce à l'IBAN indiqué ci-dessus.</>
                   }
+                  {" "}Le paiement par <span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span> arrive bientôt.
                 </p>
                 {/* Badges */}
                 <div style={{ display:"flex", gap:6, marginTop:10, flexWrap:"wrap" }}>
-                  {["🔒 Sécurisé", "💳 Carte & Apple Pay", "⚡ Instantané"].map(badge => (
+                  {["🔒 Sécurisé", "🏦 Virement IBAN", "📄 Facture PDF"].map(badge => (
                     <span key={badge} style={{
                       fontFamily:T.body, fontSize:9.5, fontWeight:600,
                       padding:"3px 8px",
@@ -11840,10 +11783,9 @@ function TactileSignatureModal({ form, onClose, onGoToProfile, depositPct: depos
                   animation:"fadeUp 0.4s ease 0.3s both",
                 }}>
                   Contrat signé par les deux parties.<br/>
-                  Le client est automatiquement redirigé vers l'interface de paiement pour régler{" "}
                   {isComptant
-                    ? <><strong style={{ color:"#4ADE80" }}>la totalité (100%)</strong>{" "}via le QR Code ou Apple Pay.</>
-                    : <>l'acompte de{" "}<strong style={{ color:"#4ADE80" }}>{acomptePct}%</strong>{" "}via le QR Code ou Apple Pay.</>
+                    ? <>Il reste à régler <strong style={{ color:"#4ADE80" }}>la totalité (100%)</strong> par virement bancaire (IBAN sur la facture).</>
+                    : <>Il reste à régler l'acompte de <strong style={{ color:"#4ADE80" }}>{acomptePct}%</strong> par virement bancaire (IBAN sur la facture).</>
                   }
                 </div>
               </div>
