@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "./supabase.js";
 
 /* ── LOGO FREELEY (base64) ── */
@@ -8482,6 +8482,16 @@ function DepositGuard({ entry }) {
 function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [paymentStatuses, setPaymentStatuses] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) { return {}; }
+  });
+  const setPaymentStatus = (contractId, status) => {
+    setPaymentStatuses(prev => {
+      const next = { ...prev, [contractId]: status };
+      try { localStorage.setItem("freeley_payment_status", JSON.stringify(next)); } catch(e) {}
+      return next;
+    });
+  };
   const [deletingId, setDeletingId] = useState(null);
   const [filter, setFilter] = useState("tous"); // "tous" | "pending" | "signed"
 
@@ -8539,6 +8549,37 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
           }}>🗑</button>
         </div>
       </div>
+
+      {/* Suivi du paiement */}
+      {(() => {
+        const st = paymentStatuses[historyView.id] || "pending";
+        const options = [
+          { key:"pending", label:"⏳ En attente", bg:"#FEF3C7", border:"#FCD34D", color:"#92400E" },
+          { key:"paid", label:"✓ Payé", bg:"#D1FAE5", border:"#6EE7B7", color:"#065F46" },
+          { key:"late", label:"⚠️ En retard", bg:"#FEE2E2", border:"#FCA5A5", color:"#991B1B" },
+        ];
+        return (
+          <div className="fade-up" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"18px 20px", marginBottom:24, boxShadow:"0 2px 12px #1B2E4B06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.15em", color:C.gold, fontWeight:700, marginBottom:12 }}>SUIVI DU PAIEMENT</div>
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+              {options.map(o => (
+                <button key={o.key} onClick={() => setPaymentStatus(historyView.id, o.key)}
+                  style={{
+                    padding:"10px 18px", borderRadius:9, cursor:"pointer",
+                    background: st === o.key ? o.bg : C.white,
+                    border: `1.5px solid ${st === o.key ? o.border : C.border}`,
+                    color: st === o.key ? o.color : C.textM,
+                    fontFamily:T.body, fontSize:13, fontWeight: st === o.key ? 700 : 500,
+                    transition:"all .18s",
+                  }}
+                >{o.label}</button>
+              ))}
+            </div>
+            {st === "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#059669", marginTop:10 }}>Paiement encaissé — mission réglée. 🎉</div>}
+            {st === "late" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#DC2626", marginTop:10 }}>Pense à relancer le client (module Recouvrement disponible).</div>}
+          </div>
+        );
+      })()}
 
       {/* Confirm delete modal */}
       {confirmDelete && (
@@ -8891,7 +8932,23 @@ function InvoiceModal({ form, profile, onClose, depositPctProp, onDepositPctChan
   const [copiedEmailRelance, setCopiedEmailRelance] = useState(false);
 
   const today = new Date().toLocaleDateString("fr-FR");
-  const invoiceNum = `FA-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
+  // Numéro affiché en aperçu (prochain numéro disponible, sans le réserver)
+  const invoiceNum = useMemo(() => {
+    const year = new Date().getFullYear();
+    let counters = {};
+    try { counters = JSON.parse(localStorage.getItem("freeley_invoice_counters") || "{}"); } catch(e) {}
+    const next = (counters[year] || 0) + 1;
+    return `FA-${year}-${String(next).padStart(4, "0")}`;
+  }, []);
+
+  // Réserve définitivement le numéro (appelé au téléchargement) — garantit une suite continue sans trou
+  const reserveInvoiceNumber = () => {
+    const year = new Date().getFullYear();
+    let counters = {};
+    try { counters = JSON.parse(localStorage.getItem("freeley_invoice_counters") || "{}"); } catch(e) {}
+    counters[year] = (counters[year] || 0) + 1;
+    try { localStorage.setItem("freeley_invoice_counters", JSON.stringify(counters)); } catch(e) {}
+  };
 
   const priceHT = parseFloat(form.price) || 0;
   const acompte = priceHT * (depositPct / 100);
@@ -9060,6 +9117,7 @@ ${freelanceName}`;
       doc.text(doc.splitTextToSize(foot, cw), ML, y);
 
       doc.save(`Facture_${invoiceNum}.pdf`);
+      reserveInvoiceNumber();
       setDownloaded(true);
       setTimeout(() => setDownloaded(false), 3000);
     } catch(err) {
