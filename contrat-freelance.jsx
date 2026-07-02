@@ -6574,9 +6574,12 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
               <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:12 }}>
                 <div style={{ width:36, height:36, background:"#FEE2E2", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>⏳</div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#991B1B", marginBottom:3 }}>Retard de paiement détecté</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#991B1B" }}>Exemple de relance</div>
+                    <span style={{ fontFamily:T.body, fontSize:9, fontWeight:700, color:"#92400E", background:"#FEF3C7", border:"1px solid #FCD34D", borderRadius:5, padding:"1px 6px", letterSpacing:"0.05em" }}>DÉMO</span>
+                  </div>
                   <div style={{ fontFamily:T.body, fontSize:12, color:"#7F1D1D", lineHeight:1.6 }}>
-                    <strong>{AUTO_CASE.clientName}</strong> ({AUTO_CASE.company}) — Facture finale de <strong>{AUTO_CASE.amount} € HT</strong> en retard de <strong>{AUTO_CASE.daysLate} jours</strong>.
+                    <strong>{AUTO_CASE.clientName}</strong> ({AUTO_CASE.company}) — Facture finale de <strong>{AUTO_CASE.amount} € HT</strong> en retard de <strong>{AUTO_CASE.daysLate} jours</strong>. <em>Teste la génération sur ce cas, ou saisis ton vrai dossier plus bas.</em>
                   </div>
                 </div>
               </div>
@@ -8296,9 +8299,7 @@ function DepositGuard({ entry }) {
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText("https://pay.stripe.com/demo-freeley-acompte-" + depositAmt + "eur").catch(()=>{});
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2800);
+    alert("Le paiement par carte (Stripe) sera bientôt disponible. En attendant, tes coordonnées bancaires (IBAN) figurent sur ta facture pour un règlement par virement.");
   };
 
   const handleRelance = () => {
@@ -8444,7 +8445,7 @@ function DepositGuard({ entry }) {
               {linkCopied ? (
                 <><span>✅</span> Lien copié !</>
               ) : (
-                <><span>🔗</span> Copier le lien de paiement sécurisé (Stripe)</>
+                <><span>🔗</span> Paiement par carte (Stripe) — bientôt disponible</>
               )}
             </button>
 
@@ -8498,7 +8499,7 @@ function DepositGuard({ entry }) {
             onMouseOut={e=>{ e.currentTarget.style.background=simPulse?"#F0FDF4":"#F8F7F5"; e.currentTarget.style.borderColor=simPulse?"#86EFAC":C.borderL; e.currentTarget.style.color=simPulse?"#15803D":C.textL; }}
           >
             <span style={{ fontSize:12, animation: simPulse ? "spin 0.6s linear" : "none" }}>⚙️</span>
-            Simuler le paiement du client
+            Aperçu : marquer comme payé (démo)
           </button>
         </div>
       )}
@@ -11865,23 +11866,13 @@ function TactileSignatureModal({ form, onClose, onGoToProfile, depositPct: depos
                     }
                   </div>
                 </div>
-                <div style={{ textAlign:"center" }}>
-                  {/* Fake QR code visual */}
+                <div style={{ textAlign:"center", maxWidth:120 }}>
                   <div style={{
-                    width:60, height:60, borderRadius:8,
-                    background:C.navy, display:"grid",
-                    gridTemplateColumns:"repeat(6, 1fr)", gap:2, padding:6,
-                    boxSizing:"border-box",
-                  }}>
-                    {Array.from({length:36}).map((_,i) => (
-                      <div key={i} style={{
-                        background: [0,1,6,7,2,8,12,13,14,21,28,29,35,34,27,26,20,19,18,24,30].includes(i)
-                          ? "#FFFFFF" : "transparent",
-                        borderRadius:1,
-                      }} />
-                    ))}
-                  </div>
-                  <div style={{ fontFamily:T.body, fontSize:9, color:"#166534", marginTop:4, fontWeight:600 }}>QR Code</div>
+                    width:48, height:48, borderRadius:10, margin:"0 auto",
+                    background:"#DCFCE7", border:"1.5px solid #86EFAC",
+                    display:"flex", alignItems:"center", justifyContent:"center", fontSize:24,
+                  }}>🏦</div>
+                  <div style={{ fontFamily:T.body, fontSize:9, color:"#166534", marginTop:4, fontWeight:600, lineHeight:1.4 }}>Par virement — IBAN sur la facture</div>
                 </div>
               </div>
 
@@ -12678,7 +12669,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
 
         {/* Bouton Stripe */}
         <button
-          onClick={() => window.open("https://billing.stripe.com/p/login/demo", "_blank")}
+          onClick={() => alert("La gestion d'abonnement et de facturation par carte (Stripe) sera disponible prochainement.")}
           style={{
             width:"100%", padding:"13px 18px",
             background:C.white, border:`1.5px solid ${C.border}`,
