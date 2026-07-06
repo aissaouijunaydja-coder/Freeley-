@@ -8572,9 +8572,9 @@ function DepositGuard({ entry }) {
             {stripeLinkUrl && (
               <div style={{ width:"100%", marginTop:4, display:"flex", alignItems:"center", gap:12, background:"#F8F6F0", border:"1px solid #E8E0D0", borderRadius:10, padding:"10px 14px" }}>
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&margin=4&data=${encodeURIComponent(stripeLinkUrl)}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=2&data=${encodeURIComponent(stripeLinkUrl)}`}
                   alt="QR code de paiement"
-                  width={72} height={72}
+                  width={120} height={120}
                   style={{ borderRadius:6, background:"#fff", flexShrink:0, border:`1px solid ${C.border}` }}
                 />
                 <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, lineHeight:1.5 }}>
@@ -9852,9 +9852,9 @@ ${freelanceName}`;
                 {stripeLinkUrl && (
                   <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:12, background:"#FFFFFF0A", border:"1px solid #FFFFFF18", borderRadius:9, padding:"10px 12px" }}>
                     <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&margin=4&data=${encodeURIComponent(stripeLinkUrl)}`}
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=2&data=${encodeURIComponent(stripeLinkUrl)}`}
                       alt="QR code de paiement"
-                      width={72} height={72}
+                      width={120} height={120}
                       style={{ borderRadius:6, background:"#fff", flexShrink:0 }}
                     />
                     <div style={{ fontFamily:T.body, fontSize:10.5, color:"#8BA3C0", lineHeight:1.5 }}>
