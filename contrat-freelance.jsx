@@ -8349,6 +8349,7 @@ function DepositGuard({ entry }) {
   const [paid, setPaid]           = useState(false);
   const [progress, setProgress]   = useState(0);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [stripeLinkUrl, setStripeLinkUrl] = useState("");
   const [relanceSent, setRelanceSent] = useState(false);
   const [simPulse, setSimPulse]   = useState(false);
 
@@ -8378,6 +8379,7 @@ function DepositGuard({ entry }) {
       });
       const data = await res.json();
       if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      setStripeLinkUrl(data.url);
       navigator.clipboard.writeText(data.url).catch(()=>{});
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2800);
@@ -8565,6 +8567,21 @@ function DepositGuard({ entry }) {
                 <><span>✉️</span> Relancer automatiquement le client</>
               )}
             </button>
+
+            {/* QR code réel — utile en présentiel, le client scanne pour payer */}
+            {stripeLinkUrl && (
+              <div style={{ width:"100%", marginTop:4, display:"flex", alignItems:"center", gap:12, background:"#F8F6F0", border:"1px solid #E8E0D0", borderRadius:10, padding:"10px 14px" }}>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&margin=4&data=${encodeURIComponent(stripeLinkUrl)}`}
+                  alt="QR code de paiement"
+                  width={72} height={72}
+                  style={{ borderRadius:6, background:"#fff", flexShrink:0, border:`1px solid ${C.border}` }}
+                />
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, lineHeight:1.5 }}>
+                  En présentiel ? Ton client peut aussi <strong style={{ color:C.navy }}>scanner ce code</strong> avec l'appareil photo de son téléphone pour payer instantanément.
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -9831,6 +9848,20 @@ ${freelanceName}`;
                 >
                   {stripeLinkGenerating ? "⏳ Génération…" : stripeLinkCopied ? "✅ Lien copié !" : "💳 Copier le lien de paiement par carte"}
                 </button>
+                {/* QR code réel — utile en présentiel, le client scanne pour payer */}
+                {stripeLinkUrl && (
+                  <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:12, background:"#FFFFFF0A", border:"1px solid #FFFFFF18", borderRadius:9, padding:"10px 12px" }}>
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&margin=4&data=${encodeURIComponent(stripeLinkUrl)}`}
+                      alt="QR code de paiement"
+                      width={72} height={72}
+                      style={{ borderRadius:6, background:"#fff", flexShrink:0 }}
+                    />
+                    <div style={{ fontFamily:T.body, fontSize:10.5, color:"#8BA3C0", lineHeight:1.5 }}>
+                      En présentiel ? Ton client peut aussi <strong style={{ color:C.goldL }}>scanner ce code</strong> avec l'appareil photo de son téléphone pour payer instantanément.
+                    </div>
+                  </div>
+                )}
                 {/* Badges */}
                 <div style={{ display:"flex", gap:6, marginTop:10, flexWrap:"wrap" }}>
                   {["🔒 Sécurisé", "🏦 Virement IBAN", "💳 Carte via Stripe"].map(badge => (
