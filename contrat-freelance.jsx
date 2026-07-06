@@ -2644,6 +2644,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       {showTactileSign && (
         <TactileSignatureModal
           form={form}
+          profile={profile}
           depositPct={invoiceDepositPct}
           onClose={() => setShowTactileSign(false)}
           onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
@@ -11606,248 +11607,9 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
 }
 
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
-function DepositInvoiceModal({ form, acomptePct, acompte, isComptant, onClose }) {
-  const [downloaded, setDownloaded] = useState(false);
-
-  const today = new Date();
-  const todayStr = today.toLocaleDateString("fr-FR");
-  const year = today.getFullYear();
-  const invoiceNum = `FAC-${year}-${String(Date.now()).slice(-3).padStart(3,"0")}`;
-
-  const priceHT = parseFloat(form.price) || 0;
-  const depositHT = acompte;
-  const tva = Math.round(depositHT * 0.2 * 100) / 100;
-  const ttc = Math.round((depositHT + tva) * 100) / 100;
-  const fmt = (n) => Number(n).toLocaleString("fr-FR", { minimumFractionDigits:2, maximumFractionDigits:2 });
-
-  const freelanceName = form.freelanceName?.trim() || "—";
-  const freelanceActivity = form.freelanceActivity?.trim() || "—";
-  const freelanceSiret = form.freelanceSiret?.trim() || null;
-  const freelanceAddress = form.freelanceAddress?.trim() || "—";
-  const freelanceEmail = form.freelanceEmail?.trim() || "—";
-  const clientName = form.clientName?.trim() || "—";
-  const clientCompany = form.clientCompany?.trim() || null;
-  const clientAddress = form.clientAddress?.trim() || "—";
-  const clientEmail = form.clientEmail?.trim() || "—";
-  const missionTitle = form.missionTitle?.trim() || "Prestation";
-  const designation = isComptant
-    ? `Paiement comptant (100%) — Mission « ${missionTitle} »`
-    : `Acompte de ${acomptePct}% — Mission « ${missionTitle} »`;
-
-  const dueDate = new Date(today);
-  dueDate.setDate(dueDate.getDate() + 30);
-  const dueDateStr = dueDate.toLocaleDateString("fr-FR");
-
-  const handleDownload = () => {
-    setDownloaded(true);
-    setTimeout(() => setDownloaded(false), 3000);
-  };
-
-  return (
-    <div
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position:"fixed", inset:0, background:"rgba(15,28,45,0.78)",
-        zIndex:20000, display:"flex", alignItems:"flex-start", justifyContent:"center",
-        padding:"20px 16px", overflowY:"auto", backdropFilter:"blur(6px)",
-      }}
-    >
-      <div className="fade-up" style={{
-        background:C.white, borderRadius:20, width:"100%", maxWidth:520,
-        boxShadow:"0 40px 100px #00000045", overflow:"hidden",
-        marginTop:16, marginBottom:16,
-      }}>
-
-        {/* ── Header ── */}
-        <div style={{
-          background:`linear-gradient(135deg, ${C.navy} 0%, #2A4167 100%)`,
-          padding:"20px 24px",
-          display:"flex", alignItems:"center", justifyContent:"space-between",
-        }}>
-          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-            <div style={{
-              width:40, height:40, background:"#FFFBEB", borderRadius:10,
-              display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
-            }}>🧾</div>
-            <div>
-              <div style={{ fontFamily:T.display, fontSize:17, color:C.white, fontWeight:700 }}>
-                {isComptant ? "Facture — Paiement comptant" : "Facture d'acompte"}
-              </div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:1 }}>
-                {invoiceNum} · {todayStr}
-              </div>
-            </div>
-          </div>
-          <button onClick={onClose} style={{
-            width:32, height:32, borderRadius:"50%", background:"#253D5E",
-            border:"none", color:"#8BA3C0", fontSize:16, cursor:"pointer",
-            display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
-          }}>✕</button>
-        </div>
-
-        {/* ── Corps facture ── */}
-        <div style={{ padding:"24px 24px 0" }}>
-
-          {/* Numéro + date */}
-          <div style={{
-            display:"flex", justifyContent:"space-between", alignItems:"flex-start",
-            marginBottom:20, paddingBottom:16, borderBottom:`1px solid ${C.borderL}`,
-          }}>
-            <div>
-              <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.12em", color:C.textL, fontWeight:700, marginBottom:3 }}>NUMÉRO DE FACTURE</div>
-              <div style={{ fontFamily:T.display, fontSize:18, color:C.navy, fontWeight:700 }}>{invoiceNum}</div>
-            </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.12em", color:C.textL, fontWeight:700, marginBottom:3 }}>DATE D'ÉMISSION</div>
-              <div style={{ fontFamily:T.body, fontSize:13, color:C.navy, fontWeight:600 }}>{todayStr}</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, marginTop:2 }}>Échéance : {dueDateStr}</div>
-            </div>
-          </div>
-
-          {/* Parties */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:16, marginBottom:20 }}>
-            {/* Émetteur */}
-            <div style={{
-              background:C.creamD, borderRadius:10, padding:"14px 16px",
-              border:`1px solid ${C.border}`,
-            }}>
-              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.14em", color:C.gold, fontWeight:800, marginBottom:10 }}>ÉMETTEUR (PRESTATAIRE)</div>
-              <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:3 }}>{freelanceName}</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, marginBottom:2 }}>{freelanceActivity}</div>
-              {freelanceSiret && (
-                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginBottom:2 }}>SIRET : {freelanceSiret}</div>
-              )}
-              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, lineHeight:1.5, marginBottom:2 }}>{freelanceAddress}</div>
-              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL }}>{freelanceEmail}</div>
-            </div>
-            {/* Destinataire */}
-            <div style={{
-              background:"#EFF6FF", borderRadius:10, padding:"14px 16px",
-              border:"1px solid #BFDBFE",
-            }}>
-              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.14em", color:"#3B82F6", fontWeight:800, marginBottom:10 }}>DESTINATAIRE (CLIENT)</div>
-              <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:3 }}>{clientName}</div>
-              {clientCompany && (
-                <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, marginBottom:2 }}>{clientCompany}</div>
-              )}
-              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, lineHeight:1.5, marginBottom:2 }}>{clientAddress}</div>
-              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL }}>{clientEmail}</div>
-            </div>
-          </div>
-
-          {/* Ligne de prestation */}
-          <div style={{ marginBottom:16 }}>
-            <div style={{
-              display:"grid", gridTemplateColumns:"1fr auto",
-              background:C.navy, borderRadius:"8px 8px 0 0",
-              padding:"8px 14px",
-            }}>
-              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.12em", color:"#8BA3C0", fontWeight:700 }}>DÉSIGNATION</div>
-              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.12em", color:"#8BA3C0", fontWeight:700, textAlign:"right" }}>MONTANT HT</div>
-            </div>
-            <div style={{
-              display:"grid", gridTemplateColumns:"1fr auto",
-              background:C.cream, border:`1px solid ${C.border}`, borderTop:"none",
-              borderRadius:"0 0 8px 8px", padding:"14px",
-              alignItems:"center",
-            }}>
-              <div>
-                <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:600, color:C.navy, marginBottom:3 }}>{designation}</div>
-                <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL }}>
-                  Montant total de la mission : {fmt(priceHT)} € HT
-                </div>
-              </div>
-              <div style={{ fontFamily:T.display, fontSize:17, color:C.navy, fontWeight:700, textAlign:"right", paddingLeft:16 }}>
-                {fmt(depositHT)} €
-              </div>
-            </div>
-          </div>
-
-          {/* Totaux */}
-          <div style={{ background:C.creamD, borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
-            {[
-              ["Sous-total HT", `${fmt(depositHT)} €`],
-              ["TVA 20 %",      `${fmt(tva)} €`],
-            ].map(([label, val]) => (
-              <div key={label} style={{
-                display:"flex", justifyContent:"space-between",
-                fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:7,
-              }}>
-                <span>{label}</span>
-                <span style={{ fontWeight:500, color:C.navy }}>{val}</span>
-              </div>
-            ))}
-            <div style={{ height:1, background:C.border, margin:"10px 0" }} />
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <span style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy }}>TOTAL TTC</span>
-              <span style={{ fontFamily:T.display, fontSize:24, fontWeight:700, color:C.navy }}>{fmt(ttc)} €</span>
-            </div>
-          </div>
-
-          {/* Conditions de règlement */}
-          <div style={{
-            background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8,
-            padding:"10px 14px", marginBottom:14,
-            fontFamily:T.body, fontSize:11, color:"#15803D", lineHeight:1.6,
-          }}>
-            ✓ {isComptant ? "Paiement intégral à la commande" : "Acompte à régler à la commande"} · Paiement par virement bancaire
-          </div>
-
-          {/* Mentions informatives */}
-          <div style={{
-            borderTop:`1px solid ${C.borderL}`, paddingTop:12, marginBottom:4,
-            fontFamily:T.body, fontSize:9.5, color:C.textL, lineHeight:1.65,
-          }}>
-            <div style={{ marginBottom:4 }}>
-              {freelanceSiret
-                ? `Micro-entreprise immatriculée sous le SIRET ${freelanceSiret}. TVA non applicable, art. 293B du CGI.`
-                : "TVA non applicable, art. 293B du CGI."
-              }
-            </div>
-            <div>Pénalités de retard : taux BCE + 10 points. Indemnité forfaitaire de recouvrement : 40 €. Tout retard de paiement entraîne l'exigibilité immédiate des sommes dues (art. L441-10 C.com.).</div>
-          </div>
-        </div>
-
-        {/* ── Boutons footer ── */}
-        <div style={{ padding:"16px 24px 20px", display:"flex", gap:10 }}>
-          <button onClick={onClose} style={{
-            flex:1, padding:"12px",
-            background:C.creamD, border:`1px solid ${C.border}`,
-            borderRadius:9, cursor:"pointer",
-            fontFamily:T.body, fontSize:13, color:C.textM, fontWeight:500,
-          }}>Fermer</button>
-
-          <button
-            onClick={handleDownload}
-            style={{
-              flex:2, padding:"12px",
-              background: downloaded
-                ? "linear-gradient(135deg,#15803D 0%,#22C55E 100%)"
-                : `linear-gradient(135deg,${C.gold} 0%,${C.goldL} 100%)`,
-              border:"none", borderRadius:9, cursor:"pointer",
-              fontFamily:T.body, fontSize:13, fontWeight:700,
-              color: downloaded ? C.white : C.navyD,
-              display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-              boxShadow: downloaded ? "0 4px 14px #15803D30" : "0 4px 14px #B8965A30",
-              transition:"all 0.25s",
-            }}
-            onMouseOver={e=>{ if(!downloaded){ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 22px #B8965A45"; }}}
-            onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow=downloaded?"0 4px 14px #15803D30":"0 4px 14px #B8965A30"; }}
-          >
-            {downloaded
-              ? <><span>✓</span> Facture téléchargée !</>
-              : <><span>⬇</span> Télécharger le PDF</>
-            }
-          </button>
-        </div>
-
-      </div>
-    </div>
-  );
-}
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, onClose, onGoToProfile, depositPct: depositPctProp }) {
+function TactileSignatureModal({ form, profile, onClose, onGoToProfile, depositPct: depositPctProp }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -12460,11 +12222,10 @@ function TactileSignatureModal({ form, onClose, onGoToProfile, depositPct: depos
 
       {/* ── Facture d'acompte Modal ── */}
       {showDepositInvoiceModal && (
-        <DepositInvoiceModal
+        <InvoiceModal
           form={form}
-          acomptePct={acomptePct}
-          acompte={acompte}
-          isComptant={isComptant}
+          profile={profile}
+          depositPctProp={acomptePct}
           onClose={() => setShowDepositInvoiceModal(false)}
         />
       )}
