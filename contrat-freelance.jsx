@@ -5770,6 +5770,13 @@ function buildAlertsFromHistory(history) {
 function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, initialAlerts = [], onAlertsChanged }) {
   const panelRef = useRef(null);
   const [alerts, setAlerts] = useState(initialAlerts);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 600);
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 600);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   useEffect(() => {
     const handler = (e) => {
@@ -5805,7 +5812,17 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
   return (
     <div
       ref={panelRef}
-      style={{
+      style={isMobile ? {
+        position:"fixed",
+        inset:0,
+        width:"100vw",
+        height:"100dvh",
+        background:C.white,
+        zIndex:300,
+        animation:"alertSlideDown 0.22s cubic-bezier(.22,.68,0,1.2) both",
+        display:"flex",
+        flexDirection:"column",
+      } : {
         position:"fixed",
         top:64, /* juste sous le header */
         left:"50%",
@@ -5824,10 +5841,11 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
     >
       {/* Header du panneau */}
       <div style={{
-        padding:"16px 18px 14px",
+        padding: isMobile ? "18px 18px 14px" : "16px 18px 14px",
         borderBottom:`1px solid ${C.borderL}`,
         display:"flex", alignItems:"center", justifyContent:"space-between",
         background:"linear-gradient(135deg, #F7F5F0 0%, #FFFFFF 100%)",
+        flexShrink:0,
       }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <div style={{
@@ -5850,11 +5868,11 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
         <button
           onClick={onClose}
           style={{
-            width:26, height:26, borderRadius:7,
+            width: isMobile ? 34 : 26, height: isMobile ? 34 : 26, borderRadius:7,
             background:C.creamD, border:`1px solid ${C.border}`,
             cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
-            fontSize:14, color:C.textL, lineHeight:1,
-            transition:"all .15s",
+            fontSize: isMobile ? 17 : 14, color:C.textL, lineHeight:1,
+            transition:"all .15s", flexShrink:0,
           }}
           onMouseOver={e=>{ e.currentTarget.style.background=C.creamDD; }}
           onMouseOut={e=>{ e.currentTarget.style.background=C.creamD; }}
@@ -5862,7 +5880,14 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
       </div>
 
       {/* Liste des alertes */}
-      <div style={{ padding:"8px 0 6px" }}>
+      <div style={{ padding:"8px 0 6px", flex: isMobile ? 1 : "0 1 auto", overflowY: isMobile ? "auto" : "visible" }}>
+        {alerts.length === 0 && (
+          <div style={{ padding:"40px 20px", textAlign:"center" }}>
+            <div style={{ fontSize:32, marginBottom:10 }}>🔔</div>
+            <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, fontWeight:600, marginBottom:4 }}>Aucune alerte</div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>Tu seras notifié ici des paiements à relancer et signatures en attente.</div>
+          </div>
+        )}
         {alerts.map((alert, i) => {
           const isUnread = !alert.read;
           return (
@@ -5951,10 +5976,11 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
 
       {/* Footer */}
       <div style={{
-        padding:"10px 16px",
+        padding: isMobile ? "12px 16px calc(12px + env(safe-area-inset-bottom, 0px))" : "10px 16px",
         borderTop:`1px solid ${C.borderL}`,
         background:C.cream,
         display:"flex", alignItems:"center", justifyContent:"space-between",
+        flexShrink:0,
       }}>
         <span style={{ fontFamily:T.body, fontSize:10, color:C.textL }}>
           Mis à jour à l'instant
