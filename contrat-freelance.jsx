@@ -9572,7 +9572,8 @@ function InvoiceModal({ form, setForm, profile, onClose, depositPctProp, onDepos
 
   const priceHT = parseFloat(form.price) || 0;
   const acompte = priceHT * (depositPct / 100);
-  const tva     = acompte * 0.2;
+  const tvaApplicableUI = !!(profile?.tvaNumber && profile.tvaNumber.trim());
+  const tva     = tvaApplicableUI ? acompte * 0.2 : 0;
   const ttc     = acompte + tva;
 
   const hasSiret   = !!form.freelanceSiret?.trim();
@@ -9997,7 +9998,7 @@ ${freelanceName}`;
           <div style={{ background:C.creamD, borderRadius:9, padding:"14px 16px", marginBottom:18 }}>
             {[
               ["Sous-total HT", hasPrice ? `${fmt(acompte)} €` : "—"],
-              ["TVA 20 %",      hasPrice ? `${fmt(tva)} €`     : "—"],
+              ...(tvaApplicableUI ? [["TVA 20 %", hasPrice ? `${fmt(tva)} €` : "—"]] : []),
             ].map(([label, val]) => (
               <div key={label} style={{ display:"flex", justifyContent:"space-between",
                 fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:7,
@@ -10006,6 +10007,11 @@ ${freelanceName}`;
                 <span style={{ fontWeight:500, color:C.navy }}>{val}</span>
               </div>
             ))}
+            {!tvaApplicableUI && (
+              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, fontStyle:"italic", marginBottom:7 }}>
+                TVA non applicable, art. 293 B du CGI
+              </div>
+            )}
             <div style={{ height:1, background:C.border, margin:"10px 0" }} />
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy }}>TOTAL TTC</span>
