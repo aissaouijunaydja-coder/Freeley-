@@ -2616,7 +2616,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         />
       )}
       {showInvoiceModal && (
-        <InvoiceModal form={form} profile={profile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} />
+        <InvoiceModal form={form} setForm={setForm} profile={profile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} />
       )}
       {magicFillTarget && (
         <CameraCapture
@@ -2644,6 +2644,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       {showTactileSign && (
         <TactileSignatureModal
           form={form}
+          setForm={setForm}
           profile={profile}
           depositPct={invoiceDepositPct}
           onClose={() => setShowTactileSign(false)}
@@ -9506,7 +9507,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 }
 
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
-function InvoiceModal({ form, profile, onClose, depositPctProp, onDepositPctChange }) {
+function InvoiceModal({ form, setForm, profile, onClose, depositPctProp, onDepositPctChange }) {
   const [downloaded, setDownloaded] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
@@ -9850,7 +9851,7 @@ ${freelanceName}`;
               borderRadius:8, padding:"10px 14px", marginBottom:16,
               fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6,
             }}>
-              💡 <strong>Remplis les étapes 1 et 3</strong> pour voir ta facture complète (client + montant).
+              💡 <strong>Complète les champs client et montant ci-dessous</strong> pour voir ta facture complète.
             </div>
           )}
 
@@ -9877,9 +9878,14 @@ ${freelanceName}`;
                   <img src={profile.photo} alt="profil" style={{ width:36, height:36, borderRadius:"50%", objectFit:"cover", border:`2px solid ${C.border}` }} />
                 </div>
               )}
-              <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:2 }}>
-                {form.freelanceName || <span style={{color:C.textL, fontStyle:"italic"}}>Non renseigné</span>}
-              </div>
+              <input
+                value={form.freelanceName}
+                onChange={e => setForm(f => ({ ...f, freelanceName: e.target.value }))}
+                placeholder="Ton nom / raison sociale"
+                style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:2, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                onFocus={e=>e.target.style.borderBottomColor=C.navy}
+                onBlur={e=>e.target.style.borderBottomColor=C.border}
+              />
               {form.freelanceActivity && <div style={{ fontFamily:T.body, fontSize:11, color:C.textM }}>{form.freelanceActivity}</div>}
               {hasSiret && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>SIRET : {form.freelanceSiret}</div>}
               {form.freelanceEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:2 }}>{form.freelanceEmail}</div>}
@@ -9887,9 +9893,14 @@ ${freelanceName}`;
             </div>
             <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>CLIENT</div>
-              <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:2 }}>
-                {form.clientName || <span style={{color:C.textL, fontStyle:"italic"}}>Non renseigné</span>}
-              </div>
+              <input
+                value={form.clientName}
+                onChange={e => setForm(f => ({ ...f, clientName: e.target.value }))}
+                placeholder="Nom du client"
+                style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:2, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                onFocus={e=>e.target.style.borderBottomColor=C.navy}
+                onBlur={e=>e.target.style.borderBottomColor=C.border}
+              />
               {form.clientCompany && <div style={{ fontFamily:T.body, fontSize:11, color:C.textM }}>{form.clientCompany}</div>}
               {form.clientEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>{form.clientEmail}</div>}
             </div>
@@ -9954,17 +9965,25 @@ ${freelanceName}`;
                 padding:"12px 14px", background:C.white, alignItems:"center", gap:8,
               }}>
                 <div>
-                  <div style={{ fontFamily:T.body, fontSize:13, color:C.navy, fontWeight:500 }}>
-                    {depositPct === 100
-                      ? (hasMission ? `Totalité de la prestation (Comptant) — ${form.missionTitle}` : "Totalité de la prestation (Comptant)")
-                      : (hasMission ? `Acompte — ${form.missionTitle}` : "Acompte sur prestation")
-                    }
-                  </div>
-                  <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, marginTop:2 }}>
-                    {depositPct === 100
-                      ? (hasPrice ? `Montant total : ${fmt(priceHT)} € HT` : "montant non renseigné")
-                      : `${depositPct}% du total (${hasPrice ? `${fmt(priceHT)} € HT` : "montant non renseigné"})`
-                    }
+                  <input
+                    value={form.missionTitle}
+                    onChange={e => setForm(f => ({ ...f, missionTitle: e.target.value }))}
+                    placeholder="Titre de la mission"
+                    style={{ fontFamily:T.body, fontSize:13, color:C.navy, fontWeight:500, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                    onFocus={e=>e.target.style.borderBottomColor=C.navy}
+                    onBlur={e=>e.target.style.borderBottomColor=C.border}
+                  />
+                  <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, marginTop:6, display:"flex", alignItems:"center", gap:6 }}>
+                    {depositPct === 100 ? "Montant total :" : `${depositPct}% du total —`}
+                    <input
+                      value={form.price}
+                      onChange={e => setForm(f => ({ ...f, price: e.target.value.replace(/[^0-9.]/g, "") }))}
+                      placeholder="Montant HT"
+                      inputMode="decimal"
+                      style={{ fontFamily:T.body, fontSize:11, color:C.textL, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:80, padding:"1px 0", outline:"none" }}
+                      onFocus={e=>e.target.style.borderBottomColor=C.navy}
+                      onBlur={e=>e.target.style.borderBottomColor=C.border}
+                    /> € HT
                   </div>
                 </div>
                 <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, textAlign:"right", whiteSpace:"nowrap" }}>
@@ -11609,7 +11628,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, profile, onClose, onGoToProfile, depositPct: depositPctProp }) {
+function TactileSignatureModal({ form, setForm, profile, onClose, onGoToProfile, depositPct: depositPctProp }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -12224,6 +12243,7 @@ function TactileSignatureModal({ form, profile, onClose, onGoToProfile, depositP
       {showDepositInvoiceModal && (
         <InvoiceModal
           form={form}
+          setForm={setForm}
           profile={profile}
           depositPctProp={acomptePct}
           onClose={() => setShowDepositInvoiceModal(false)}
