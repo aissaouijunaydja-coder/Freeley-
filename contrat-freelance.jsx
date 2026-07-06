@@ -3101,11 +3101,31 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               background:"none", border:"none", cursor:"pointer",
               fontFamily:T.body, fontSize:12.5, color:C.textL,
               display:"flex", alignItems:"center", gap:6,
-              textDecoration: draftSavedToast ? "none" : "underline", textDecorationStyle:"dotted",
+              textDecoration:"underline", textDecorationStyle:"dotted",
             }}>
-              {draftSavedToast ? <><span>✅</span> Brouillon enregistré !</> : <><span>💾</span> Enregistrer comme brouillon</>}
+              <span>💾</span> Enregistrer comme brouillon
             </button>
           </div>
+
+          {/* Toast confirmation brouillon enregistré */}
+          {draftSavedToast && (
+            <div style={{
+              position:"fixed", top:80, left:"50%", transform:"translateX(-50%)",
+              zIndex:9999, pointerEvents:"none",
+              animation:"toastSlideIn 0.35s cubic-bezier(.22,.68,0,1.2) both",
+            }}>
+              <div style={{
+                display:"flex", alignItems:"center", gap:10,
+                background:"linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
+                color:"#fff", borderRadius:50, padding:"13px 22px",
+                fontFamily:T.body, fontSize:12.5, fontWeight:600,
+                boxShadow:"0 8px 32px #15803D40", whiteSpace:"nowrap",
+              }}>
+                <span style={{ fontSize:15 }}>✅</span>
+                Brouillon enregistré — retrouve-le dans ton profil → « Mes brouillons »
+              </div>
+            </div>
+          )}
 
           {/* Nav */}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:16, gap:12 }}>
