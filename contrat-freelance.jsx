@@ -10132,6 +10132,42 @@ ${freelanceName}`;
           </div>
         </div>
 
+        {/* ══ ENVOYER LA FACTURE (premier envoi) ══ */}
+        <div style={{ padding:"0 24px 20px" }}>
+          <div style={{
+            display:"flex", alignItems:"center", gap:8, marginBottom:14,
+          }}>
+            <div style={{ flex:1, height:1, background:C.borderL }} />
+            <span style={{
+              fontFamily:T.body, fontSize:10, fontWeight:700, letterSpacing:"0.12em",
+              color:C.textL, whiteSpace:"nowrap",
+            }}>📤 ENVOYER LA FACTURE AU CLIENT</span>
+            <div style={{ flex:1, height:1, background:C.borderL }} />
+          </div>
+
+          <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:14 }}>
+            ⚠️ Pense d'abord à <strong>télécharger le PDF</strong> ci-dessous, pour pouvoir le joindre à ton message.
+          </div>
+
+          {(() => {
+            const sendSubject = `${isComptant ? "Facture" : "Facture d'acompte"} n° ${invoiceNum} — ${form.missionTitle || "notre mission"}`;
+            const sendBody = `Bonjour ${clientFullName},\n\nVoici ta ${isComptant ? "facture" : "facture d'acompte"} n° ${invoiceNum} concernant notre mission « ${form.missionTitle || "prestation"} ».\n\nTu trouveras le PDF en pièce jointe.${stripeLinkUrl ? `\n\nTu peux régler directement par carte via ce lien sécurisé :\n${stripeLinkUrl}` : ""}\n\nMerci d'avance,\n${freelanceName}`;
+            const sendSms = `Bonjour ${clientFullName}, voici ta facture ${isComptant ? "" : "d'acompte "}n° ${invoiceNum}.${stripeLinkUrl ? ` Tu peux régler ici : ${stripeLinkUrl}` : " Le détail arrive par email."} Merci !`;
+            return (
+              <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                <a
+                  href={`mailto:${form.clientEmail?.trim() || ""}?subject=${encodeURIComponent(sendSubject)}&body=${encodeURIComponent(sendBody)}`}
+                  style={{ flex:1, minWidth:160, padding:"12px 16px", background:"#EFF6FF", border:"1.5px solid #BFDBFE", borderRadius:10, textDecoration:"none", textAlign:"center", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#1E40AF", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
+                >✉️ Envoyer par email</a>
+                <a
+                  href={`sms:?body=${encodeURIComponent(sendSms)}`}
+                  style={{ flex:1, minWidth:160, padding:"12px 16px", background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:10, textDecoration:"none", textAlign:"center", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
+                >📱 Envoyer par SMS</a>
+              </div>
+            );
+          })()}
+        </div>
+
         {/* ══ RELANCE ACOMPTE ══ */}
         <div style={{ padding:"0 24px 20px" }}>
           {/* Titre section */}
