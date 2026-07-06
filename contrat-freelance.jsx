@@ -961,7 +961,12 @@ class ErrorBoundary extends React.Component {
 function AppInner() {
   const [step, setStep]           = useState(() => {
     const s = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
-    return s ? Number(s) : 0;
+    if (s) return Number(s);
+    try {
+      const draft = JSON.parse(localStorage.getItem("freeley_current_draft") || "null");
+      if (draft && typeof draft.step === "number") return draft.step;
+    } catch(e) {}
+    return 0;
   });
   const [form, setForm]           = useState(() => {
     // Effacer le cookie si on arrive sans OAuth (pas de hash #access_token)
@@ -969,9 +974,23 @@ function AppInner() {
       document.cookie = "freeley_pending_form=;path=/;max-age=0";
       document.cookie = "freeley_pending_step=;path=/;max-age=0";
     }
+    // Restaurer le brouillon en cours (survit au rafraîchissement de page)
+    try {
+      const draft = JSON.parse(localStorage.getItem("freeley_current_draft") || "null");
+      if (draft && draft.form) return { ...initialForm, ...draft.form };
+    } catch(e) {}
     return initialForm;
   });
   const [errors, setErrors]       = useState({});
+
+  // Auto-sauvegarde du brouillon en cours (survit au rafraîchissement de page)
+  useEffect(() => {
+    // On ne sauvegarde que s'il y a un minimum de contenu saisi, pour ne pas polluer avec un formulaire vide
+    const hasContent = form.freelanceName || form.clientName || form.missionTitle || form.missionDescription;
+    if (hasContent && !contract) {
+      try { localStorage.setItem("freeley_current_draft", JSON.stringify({ form, step, savedAt: Date.now() })); } catch(e) {}
+    }
+  }, [form, step]);
   const [contract, setContract]   = useState("");
   const [loading, setLoading]     = useState(false);
   const [loadingPhase, setLoadingPhase] = useState(0);
@@ -988,7 +1007,7 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results","profile-gate","dashboard","cgu"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","profile-gate","dashboard","cgu","drafts"].includes(saved) ? saved : "app";
   });
   const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
@@ -1391,6 +1410,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     setAnimDone(false);
     animDoneRef.current = false;
     apiReadyRef.current = null;
+    try { localStorage.removeItem("freeley_current_draft"); } catch(e) {}
   };
 
   const generateContract = async () => {
@@ -2299,6 +2319,24 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     return buildAlertsFromHistory(history).map(a => ({ ...a, read: readIds.includes(a.id) }));
   })();
 
+  const startFreshContract = () => {
+    try { localStorage.removeItem("freeley_current_draft"); } catch(e) {}
+    setStep(0); setContract(""); setForm(initialForm); setErrors({}); setApiError("");
+  };
+
+  const [draftSavedToast, setDraftSavedToast] = useState(false);
+  const handleSaveDraft = () => {
+    saveDraftToList(form, step);
+    setDraftSavedToast(true);
+    setTimeout(() => setDraftSavedToast(false), 2600);
+  };
+
+  const handleResumeDraft = (draft) => {
+    setForm({ ...initialForm, ...draft.form });
+    setStep(draft.step || 0);
+    goToScreen("app");
+  };
+
   const headerProps = {
     isPremium, premiumPlan, left: contractsLeft,
     historyCount: history.length,
@@ -2308,9 +2346,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onAuthClick: () => { setAuthMode("login"); setShowAuthModal(true); },
     onSignOut: handleSignOut,
     onPricing: () => goToScreen("pricing"),
-    onHome: () => { goToScreen("app"); setStep(0); setContract(""); setForm(initialForm); },
+    onHome: () => { goToScreen("app"); startFreshContract(); },
     onHistory: () => goToScreen("history"),
     onDashboard: () => goToScreen("dashboard"),
+    onDrafts: () => goToScreen("drafts"),
     onCGU: () => goToScreen("cgu"),
     onProfile: () => authUser ? goToScreen("profile") : setScreen("profile-gate"),
     onOpenRecouvrement: () => setShowRecouvrementModal(true),
@@ -2425,7 +2464,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       <DashboardPage
         history={history}
         onBack={() => goToScreen("app")}
-        onNewContract={() => { goToScreen("app"); setStep(0); setContract(""); setForm(initialForm); }}
+        onNewContract={() => { goToScreen("app"); startFreshContract(); }}
         onOpenHistory={() => goToScreen("history")}
         onOpenContract={(entry) => { setHistoryView(entry); goToScreen("history"); }}
       />
@@ -2437,6 +2476,18 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       {AuthModalEl}
       <Header {...headerProps} />
       <CGUPage onBack={() => goToScreen("app")} />
+    </Shell>
+  );
+
+  if (screen === "drafts") return (
+    <Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <DraftsPage
+        onBack={() => goToScreen("app")}
+        onResume={handleResumeDraft}
+        onNewContract={() => { goToScreen("app"); startFreshContract(); }}
+      />
     </Shell>
   );
 
@@ -3044,8 +3095,20 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             </div>
           )}
 
+          {/* Enregistrer comme brouillon */}
+          <div style={{ display:"flex", justifyContent:"center", marginTop:20 }}>
+            <button onClick={handleSaveDraft} style={{
+              background:"none", border:"none", cursor:"pointer",
+              fontFamily:T.body, fontSize:12.5, color:C.textL,
+              display:"flex", alignItems:"center", gap:6,
+              textDecoration: draftSavedToast ? "none" : "underline", textDecorationStyle:"dotted",
+            }}>
+              {draftSavedToast ? <><span>✅</span> Brouillon enregistré !</> : <><span>💾</span> Enregistrer comme brouillon</>}
+            </button>
+          </div>
+
           {/* Nav */}
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:44, gap:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:16, gap:12 }}>
             {step > 0 ? (
               <button className="btn-secondary" onClick={() => { setStep(s=>s-1); setErrors({}); }} style={{
                 padding:"12px 24px", background:"transparent", border:`1.5px solid ${C.border}`,
@@ -3379,7 +3442,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, transition:"all .2s",
                 flex:1, minWidth:0,
               }}>{copied ? "✓ Copié" : "Copier"}</button>
-              <button onClick={() => { setStep(0); setContract(""); setForm(initialForm); setErrors({}); setApiError(""); setSignResult(null); }} style={{
+              <button onClick={() => { startFreshContract(); setSignResult(null); }} style={{
                 padding:"10px 14px", background:"transparent", color:"#5A7A9A",
                 border:"1px solid #354F6E", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body,
                 flexShrink:0,
@@ -5701,6 +5764,24 @@ function Shell({ children }) {
 /* ══════════════════════════════════════════════════════════ ALERT CENTER ══ */
 const ALERTS_DATA = [];
 
+// ─── Système de brouillons (contrats non terminés) ───
+const getDraftsList = () => {
+  try { return JSON.parse(localStorage.getItem("freeley_drafts_list") || "[]"); } catch(e) { return []; }
+};
+const saveDraftToList = (form, step) => {
+  const drafts = getDraftsList();
+  const label = form.missionTitle || form.clientName || "Contrat sans titre";
+  const draft = { id: "draft_" + Date.now(), label, clientName: form.clientName || "", form, step, savedAt: Date.now() };
+  drafts.unshift(draft);
+  try { localStorage.setItem("freeley_drafts_list", JSON.stringify(drafts.slice(0, 30))); } catch(e) {}
+  return draft;
+};
+const deleteDraftFromList = (id) => {
+  const drafts = getDraftsList().filter(d => d.id !== id);
+  try { localStorage.setItem("freeley_drafts_list", JSON.stringify(drafts)); } catch(e) {}
+  return drafts;
+};
+
 // Persistance du statut "lu" des alertes (localStorage)
 const getReadAlertIds = () => {
   try { return JSON.parse(localStorage.getItem("freeley_read_alerts") || "[]"); } catch(e) { return []; }
@@ -6004,7 +6085,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
+function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onDrafts, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
   const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -6185,6 +6266,15 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
                 >👤 Mon Profil</button>
+                <button onClick={() => { setUserMenu(false); if(onDrafts) onDrafts(); }} style={{
+                  width:"100%", textAlign:"left",
+                  padding:"10px 16px", background:"none", border:"none",
+                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
+                  display:"flex", alignItems:"center", gap:8,
+                }}
+                  onMouseOver={e=>e.currentTarget.style.background=C.creamD}
+                  onMouseOut={e=>e.currentTarget.style.background="none"}
+                >📝 Mes brouillons</button>
                 <button onClick={() => { setUserMenu(false); if(onCGU) onCGU(); }} style={{
                   width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
@@ -8841,6 +8931,70 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
             <button onClick={onOpenHistory} style={{ flex:1, minWidth:160, padding:"14px", background:C.white, color:C.navy, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Voir tous mes contrats</button>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+function DraftsPage({ onBack, onResume, onNewContract }) {
+  const [drafts, setDrafts] = useState(() => getDraftsList());
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const handleDelete = (id) => {
+    setDrafts(deleteDraftFromList(id));
+    setConfirmDelete(null);
+  };
+
+  const timeAgo = (ts) => {
+    const diffH = Math.floor((Date.now() - ts) / (1000 * 60 * 60));
+    if (diffH < 1) return "à l'instant";
+    if (diffH < 24) return `il y a ${diffH} h`;
+    const diffD = Math.floor(diffH / 24);
+    return `il y a ${diffD} j`;
+  };
+
+  return (
+    <div style={{ maxWidth:760, margin:"0 auto", padding:"24px 16px 80px" }}>
+      <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
+      <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Mes brouillons</div>
+      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:28 }}>Reprends un contrat en pause — utile quand le client n'a pas encore décidé.</div>
+
+      {drafts.length === 0 ? (
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ fontSize:40, marginBottom:16 }}>📝</div>
+          <div style={{ fontFamily:T.display, fontSize:19, color:C.navy, marginBottom:8 }}>Aucun brouillon</div>
+          <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:24, lineHeight:1.6 }}>Pendant la création d'un contrat, clique sur « Enregistrer comme brouillon » pour le retrouver ici plus tard.</div>
+          <button onClick={onNewContract} style={{ padding:"13px 28px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Créer un contrat</button>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {drafts.map(d => (
+            <div key={d.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"16px 18px", boxShadow:"0 2px 12px #1B2E4B06", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:12, minWidth:0, flex:1 }}>
+                <div style={{ width:38, height:38, borderRadius:10, background:C.creamD, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>📝</div>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontFamily:T.body, fontSize:13.5, color:C.navy, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{d.label}</div>
+                  <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>
+                    {d.clientName ? `${d.clientName} · ` : ""}Étape {Number(d.step) + 1}/3 · {timeAgo(d.savedAt)}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+                {confirmDelete === d.id ? (
+                  <>
+                    <button onClick={() => handleDelete(d.id)} style={{ padding:"8px 14px", background:"#DC2626", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>Confirmer</button>
+                    <button onClick={() => setConfirmDelete(null)} style={{ padding:"8px 14px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:C.textM }}>Annuler</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => onResume(d)} style={{ padding:"9px 16px", background:C.navy, color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700 }}>Reprendre</button>
+                    <button onClick={() => setConfirmDelete(d.id)} style={{ padding:"9px 12px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:14, color:C.textL }}>🗑</button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
