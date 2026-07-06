@@ -1080,6 +1080,7 @@ function AppInner() {
   const [negotLinkCopied, setNegotLinkCopied] = useState(false);
   const [alertsTick, setAlertsTick] = useState(0); // force le recalcul des alertes (badge cloche) après lecture
   const [draftSavedToast, setDraftSavedToast] = useState(false);
+  const [profileInitialTab, setProfileInitialTab] = useState(null);
   const [reviseOpen, setReviseOpen] = useState(false);
   const [reviseMessage, setReviseMessage] = useState("");
   const [reviseLoading, setReviseLoading] = useState(false);
@@ -2320,6 +2321,11 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     return buildAlertsFromHistory(history).map(a => ({ ...a, read: readIds.includes(a.id) }));
   })();
 
+  const goToProfileFacturation = () => {
+    setProfileInitialTab("facturation");
+    goToScreen("profile");
+  };
+
   const startFreshContract = () => {
     try { localStorage.removeItem("freeley_current_draft"); } catch(e) {}
     setStep(0); setContract(""); setForm(initialForm); setErrors({}); setApiError("");
@@ -2396,6 +2402,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         isPremium={isPremium}
         onSignOut={handleSignOut}
         onGoHome={() => goToScreen("app")}
+        initialSection={profileInitialTab}
       />
     </Shell>
   );
@@ -2616,7 +2623,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         />
       )}
       {showInvoiceModal && (
-        <InvoiceModal form={form} setForm={setForm} profile={profile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} />
+        <InvoiceModal form={form} setForm={setForm} profile={profile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} />
       )}
       {magicFillTarget && (
         <CameraCapture
@@ -2649,6 +2656,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           depositPct={invoiceDepositPct}
           onClose={() => setShowTactileSign(false)}
           onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
+          onGoToProfileTva={goToProfileFacturation}
         />
       )}
       {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} />}
@@ -9507,7 +9515,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 }
 
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
-function InvoiceModal({ form, setForm, profile, onClose, depositPctProp, onDepositPctChange }) {
+function InvoiceModal({ form, setForm, profile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva }) {
   const [downloaded, setDownloaded] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
@@ -10010,6 +10018,14 @@ ${freelanceName}`;
             {!tvaApplicableUI && (
               <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, fontStyle:"italic", marginBottom:7 }}>
                 TVA non applicable, art. 293 B du CGI
+                {onGoToProfileTva && (
+                  <>
+                    {" — "}
+                    <span onClick={onGoToProfileTva} style={{ color:C.navy, fontWeight:600, cursor:"pointer", textDecoration:"underline", fontStyle:"normal" }}>
+                      redevable de la TVA ? configure-le ici →
+                    </span>
+                  </>
+                )}
               </div>
             )}
             <div style={{ height:1, background:C.border, margin:"10px 0" }} />
@@ -11670,7 +11686,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, setForm, profile, onClose, onGoToProfile, depositPct: depositPctProp }) {
+function TactileSignatureModal({ form, setForm, profile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -12289,6 +12305,7 @@ function TactileSignatureModal({ form, setForm, profile, onClose, onGoToProfile,
           profile={profile}
           depositPctProp={acomptePct}
           onClose={() => setShowDepositInvoiceModal(false)}
+          onGoToProfileTva={onGoToProfileTva}
         />
       )}
     </div>
@@ -12531,10 +12548,10 @@ function MiniPlanCard({ icon, title, price, sub, color, recommended, onSelect })
 }
 
 /* ══════════════════════════════════════════ PROFILE PAGE ══ */
-function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome }) {
+function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection }) {
   const [newSkill, setNewSkill] = useState("");
   const [saved, setSaved] = useState(false);
-  const [activeSection, setActiveSection] = useState("identity");
+  const [activeSection, setActiveSection] = useState(initialSection || "identity");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
   const fileInputRef = useRef(null);
@@ -12879,7 +12896,11 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             <div>
               <label style={labelStyle}>N° TVA INTRACOMMUNAUTAIRE</label>
               <input style={inputStyle} value={profile.tvaNumber} placeholder="FR 12 345678900 (laisser vide si non assujetti)" onChange={e => updateProfile("tvaNumber", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
-              <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.4 }}>Micro-entreprise non assujettie ? Laisse vide : la mention « TVA non applicable, art. 293 B du CGI » sera ajoutée automatiquement.</div>
+              <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>
+                <strong>Es-tu redevable de la TVA ?</strong> Renseigne ton numéro ici pour que tes factures calculent et affichent automatiquement la TVA à 20%.<br/>
+                <strong>En franchise de TVA</strong> (micro-entreprise sous les seuils) ? Laisse ce champ vide : la mention « TVA non applicable, art. 293 B du CGI » sera ajoutée automatiquement, sans TVA calculée.<br/>
+                ⚠️ C'est à toi de vérifier ton statut réel et de tenir ce champ à jour — Freeley ne peut pas le déterminer à ta place.
+              </div>
             </div>
           </div>
 
