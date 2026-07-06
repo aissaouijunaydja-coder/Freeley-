@@ -8361,8 +8361,31 @@ function DepositGuard({ entry }) {
     }, 600);
   };
 
-  const handleCopyLink = () => {
-    alert("Le paiement par carte (Stripe) sera bientôt disponible. En attendant, tes coordonnées bancaires (IBAN) figurent sur ta facture pour un règlement par virement.");
+  const [linkGenerating, setLinkGenerating] = useState(false);
+
+  const handleCopyLink = async () => {
+    if (linkGenerating) return;
+    setLinkGenerating(true);
+    try {
+      const res = await fetch("/api/create-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: depositAmt,
+          description: `Acompte — ${entry?.missionTitle || "Prestation Freeley"}`,
+          customerEmail: entry?.form?.clientEmail || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      navigator.clipboard.writeText(data.url).catch(()=>{});
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2800);
+    } catch(e) {
+      alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
+    } finally {
+      setLinkGenerating(false);
+    }
   };
 
   const handleRelance = () => {
@@ -8490,6 +8513,7 @@ function DepositGuard({ entry }) {
             {/* Copier lien paiement */}
             <button
               onClick={handleCopyLink}
+              disabled={linkGenerating}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -8497,18 +8521,21 @@ function DepositGuard({ entry }) {
                 background: linkCopied
                   ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)"
                   : "linear-gradient(135deg, #1B2E4B 0%, #2A4167 100%)",
-                color: "#fff", border:"none", borderRadius:10, cursor:"pointer",
+                color: "#fff", border:"none", borderRadius:10, cursor: linkGenerating ? "wait" : "pointer",
                 fontFamily:T.body, fontSize:13, fontWeight:700,
                 boxShadow: linkCopied ? "0 5px 18px #15803D35" : "0 5px 18px #1B2E4B35",
                 transition:"all 0.25s",
+                opacity: linkGenerating ? 0.7 : 1,
               }}
               onMouseOver={e=>{ if(!linkCopied){ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 24px #1B2E4B45"; }}}
               onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow=linkCopied?"0 5px 18px #15803D35":"0 5px 18px #1B2E4B35"; }}
             >
-              {linkCopied ? (
+              {linkGenerating ? (
+                <><span>⏳</span> Génération du lien…</>
+              ) : linkCopied ? (
                 <><span>✅</span> Lien copié !</>
               ) : (
-                <><span>🔗</span> Paiement par carte (Stripe) — bientôt disponible</>
+                <><span>💳</span> Copier le lien de paiement (Stripe)</>
               )}
             </button>
 
@@ -9297,6 +9324,9 @@ function InvoiceModal({ form, profile, onClose, depositPctProp, onDepositPctChan
   };
   const [copiedSms, setCopiedSms]       = useState(false);
   const [copiedEmailRelance, setCopiedEmailRelance] = useState(false);
+  const [stripeLinkGenerating, setStripeLinkGenerating] = useState(false);
+  const [stripeLinkCopied, setStripeLinkCopied] = useState(false);
+  const [stripeLinkUrl, setStripeLinkUrl] = useState("");
 
   const today = new Date().toLocaleDateString("fr-FR");
   // Numéro affiché en aperçu (prochain numéro disponible, sans le réserver)
@@ -9315,6 +9345,35 @@ function InvoiceModal({ form, profile, onClose, depositPctProp, onDepositPctChan
     try { counters = JSON.parse(localStorage.getItem("freeley_invoice_counters") || "{}"); } catch(e) {}
     counters[year] = (counters[year] || 0) + 1;
     try { localStorage.setItem("freeley_invoice_counters", JSON.stringify(counters)); } catch(e) {}
+  };
+
+  const handleGenerateStripeLink = async () => {
+    if (stripeLinkGenerating) return;
+    const priceHTNow = parseFloat(form.price) || 0;
+    const amountNow = priceHTNow * (depositPct / 100);
+    if (!amountNow || amountNow <= 0) { alert("Renseigne d'abord le montant de la mission (étape 3)."); return; }
+    setStripeLinkGenerating(true);
+    try {
+      const res = await fetch("/api/create-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: amountNow,
+          description: `${depositPct === 100 ? "Paiement" : "Acompte " + depositPct + "%"} — ${form.missionTitle || "Prestation Freeley"}`,
+          customerEmail: form.clientEmail || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      setStripeLinkUrl(data.url);
+      navigator.clipboard.writeText(data.url).catch(()=>{});
+      setStripeLinkCopied(true);
+      setTimeout(() => setStripeLinkCopied(false), 2800);
+    } catch(e) {
+      alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
+    } finally {
+      setStripeLinkGenerating(false);
+    }
   };
 
   const priceHT = parseFloat(form.price) || 0;
@@ -9752,14 +9811,29 @@ ${freelanceName}`;
                   lineHeight:1.65, margin:0,
                 }}>
                   {depositPct === 100
-                    ? <>Ton client règle la <span style={{ color:C.goldL, fontWeight:600 }}>totalité</span> par virement bancaire, grâce à l'IBAN indiqué ci-dessus.</>
-                    : <>Ton client règle l'acompte par virement bancaire, grâce à l'IBAN indiqué ci-dessus.</>
+                    ? <>Ton client règle la <span style={{ color:C.goldL, fontWeight:600 }}>totalité</span> par virement bancaire (IBAN ci-dessus) ou par <span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span> via le lien Stripe.</>
+                    : <>Ton client règle l'acompte par virement bancaire (IBAN ci-dessus) ou par <span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span> via le lien Stripe.</>
                   }
-                  {" "}Le paiement par <span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span> arrive bientôt.
                 </p>
+                {/* Bouton lien Stripe */}
+                <button
+                  onClick={handleGenerateStripeLink}
+                  disabled={stripeLinkGenerating}
+                  style={{
+                    marginTop:12, width:"100%", padding:"11px 16px",
+                    background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.gold,
+                    color: stripeLinkCopied ? "#fff" : C.navyD,
+                    border:"none", borderRadius:9, cursor: stripeLinkGenerating ? "wait" : "pointer",
+                    fontFamily:T.body, fontSize:12.5, fontWeight:700,
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                    opacity: stripeLinkGenerating ? 0.7 : 1, transition:"all .2s",
+                  }}
+                >
+                  {stripeLinkGenerating ? "⏳ Génération…" : stripeLinkCopied ? "✅ Lien copié !" : "💳 Copier le lien de paiement par carte"}
+                </button>
                 {/* Badges */}
                 <div style={{ display:"flex", gap:6, marginTop:10, flexWrap:"wrap" }}>
-                  {["🔒 Sécurisé", "🏦 Virement IBAN", "📄 Facture PDF"].map(badge => (
+                  {["🔒 Sécurisé", "🏦 Virement IBAN", "💳 Carte via Stripe"].map(badge => (
                     <span key={badge} style={{
                       fontFamily:T.body, fontSize:9.5, fontWeight:600,
                       padding:"3px 8px",
