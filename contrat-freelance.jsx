@@ -1079,6 +1079,7 @@ function AppInner() {
   const [signLinkCopied, setSignLinkCopied] = useState("");
   const [negotLinkCopied, setNegotLinkCopied] = useState(false);
   const [alertsTick, setAlertsTick] = useState(0); // force le recalcul des alertes (badge cloche) après lecture
+  const [draftSavedToast, setDraftSavedToast] = useState(false);
   const [reviseOpen, setReviseOpen] = useState(false);
   const [reviseMessage, setReviseMessage] = useState("");
   const [reviseLoading, setReviseLoading] = useState(false);
@@ -2324,7 +2325,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     setStep(0); setContract(""); setForm(initialForm); setErrors({}); setApiError("");
   };
 
-  const [draftSavedToast, setDraftSavedToast] = useState(false);
   const handleSaveDraft = () => {
     saveDraftToList(form, step);
     setDraftSavedToast(true);
