@@ -8578,7 +8578,7 @@ function DepositGuard({ entry }) {
                   style={{ borderRadius:6, background:"#fff", flexShrink:0, border:`1px solid ${C.border}` }}
                 />
                 <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, lineHeight:1.5 }}>
-                  En présentiel ? Ton client peut aussi <strong style={{ color:C.navy }}>scanner ce code</strong> avec l'appareil photo de son téléphone pour payer instantanément.
+                  <strong style={{ color:C.navy }}>Scannable ou partageable</strong> — en face à face ou à distance, ton client règle en un instant.
                 </div>
               </div>
             )}
@@ -9858,7 +9858,7 @@ ${freelanceName}`;
                       style={{ borderRadius:6, background:"#fff", flexShrink:0 }}
                     />
                     <div style={{ fontFamily:T.body, fontSize:10.5, color:"#8BA3C0", lineHeight:1.5 }}>
-                      En présentiel ? Ton client peut aussi <strong style={{ color:C.goldL }}>scanner ce code</strong> avec l'appareil photo de son téléphone pour payer instantanément.
+                      <strong style={{ color:C.goldL }}>Scannable ou partageable</strong> — en face à face ou à distance, ton client règle en un instant.
                     </div>
                   </div>
                 )}
