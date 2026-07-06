@@ -9333,6 +9333,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
 function InvoiceModal({ form, profile, onClose, depositPctProp, onDepositPctChange }) {
   const [downloaded, setDownloaded] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
   const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
   const depositPct = depositPctProp ?? _depositPct;
   const setDepositPct = (v) => {
@@ -9456,9 +9457,49 @@ ${freelanceName}`;
     });
   };
 
-  const handleFakeDownload = () => {
+  const handleFakeDownload = async () => {
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie dans un instant."); return; }
+    setPdfGenerating(true);
     try {
+      // 1. Récupérer (ou réutiliser) le lien de paiement Stripe pour l'intégrer au PDF
+      let payUrl = stripeLinkUrl;
+      const amountForStripe = priceHT * (depositPct / 100);
+      if (!payUrl && amountForStripe > 0) {
+        try {
+          const res = await fetch("/api/create-payment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              amount: amountForStripe,
+              description: `${depositPct === 100 ? "Paiement" : "Acompte " + depositPct + "%"} — ${form.missionTitle || "Prestation Freeley"}`,
+              customerEmail: form.clientEmail || undefined,
+            }),
+          });
+          const data = await res.json();
+          if (res.ok && data.url) { payUrl = data.url; setStripeLinkUrl(data.url); }
+        } catch(e) { /* Le PDF se génère quand même sans le QR si Stripe échoue */ }
+      }
+
+      // 2. Convertir le QR code (image distante) en base64 pour l'intégrer au PDF
+      let qrBase64 = null;
+      if (payUrl) {
+        try {
+          qrBase64 = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              canvas.width = img.width; canvas.height = img.height;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0);
+              try { resolve(canvas.toDataURL("image/png")); } catch(e) { reject(e); }
+            };
+            img.onerror = reject;
+            img.src = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=2&data=${encodeURIComponent(payUrl)}`;
+          });
+        } catch(e) { qrBase64 = null; /* Pas grave, le PDF s'en passe */ }
+      }
+
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "mm", format: "a4" });
       const PW = 210, ML = 20, MR = 20, cw = PW - ML - MR;
@@ -9537,8 +9578,10 @@ ${freelanceName}`;
       }
       y += 8;
 
-      // Coordonnées de paiement (IBAN)
-      doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, cw, p.iban ? 30 : 20, 2, 2, "F");
+      // Coordonnées de paiement (IBAN) + QR Stripe si disponible
+      const payBoxH = p.iban ? 30 : 20;
+      const ibanBoxW = qrBase64 ? cw * 0.62 : cw;
+      doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, ibanBoxW, payBoxH, 2, 2, "F");
       doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
       doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 7);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
@@ -9550,7 +9593,20 @@ ${freelanceName}`;
         doc.setTextColor(...GREY);
         doc.text("Ajoute ton IBAN dans ton profil (onglet Facturation) pour l'afficher ici.", ML + 4, y + 14);
       }
-      y += (p.iban ? 30 : 20) + 10;
+      // Bloc QR Stripe (paiement par carte), à droite de l'IBAN
+      if (qrBase64) {
+        const qrBoxX = ML + ibanBoxW + 4;
+        const qrBoxW = cw - ibanBoxW - 4;
+        doc.setFillColor(248, 246, 240); doc.roundedRect(qrBoxX, y, qrBoxW, payBoxH, 2, 2, "F");
+        try { doc.addImage(qrBase64, "PNG", qrBoxX + (qrBoxW - payBoxH) / 2 + 2, y + 2, payBoxH - 4, payBoxH - 4); } catch(e) {}
+      }
+      y += payBoxH + 6;
+      if (qrBase64) {
+        doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+        doc.text("Paiement par carte : scanner le code ci-dessus", ML, y);
+        y += 4;
+      }
+      y += 4;
 
       // Pied de page
       doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
@@ -9566,6 +9622,8 @@ ${freelanceName}`;
     } catch(err) {
       console.error(err);
       alert("Erreur lors de la génération de la facture : " + (err.message || "inconnue"));
+    } finally {
+      setPdfGenerating(false);
     }
   };
 
@@ -10026,17 +10084,20 @@ ${freelanceName}`;
             borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body,
             color:C.textM, fontWeight:500,
           }}>Fermer</button>
-          <button onClick={handleFakeDownload} style={{
+          <button onClick={handleFakeDownload} disabled={pdfGenerating} style={{
             flex:2, padding:"12px",
             background: downloaded ? "#16A34A" : C.gold,
-            border:"none", borderRadius:8, cursor:"pointer",
+            border:"none", borderRadius:8, cursor: pdfGenerating ? "wait" : "pointer",
             fontSize:13, fontFamily:T.body, fontWeight:700,
             color: downloaded ? C.white : C.navyD,
             display:"flex", alignItems:"center", justifyContent:"center", gap:7,
             transition:"background 0.25s",
             boxShadow: downloaded ? "none" : "0 4px 14px #B8965A35",
+            opacity: pdfGenerating ? 0.7 : 1,
           }}>
-            {downloaded
+            {pdfGenerating
+              ? <><span style={{fontSize:15}}>⏳</span> Préparation du PDF…</>
+              : downloaded
               ? <><span style={{fontSize:15}}>✓</span> Facture générée !</>
               : <><span style={{fontSize:15}}>⬇</span> Télécharger la facture PDF</>
             }
