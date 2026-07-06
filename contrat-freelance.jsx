@@ -9545,7 +9545,7 @@ function InvoiceModal({ form, setForm, profile, onClose, depositPctProp, onDepos
     if (stripeLinkGenerating) return;
     const priceHTNow = parseFloat(form.price) || 0;
     const amountNow = priceHTNow * (depositPct / 100);
-    if (!amountNow || amountNow <= 0) { alert("Renseigne d'abord le montant de la mission (étape 3)."); return; }
+    if (!amountNow || amountNow <= 0) { alert("Renseigne d'abord le montant de la mission dans le champ ci-dessus."); return; }
     setStripeLinkGenerating(true);
     try {
       const res = await fetch("/api/create-payment", {
