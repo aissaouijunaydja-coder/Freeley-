@@ -9590,7 +9590,7 @@ function InvoiceModal({ form, setForm, profile, onClose, depositPctProp, onDepos
   const freelanceFirstName = freelanceName.split(" ")[0];
   const activityLabel      = form.freelanceActivity?.trim() || "prestation";
   const missionLabel       = form.missionTitle?.trim()     || "notre mission";
-  const acompteTTC = (priceHT * (depositPct / 100) * 1.2);
+  const acompteTTC = ttc;
   const acompteTTCStr = hasPrice ? `${fmt(acompteTTC)} €` : "le montant convenu";
   const isComptant = depositPct === 100;
 
