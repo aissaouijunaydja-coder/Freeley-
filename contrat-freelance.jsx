@@ -6699,6 +6699,8 @@ ${isParticulier
 
 Structure : Objet → Rappel des faits → Montant total dû avec calcul détaillé (reprendre les chiffres exacts fournis ci-dessus) → Mise en demeure formelle → Délai + conséquences → Formule de clôture
 
+MISE EN FORME — ce texte sera affiché tel quel dans un PDF simple, SANS interprétation du markdown : n'utilise JAMAIS de tableaux (pas de barres verticales |, pas de lignes de séparateurs ---), pas de gras (**), pas de titres avec #. Présente les montants en liste simple avec des tirets ou retours à la ligne classiques.
+
 IMPORTANT — Ne jamais affirmer des faits non fournis dans les informations ci-dessus (par exemple, ne pas prétendre que des relances amiables ont déjà été envoyées, sauf si cela est explicitement mentionné dans la mission/les détails du litige). Reste factuel et ne complète pas l'historique par des suppositions.
 
 Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
@@ -6725,7 +6727,7 @@ Le message doit :
 
 Termine par une formule de politesse simple et la signature "${senderName}".
 
-Réponds uniquement avec le texte du message, sans titre ni introduction.`;
+Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple uniquement, ce message sera affiché tel quel.`;
   };
 
   const callAI = async (prompt) => {
@@ -6853,6 +6855,15 @@ Réponds uniquement avec le texte du message, sans titre ni introduction.`;
     }
   };
 
+  // Filet de sécurité : nettoie tout résidu de markdown (tableaux, gras, titres) si l'IA en génère malgré les instructions
+  const cleanLetterText = (text) => String(text || "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/\*\*/g, "")
+    .split("\n")
+    .filter(line => !/^[\s|:\-]+$/.test(line)) // retire les lignes de séparation de tableau (---|---|---)
+    .map(line => line.includes("|") ? line.split("|").map(s => s.trim()).filter(Boolean).join(" — ") : line)
+    .join("\n");
+
   const downloadLetterPDF = async (letter, clientName, total, mission, clientEmail, letterType = "formal") => {
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!letter) { alert("Aucune lettre à télécharger."); return; }
@@ -6898,7 +6909,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction.`;
       doc.text(`Établi le ${today} via Freeley${isPreventive ? "" : " — Recouvrement Ferme"}`, ML, 23);
       let y = 42;
       doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
-      const cleanText = String(letter).replace(/^#+\s*/gm, "").replace(/\*\*/g, "");
+      const cleanText = cleanLetterText(letter);
       const lines = doc.splitTextToSize(cleanText, cw);
       lines.forEach(l => {
         if (y > 270) { doc.addPage(); y = 20; }
@@ -6936,7 +6947,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction.`;
         <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isPreventive ? "#92400E" : "#991B1B" }}>{isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
       </div>
       <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"18px 20px", maxHeight:260, overflowY:"auto", marginBottom:14 }}>
-        <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{letter}</pre>
+        <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanLetterText(letter)}</pre>
       </div>
 
       {/* Paiement du montant dû */}
