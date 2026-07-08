@@ -181,6 +181,17 @@ const rowToEntry = (row) => ({
   },
 });
 
+// Parse en sécurité la colonne "content" venant de Supabase : elle est parfois
+// stockée comme texte brut (string) et parfois comme JSON natif selon la config.
+// Sans ça, un ".price" ou ".endDate" sur une string renvoie undefined silencieusement.
+const parseContent = (raw) => {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw); } catch (e) { return {}; }
+  }
+  return raw;
+};
+
 const getHistory = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
@@ -189,20 +200,24 @@ const getHistory = async () => {
     .select("*")
     .order("created_at", { ascending: false });
   if (error || !Array.isArray(data)) return [];
-  return data.map(row => ({
-    id: row.id,
-    date: new Date(row.created_at).toLocaleDateString("fr-FR"),
-    missionTitle: row.title || row.titre || "",
-    clientName: row.content?.clientName || row.contenu?.clientName || "",
-    clientCompany: row.content?.clientCompany || row.contenu?.clientCompany || "",
-    price: row.content?.price || row.contenu?.price || "",
-    startDate: row.content?.startDate || row.contenu?.startDate || "",
-    endDate: row.content?.endDate || row.contenu?.endDate || "",
-    contract: row.content?.contract || row.contenu?.contract || "",
-    signatureStatus: row.status || row.statut || "none",
-    signatureRequestId: null,
-    form: row.content?.form || row.contenu?.form || {},
-  }));
+  return data.map(row => {
+    const content = parseContent(row.content);
+    const contenu = parseContent(row.contenu);
+    return {
+      id: row.id,
+      date: new Date(row.created_at).toLocaleDateString("fr-FR"),
+      missionTitle: row.title || row.titre || "",
+      clientName: content.clientName || contenu.clientName || "",
+      clientCompany: content.clientCompany || contenu.clientCompany || "",
+      price: content.price || contenu.price || "",
+      startDate: content.startDate || contenu.startDate || "",
+      endDate: content.endDate || contenu.endDate || "",
+      contract: content.contract || contenu.contract || "",
+      signatureStatus: row.status || row.statut || "none",
+      signatureRequestId: null,
+      form: content.form || contenu.form || {},
+    };
+  });
 };
 
 const saveToHistory = async (entry, form) => {
@@ -270,7 +285,7 @@ const getContractForSigning = async (contractId) => {
     .eq("id", contractId)
     .single();
   if (error) { console.error("getContractForSigning error:", error); return null; }
-  return data;
+  return { ...data, content: parseContent(data.content) };
 };
 
 // Le client signe : on enregistre sa signature et on passe le statut à "signed"
@@ -281,7 +296,7 @@ const submitClientSignature = async (contractId, clientSignature) => {
     .eq("id", contractId)
     .single();
   if (e1) { console.error(e1); return false; }
-  const newContent = { ...(existing.content || {}), clientSignature, signedByClientAt: new Date().toISOString() };
+  const newContent = { ...parseContent(existing.content), clientSignature, signedByClientAt: new Date().toISOString() };
   const { error: e2 } = await supabase
     .from("contracts")
     .update({ content: newContent, status: "signed" })
