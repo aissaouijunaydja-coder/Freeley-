@@ -1066,12 +1066,14 @@ function AppInner() {
   const [showCameraPermissionModal, setShowCameraPermissionModal] = useState(false);
   const [cameraPermissionCallback, setCameraPermissionCallback]   = useState(null); // fn à appeler si accordé
   const [cameraPermissionDenied, setCameraPermissionDenied]       = useState(false);
+  const [cameraDeniedContext, setCameraDeniedContext] = useState("form"); // "form" | "scanner" — pour adapter le message de repli
 
   // Magic fill réel : caméra + extraction IA
   const [magicFillTarget, setMagicFillTarget] = useState(null); // "step0" | "step1" | null
 
   // Appelée par chaque bouton 📷 — gère le routage permission → scan
-  const requestCameraPermission = (onGranted) => {
+  const requestCameraPermission = (onGranted, context = "form") => {
+    setCameraDeniedContext(context);
     if (cameraPermission === "granted") {
       // Permission déjà accordée : lancer directement
       onGranted();
@@ -1194,13 +1196,6 @@ function AppInner() {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
-        const urlParams = new URLSearchParams(window.location.search);
-        const fromScanner = urlParams.get("from") === "scanner" || localStorage.getItem("freeley_scan_pending") === "1";
-        if (fromScanner) {
-          localStorage.removeItem("freeley_scan_pending");
-          window.history.replaceState({}, "", window.location.pathname);
-          goToScreen("scan-results");
-        }
         // Restaurer formulaire sauvegardé après OAuth Google
         // Restaurer formulaire depuis IndexedDB après OAuth Google
         await new Promise((resolve) => {
@@ -1232,19 +1227,6 @@ function AppInner() {
           } catch(e) { resolve(); }
         });
         localStorage.removeItem("freeley_screen");
-        if (localStorage.getItem("freeley_pending_import") === "1") {
-          localStorage.removeItem("freeley_pending_import");
-          const scanData = localStorage.getItem("freeley_scan_results");
-          if (scanData) {
-            try {
-              const parsed = JSON.parse(scanData);
-              const ext = parsed.extractedData || {};
-                  localStorage.removeItem("freeley_scan_results");
-              setHasScanResults(false);
-            } catch(e) {}
-          }
-          goToScreen("history");
-        }
       }
       setAuthReady(true);
     });
@@ -1258,12 +1240,6 @@ function AppInner() {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
-        console.log("onAuthStateChange fired, from_scanner:", localStorage.getItem("freeley_from_scanner"));
-        if (localStorage.getItem("freeley_from_scanner") === "1") {
-          localStorage.removeItem("freeley_from_scanner");
-          goToScreen("scan-results");
-          return;
-        }
         // Restaurer formulaire après OAuth Google
         const _pf = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null);
         const _ps = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
@@ -2272,18 +2248,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     setAuthUser(user);
     await loadUserData(user);
     setShowAuthModal(false);
-    // Si on vient du scanner, rouvrir le scanner
-    console.log("handleAuthSuccess called, from_scanner:", localStorage.getItem("freeley_from_scanner"));
     // Restaurer le formulaire en cours si sauvegardé (priorité sur scanner)
     const pendingForm2 = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null);
     if (pendingForm2) {
-      localStorage.removeItem("freeley_from_scanner");
       goToScreen("app");
-      return;
-    }
-    if (localStorage.getItem("freeley_from_scanner") === "1") {
-      localStorage.removeItem("freeley_from_scanner");
-      goToScreen("history");
       return;
     }
     // Restaurer le formulaire en cours si sauvegardé
@@ -2671,16 +2639,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onClose={() => { setShowScannerModal(false); setScanResultsToShow(null); }}
           onRequestCamera={requestCameraPermission}
           initialResults={scanResultsToShow}
-          authUser={authUser}
-          onShowAuth={() => {
-            setShowScannerModal(false);
-            setAuthMode("signup");
-            setShowAuthModal(true);
-          }}
-          onImportToDashboard={async (extractedData) => {
-            setShowScannerModal(false);
-            goToScreen("history");
-          }}
+          onScanSaved={() => setHasScanResults(true)}
         />
       )}
       {showTactileSign && (
@@ -2818,7 +2777,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             whiteSpace:"nowrap",
           }}>
             <span style={{ fontSize:14 }}>🚫</span>
-            L'accès à l'appareil photo a été refusé. Vous pouvez toujours remplir les champs manuellement.
+            {cameraDeniedContext === "scanner"
+              ? "L'accès à l'appareil photo a été refusé. Vous pouvez toujours importer un fichier depuis votre appareil."
+              : "L'accès à l'appareil photo a été refusé. Vous pouvez toujours remplir les champs manuellement."}
           </div>
         </div>
       )}
@@ -7457,7 +7418,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: provider === "linkedin" ? "linkedin_oidc" : provider,
         options: {
-          redirectTo: window.location.origin + (localStorage.getItem("freeley_scan_pending") === "1" ? "?from=scanner" : ""),
+          redirectTo: window.location.origin,
         },
       });
       if (error) { setError(error.message); setOauthLoading(""); }
@@ -10885,20 +10846,9 @@ function CameraCapture({ onCapture, onClose }) {
   );
 }
 
-function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAuth, initialResults, authUser }) {
+function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved }) {
   const [phase, setPhase]       = useState(initialResults ? "result" : "upload");   // "upload" | "loading" | "result"
 
-  useEffect(() => {
-    if (phase === "auth-waiting") {
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        if (user) setPhase("result");
-      });
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (session?.user && phase === "auth-waiting") setPhase("result");
-      });
-      return () => subscription.unsubscribe();
-    }
-  }, [phase]);
   const [fileName, setFileName] = useState("");
   const [progress, setProgress] = useState(0);
   const [animFrame, setAnimFrame] = useState(0);
@@ -10906,10 +10856,6 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
   const [showEmail, setShowEmail]     = useState(false);
   const [copiedClause, setCopiedClause] = useState(false);
   const [copiedEmail, setCopiedEmail]   = useState(false);
-  const [showProfessionaliser, setShowProfessionaliser] = useState(false);
-  const [showComparatif, setShowComparatif] = useState(false);
-  const [showExtractionMagique, setShowExtractionMagique] = useState(false);
-  const [importSuccess, setImportSuccess] = useState(false);
   const [showPhotoTooltip, setShowPhotoTooltip] = useState(false);
   const [photoScanning, setPhotoScanning] = useState(false);
 
@@ -10969,7 +10915,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
   const handlePhotoScan = () => {
     const doScan = () => setShowRealCamera(true);
     if (onRequestCamera) {
-      onRequestCamera(doScan);
+      onRequestCamera(doScan, "scanner");
     } else {
       doScan();
     }
@@ -11009,6 +10955,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
       existing.unshift({ aiFindings: findings, extractedData: null, date: new Date().toLocaleDateString("fr-FR") });
       localStorage.setItem("freeley_scan_list", JSON.stringify(existing.slice(0, 10)));
       localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings: findings, extractedData: null }));
+      if (onScanSaved) onScanSaved();
     } catch(e) { setAiFindings(null); }
     clearInterval(interval); setProgress(100);
     await handleExtraction();
@@ -11729,194 +11676,6 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
                 }}
               >⬇ Télécharger le rapport PDF</button>
 
-              {/* ════ SECTION PROFESSIONNALISER ════ */}
-              <div style={{
-                background:"linear-gradient(135deg, #0F1C2D 0%, #1B2E4B 60%, #2A3F6B 100%)",
-                borderRadius:14, padding:"20px 20px 18px", marginBottom:20,
-                border:"1.5px solid #2A4167",
-                boxShadow:"0 4px 24px #1B2E4B30",
-                position:"relative", overflow:"hidden",
-              }}>
-                {/* Subtle glow accent */}
-                <div style={{
-                  position:"absolute", top:-30, right:-30,
-                  width:120, height:120, borderRadius:"50%",
-                  background:"radial-gradient(circle, #7C3AED22 0%, transparent 70%)",
-                  pointerEvents:"none",
-                }} />
-
-                {/* Title */}
-                <div style={{ fontFamily:T.display, fontSize:15, fontWeight:700, color:"#FFFFFF", marginBottom:14 }}>
-                  Pourquoi professionnaliser votre contrat ? 🛡️
-                </div>
-
-                {/* 3 bullet points */}
-                <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:18 }}>
-                  {[
-                    { icon:"⚖️", label:"Sécurité contractuelle", desc:"Vos clauses floues sont reformulées avec les termes exacts du droit français." },
-                    { icon:"💼", label:"Crédibilité maximale", desc:"Présentez un document irréprochable qui rassure vos clients et accélère la signature." },
-                    { icon:"⚡", label:"Zéro effort", desc:"L'IA s'occupe de la structure, vous gardez 100% du contrôle sur vos prix et vos délais." },
-                  ].map((item, i) => (
-                    <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
-                      <div style={{
-                        width:30, height:30, borderRadius:8, flexShrink:0,
-                        background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.15)",
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        fontSize:14,
-                      }}>{item.icon}</div>
-                      <div>
-                        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#E2E8F0", marginBottom:2 }}>{item.label}</div>
-                        <div style={{ fontFamily:T.body, fontSize:11, color:"#94A3B8", lineHeight:1.55 }}>{item.desc}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* CTA Button */}
-                <button
-                  onClick={() => { setShowComparatif(v => !v); setShowProfessionaliser(true); }}
-                  style={{
-                    width:"100%", padding:"13px 16px",
-                    background: showComparatif
-                      ? "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)"
-                      : "linear-gradient(135deg, #7C3AED 0%, #9F67FF 100%)",
-                    color:"#FFFFFF", border:"none", borderRadius:10, cursor:"pointer",
-                    fontFamily:T.body, fontSize:14, fontWeight:700,
-                    display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                    boxShadow:"0 4px 20px #7C3AED50",
-                    transition:"all 0.2s",
-                    letterSpacing:"0.01em",
-                  }}
-                  onMouseOver={e => { e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 28px #7C3AED60"; }}
-                  onMouseOut={e => { e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 4px 20px #7C3AED50"; }}
-                >
-                  <span style={{ fontSize:16 }}>✨</span>
-                  {showComparatif ? "Masquer l'aperçu" : "Professionnaliser mon contrat avec l'IA"}
-                </button>
-              </div>
-
-              {/* ════ COMPARATIF AVANT / APRÈS ════ */}
-              {showComparatif && (
-                <div className="fade-up" style={{
-                  background:C.white, border:`1.5px solid #DDD6FE`,
-                  borderRadius:14, overflow:"hidden", marginBottom:20,
-                  boxShadow:"0 4px 24px #7C3AED14",
-                  animation:"fadeUp 0.35s cubic-bezier(.22,.68,0,1.2) both",
-                }}>
-                  {/* Header comparatif */}
-                  <div style={{
-                    background:"linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)",
-                    padding:"12px 18px", borderBottom:"1px solid #DDD6FE",
-                    display:"flex", alignItems:"center", gap:8,
-                  }}>
-                    <span style={{ fontSize:14 }}>🔄</span>
-                    <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#5B21B6" }}>
-                      Aperçu — Transformation en direct
-                    </div>
-                    <div style={{
-                      marginLeft:"auto", background:"#7C3AED", color:"#FFFFFF",
-                      fontFamily:T.body, fontSize:9, fontWeight:700, letterSpacing:"0.08em",
-                      padding:"3px 8px", borderRadius:20,
-                    }}>DEMO</div>
-                  </div>
-
-                  <div style={{ padding:"16px 18px" }}>
-                    {/* Colonnes Avant / Après */}
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(120px, 1fr))", gap:12 }}>
-
-                      {/* AVANT */}
-                      <div>
-                        <div style={{
-                          display:"flex", alignItems:"center", gap:6, marginBottom:10,
-                        }}>
-                          <div style={{
-                            width:8, height:8, borderRadius:"50%", background:"#EF4444", flexShrink:0,
-                          }} />
-                          <div style={{ fontFamily:T.body, fontSize:10, fontWeight:700, color:"#DC2626", letterSpacing:"0.08em" }}>VOTRE TEXTE BRUT</div>
-                        </div>
-                        <div style={{
-                          background:"#FEF2F2", border:"1.5px solid #FECACA",
-                          borderRadius:8, padding:"12px 14px", minHeight:120,
-                        }}>
-                          <p style={{
-                            fontFamily:T.body, fontSize:11.5, color:"#374151",
-                            lineHeight:1.7, margin:0, fontStyle:"italic",
-                          }}>
-                            « Le client doit me payer vite à la fin de la mission. »
-                          </p>
-                          <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:5 }}>
-                            {[
-                              { text:"Délai flou", icon:"⚠️" },
-                              { text:"Sans référence réglementaire", icon:"⚠️" },
-                              { text:"Aucune pénalité prévue", icon:"⚠️" },
-                            ].map((tag, i) => (
-                              <div key={i} style={{
-                                display:"inline-flex", alignItems:"center", gap:4,
-                                background:"#FEE2E2", borderRadius:5, padding:"3px 8px",
-                                fontFamily:T.body, fontSize:10, color:"#DC2626", fontWeight:600,
-                              }}>{tag.icon} {tag.text}</div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* APRÈS */}
-                      <div>
-                        <div style={{
-                          display:"flex", alignItems:"center", gap:6, marginBottom:10,
-                        }}>
-                          <div style={{
-                            width:8, height:8, borderRadius:"50%", background:"#16A34A", flexShrink:0,
-                          }} />
-                          <div style={{ fontFamily:T.body, fontSize:10, fontWeight:700, color:"#16A34A", letterSpacing:"0.08em" }}>VERSION PROFESSIONNELLE</div>
-                        </div>
-                        <div style={{
-                          background:"#F0FDF4", border:"1.5px solid #86EFAC",
-                          borderRadius:8, padding:"12px 14px", minHeight:120,
-                          position:"relative",
-                        }}>
-                          <p style={{
-                            fontFamily:T.body, fontSize:11, color:"#1A1A1A",
-                            lineHeight:1.7, margin:0,
-                          }}>
-                            <span style={{ fontWeight:700, color:"#15803D" }}>Conformément à l'art. L. 441-10 du Code de commerce,</span> les pénalités de retard sont exigibles dès le lendemain de la date d'échéance, au taux de 3× le taux directeur en vigueur.
-                          </p>
-                          <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:5 }}>
-                            {[
-                              { text:"Référence réglementaire", icon:"✅" },
-                              { text:"Pénalités chiffrées", icon:"✅" },
-                              { text:"Opposable en justice", icon:"✅" },
-                            ].map((tag, i) => (
-                              <div key={i} style={{
-                                display:"inline-flex", alignItems:"center", gap:4,
-                                background:"#DCFCE7", borderRadius:5, padding:"3px 8px",
-                                fontFamily:T.body, fontSize:10, color:"#16A34A", fontWeight:600,
-                              }}>{tag.icon} {tag.text}</div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-
-                    {/* Flèche centrale */}
-                    <div style={{ textAlign:"center", marginTop:14 }}>
-                      <div style={{
-                        display:"inline-flex", alignItems:"center", gap:8,
-                        background:"linear-gradient(135deg, #7C3AED 0%, #9F67FF 100%)",
-                        color:"#FFFFFF", fontFamily:T.body, fontSize:11, fontWeight:700,
-                        borderRadius:20, padding:"8px 18px",
-                        boxShadow:"0 4px 14px #7C3AED40",
-                      }}>
-                        <span>✨</span>
-                        L'IA transforme chaque clause en moins de 30 secondes
-                        <span>→</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Disclaimer */}
               <div style={{
                 background:C.creamD, borderRadius:8, padding:"10px 14px", marginBottom:20,
@@ -11944,7 +11703,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
                       🪄 Extraction magique des données
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:11, color:"#C4B5FD", lineHeight:1.5 }}>
-                      L'IA a détecté et extrait automatiquement les informations clés de votre document pour créer votre suivi interactif :
+                      L'IA a détecté et extrait automatiquement les informations clés de votre document :
                     </div>
                   </div>
                   <div style={{
@@ -12001,63 +11760,6 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
                     ))}
                   </div>
 
-                  {/* Info note */}
-                  <div style={{
-                    display:"flex", alignItems:"flex-start", gap:8,
-                    background:"rgba(124,58,237,0.06)", border:"1px solid #DDD6FE",
-                    borderRadius:8, padding:"10px 12px", marginBottom:18,
-                    fontFamily:T.body, fontSize:11, color:"#5B21B6", lineHeight:1.55,
-                  }}>
-                    <span style={{ fontSize:13, flexShrink:0 }}>✨</span>
-                    <span>Ces données seront automatiquement intégrées dans votre tableau de bord Freeley pour un suivi en temps réel.</span>
-                  </div>
-                </div>
-
-                {/* Grand bouton d'import */}
-                <div style={{ padding:"0 20px 20px" }}>
-                  {!authUser && (
-                    <div style={{ background:"#EFF6FF", border:"1.5px solid #BFDBFE", borderRadius:10, padding:"12px 16px", marginBottom:12, fontFamily:T.body, fontSize:12, color:"#1D4ED8", lineHeight:1.6 }}>
-                      💾 <strong>Créez un compte gratuit</strong> pour sauvegarder ces résultats et accéder à l'historique de vos analyses.
-                      <span onClick={() => { if (onShowAuth) onShowAuth(); }} style={{ display:"block", marginTop:6, cursor:"pointer", fontWeight:700, textDecoration:"underline" }}>
-                        S'inscrire gratuitement →
-                      </span>
-                    </div>
-                  )}
-                  <button
-                    onClick={() => {
-                      if (importSuccess) return;
-                      if (!authUser) {
-                        localStorage.setItem("freeley_pending_import", "1");
-                        if (onShowAuth) onShowAuth();
-                        return;
-                      }
-                      setImportSuccess(true);
-                      setTimeout(() => {
-                        if (onImportToDashboard) onImportToDashboard(extractedData);
-                        onClose();
-                      }, 1000);
-                    }}
-                    style={{
-                      width:"100%", padding:"16px 20px",
-                      background: importSuccess
-                        ? "linear-gradient(135deg, #065F46 0%, #10B981 100%)"
-                        : "linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)",
-                      color:"#FFFFFF", border:"none", borderRadius:12, cursor: importSuccess ? "default" : "pointer",
-                      fontFamily:T.body, fontSize:15, fontWeight:800,
-                      display:"flex", alignItems:"center", justifyContent:"center", gap:10,
-                      boxShadow: importSuccess ? "0 4px 20px #10B98150" : "0 6px 28px #7C3AED55",
-                      transition:"all 0.3s",
-                      letterSpacing:"0.01em",
-                    }}
-                    onMouseOver={e => { if (!importSuccess) { e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow="0 10px 36px #7C3AED65"; }}}
-                    onMouseOut={e => { if (!importSuccess) { e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 6px 28px #7C3AED55"; }}}
-                  >
-                    {importSuccess ? (
-                      <><span style={{ fontSize:18 }}>✅</span> Importé ! Ouverture du tableau de bord…</>
-                    ) : (
-                      <><span style={{ fontSize:18 }}>📥</span> Importer et générer mon tableau de bord Freeley</>
-                    )}
-                  </button>
                 </div>
               </div>
 
