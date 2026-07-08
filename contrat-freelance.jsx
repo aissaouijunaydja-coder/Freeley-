@@ -2570,6 +2570,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         onUpgrade={() => { goToScreen("pricing"); }}
         onRelance={openRelanceModal}
         onRateClient={openRatingModal}
+        onPaymentStatusChanged={() => setAlertsTick(t => t + 1)}
       />
       {ratingModal && (
         <ClientRatingModal
@@ -6587,7 +6588,6 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
 /* ══════════════════════════════════════════════════════════ RECOUVREMENT FERME MODAL ══ */
 function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
   /* ── State global ── */
-  const [activeMode, setActiveMode] = useState(null); // null | "auto" | "manual"
   const [manualOpen, setManualOpen] = useState(false); // le mode manuel démarre toujours fermé et vide
   const recouvrementCases = useMemo(() => getRecouvrementCases(history), [history]);
 
@@ -6603,13 +6603,13 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
     setSelectedCase(rc);
     setAutoStep("alert");
     setAutoLetter("");
+    setStripeLinkUrl(""); setStripeLinkCopied(false);
   };
 
   const [autoStep, setAutoStep]     = useState("alert"); // alert | loading | result
   const [autoLetter, setAutoLetter] = useState("");
   const [autoLetterType, setAutoLetterType] = useState("formal"); // "formal" | "preventive"
   const [autoTotal, setAutoTotal]   = useState(0);
-  const [autoCopying, setAutoCopying] = useState(false);
   const [autoDots, setAutoDots]     = useState(1);
 
   /* ── State mode MANUEL — toujours vide au départ, à écrire à la main ── */
@@ -6624,7 +6624,6 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
   const [manLetter,  setManLetter]  = useState("");
   const [manTotal,   setManTotal]   = useState(0);
   const [manLetterType, setManLetterType] = useState("formal"); // "formal" | "preventive"
-  const [manCopying, setManCopying] = useState(false);
   const [manDots,    setManDots]    = useState(1);
 
   /* ── State envoi mise en demeure ── */
@@ -6755,6 +6754,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   const generateAuto = async () => {
     if (!autoCase) return;
     setAutoStep("loading");
+    setStripeLinkUrl(""); setStripeLinkCopied(false); // évite de réutiliser le lien d'un dossier précédent
     try {
       const isPart = autoCase.typeClient === "particulier";
       // Jours écoulés depuis l'échéance : positif = dépassée, négatif = pas encore atteinte
@@ -6790,6 +6790,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   const generateManual = async () => {
     if (!manDebtor.trim() || !manAmount.trim()) return;
     setManStep("loading");
+    setStripeLinkUrl(""); setStripeLinkCopied(false); // évite de réutiliser le lien d'un dossier précédent
     try {
       const isPart = manClientType === "particulier";
       // Jours écoulés depuis l'échéance : positif = dépassée, négatif = pas encore atteinte
@@ -9544,7 +9545,7 @@ function CGUPage({ onBack }) {
   );
 }
 
-function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient }) {
+function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [paymentStatuses, setPaymentStatuses] = useState(() => {
@@ -9556,6 +9557,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       try { localStorage.setItem("freeley_payment_status", JSON.stringify(next)); } catch(e) {}
       return next;
     });
+    if (onPaymentStatusChanged) onPaymentStatusChanged(); // rafraîchit immédiatement la cloche d'alertes
   };
   const [deletingId, setDeletingId] = useState(null);
   const [filter, setFilter] = useState("tous"); // "tous" | "pending" | "signed"
