@@ -9700,8 +9700,9 @@ ${freelanceName}`;
       doc.text("FACTURE", PW - MR, y + 8, { align: "right" });
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
       doc.text(`N° ${invoiceNum}`, PW - MR, y + 15, { align: "right" });
-      doc.text(`Date : ${today}`, PW - MR, y + 20, { align: "right" });
-      y += 34;
+      doc.text(`Date d'émission : ${today}`, PW - MR, y + 20, { align: "right" });
+      doc.text(`Date d'échéance : ${today} (paiement à réception)`, PW - MR, y + 25, { align: "right" });
+      y += 39;
 
       doc.setDrawColor(...GOLD); doc.setLineWidth(0.6); doc.line(ML, y, PW - MR, y);
       y += 10;
@@ -9805,6 +9806,8 @@ ${freelanceName}`;
         ? "Pénalités de retard : en cas de paiement au-delà de la date d'échéance, des pénalités calculées au taux d'intérêt légal en vigueur applicable aux consommateurs seront appliquées de plein droit."
         : "Pénalités de retard : taux BCE majoré de 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.";
       doc.text(doc.splitTextToSize(penaltyMention, cw), ML, y);
+      y += (form.typeClient === "particulier" ? 10 : 14);
+      doc.text("Pas d'escompte pour paiement anticipé.", ML, y);
 
       doc.save(`Facture_${invoiceNum}.pdf`);
       reserveInvoiceNumber();
@@ -9879,6 +9882,7 @@ ${freelanceName}`;
             <div style={{ textAlign:"right" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.15em", color:C.textL, fontWeight:600, marginBottom:3 }}>DATE D'ÉMISSION</div>
               <div style={{ fontFamily:T.body, fontSize:13, color:C.navy, fontWeight:500 }}>{today}</div>
+              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>Échéance : {today} (à réception)</div>
             </div>
           </div>
 
@@ -10063,6 +10067,7 @@ ${freelanceName}`;
               ? "Pénalités de retard : taux d'intérêt légal en vigueur applicable aux consommateurs, appliqué de plein droit en cas de paiement au-delà de l'échéance."
               : "Pénalités de retard : taux BCE + 10 points (minimum légal : 3x le taux d'intérêt légal). Indemnité forfaitaire de recouvrement : 40€ (art. L441-10, D441-5 C. com.)."
             }
+            <br/>Pas d'escompte pour paiement anticipé.
           </div>
         </div>
 
