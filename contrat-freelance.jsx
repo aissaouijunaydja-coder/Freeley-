@@ -1081,6 +1081,7 @@ function AppInner() {
   const [alertsTick, setAlertsTick] = useState(0); // force le recalcul des alertes (badge cloche) après lecture
   const [draftSavedToast, setDraftSavedToast] = useState(false);
   const [profileInitialTab, setProfileInitialTab] = useState(null);
+  const [recouvrementInitialCase, setRecouvrementInitialCase] = useState(null);
   const [reviseOpen, setReviseOpen] = useState(false);
   const [reviseMessage, setReviseMessage] = useState("");
   const [reviseLoading, setReviseLoading] = useState(false);
@@ -2369,6 +2370,18 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onOpenMission: (alert) => {
       const contractId = alert?.id ? alert.id.replace(/^(recouvre_|sign_|soon_)/, "") : null;
       const entry = contractId ? history.find(c => String(c.id) === String(contractId)) : null;
+      if (alert?.action === "recouvrement" && entry) {
+        setRecouvrementInitialCase({
+          clientName: entry.clientName || "",
+          amount: entry.price || "",
+          dueDate: entry.endDate || "",
+          mission: entry.missionTitle || "",
+          clientEmail: entry.clientEmail || entry.form?.clientEmail || "",
+          typeClient: entry.form?.typeClient || "professionnel",
+        });
+        setShowRecouvrementModal(true);
+        return;
+      }
       if (entry) { setHistoryView(entry); goToScreen("history"); }
       else { goToScreen("history"); }
     },
@@ -2666,7 +2679,14 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         />
       )}
       {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} />}
-      {showRecouvrementModal && <RecouvrementFermeModal onClose={() => setShowRecouvrementModal(false)} profile={profile} />}
+      {showRecouvrementModal && (
+        <RecouvrementFermeModal
+          onClose={() => { setShowRecouvrementModal(false); setRecouvrementInitialCase(null); }}
+          profile={profile}
+          initialCase={recouvrementInitialCase}
+          history={history}
+        />
+      )}
 
       {/* ── 📷 Popup permission caméra (simulation iOS/Android) ── */}
       {showCameraPermissionModal && (
@@ -5837,59 +5857,78 @@ const markAllAlertsReadPersist = (ids) => {
 };
 
 // Génère des alertes réelles à partir de l'historique des contrats
-function buildAlertsFromHistory(history) {
+// Retourne la liste des dossiers nécessitant une action de recouvrement (avant ou après échéance)
+function getRecouvrementCases(history) {
   if (!Array.isArray(history) || !history.length) return [];
-  const alerts = [];
   const now = new Date();
-
-  // Statuts de paiement déjà enregistrés par le freelance (✓ Payé / ⏳ En attente / ⚠️ En retard)
   let payStatus = {};
   try { payStatus = JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) {}
 
+  const cases = [];
   history.forEach(c => {
     const isPaid = payStatus[c.id] === "paid";
+    if (!c.endDate || isPaid) return;
+    const end = new Date(c.endDate);
+    if (isNaN(end)) return;
+    const diffDays = Math.floor((end - now) / (1000 * 60 * 60 * 24));
+    if (diffDays > 3) return; // trop loin dans le futur, pas encore concerné
 
-    if (c.endDate && !isPaid) {
-      const end = new Date(c.endDate);
-      if (!isNaN(end)) {
-        const diffDays = Math.floor((end - now) / (1000 * 60 * 60 * 24)); // >0 = pas encore atteint, <0 = dépassé
+    cases.push({
+      id: c.id,
+      clientName: c.clientName || "Client sans nom",
+      amount: c.price || "",
+      dueDate: c.endDate,
+      mission: c.missionTitle || "Sans titre",
+      clientEmail: c.clientEmail || c.form?.clientEmail || "",
+      typeClient: c.form?.typeClient || "professionnel",
+      diffDays,
+      status: diffDays < 0 ? "late" : "soon",
+    });
+  });
 
-        // Alerte AVANT échéance : reste 0 à 3 jours avant la date de fin/paiement
-        if (diffDays >= 0 && diffDays <= 3) {
-          alerts.push({
-            id: "soon_" + c.id,
-            read: false,
-            icon: "⏰",
-            accentBg: "#FFFBEB",
-            accentIcon: "#FEF3C7",
-            accentBorder: "#FCD34D",
-            badgeBg: "#D97706",
-            badgeText: "ÉCHÉANCE PROCHE",
-            title: diffDays === 0 ? "Échéance aujourd'hui" : `Échéance dans ${diffDays} j`,
-            detail: `Mission « ${c.missionTitle || "Sans titre"} »${c.clientName ? " · " + c.clientName : ""} arrive à échéance${c.price ? " · " + c.price + " €" : ""} — envoie un rappel préventif avant que des pénalités s'appliquent.`,
-            action: "recouvrement",
-          });
-        }
+  // Les plus en retard en premier, puis les plus proches de l'échéance
+  return cases.sort((a, b) => a.diffDays - b.diffDays);
+}
 
-        // Alerte APRÈS échéance : date dépassée → relance / recouvrement
-        if (diffDays < 0) {
-          const daysLate = Math.abs(diffDays);
-          alerts.push({
-            id: "recouvre_" + c.id,
-            read: false,
-            icon: "⚠️",
-            accentBg: "#FEF5F5",
-            accentIcon: "#FEE2E2",
-            accentBorder: "#FCA5A5",
-            badgeBg: "#DC2626",
-            badgeText: "PAIEMENT",
-            title: "Paiement à relancer",
-            detail: `Mission « ${c.missionTitle || "Sans titre"} »${c.clientName ? " · " + c.clientName : ""} terminée depuis ${daysLate} j${c.price ? " · " + c.price + " €" : ""}`,
-            action: "recouvrement",
-          });
-        }
-      }
+function buildAlertsFromHistory(history) {
+  if (!Array.isArray(history) || !history.length) return [];
+  const alerts = [];
+
+  // Alertes recouvrement (avant + après échéance) — même logique que la liste dans Recouvrement Ferme
+  getRecouvrementCases(history).forEach(rc => {
+    if (rc.status === "soon") {
+      alerts.push({
+        id: "soon_" + rc.id,
+        read: false,
+        icon: "⏰",
+        accentBg: "#FFFBEB",
+        accentIcon: "#FEF3C7",
+        accentBorder: "#FCD34D",
+        badgeBg: "#D97706",
+        badgeText: "ÉCHÉANCE PROCHE",
+        title: rc.diffDays === 0 ? "Échéance aujourd'hui" : `Échéance dans ${rc.diffDays} j`,
+        detail: `Mission « ${rc.mission} » · ${rc.clientName} arrive à échéance${rc.amount ? " · " + rc.amount + " €" : ""} — envoie un rappel préventif avant que des pénalités s'appliquent.`,
+        action: "recouvrement",
+      });
+    } else {
+      const daysLate = Math.abs(rc.diffDays);
+      alerts.push({
+        id: "recouvre_" + rc.id,
+        read: false,
+        icon: "⚠️",
+        accentBg: "#FEF5F5",
+        accentIcon: "#FEE2E2",
+        accentBorder: "#FCA5A5",
+        badgeBg: "#DC2626",
+        badgeText: "PAIEMENT",
+        title: "Paiement à relancer",
+        detail: `Mission « ${rc.mission} » · ${rc.clientName} terminée depuis ${daysLate} j${rc.amount ? " · " + rc.amount + " €" : ""}`,
+        action: "recouvrement",
+      });
     }
+  });
+
+  history.forEach(c => {
     // Alerte 2 : contrat non signé
     if (c.signatureStatus === "none" && c.date) {
       alerts.push({
@@ -6528,10 +6567,22 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
 }
 
 /* ══════════════════════════════════════════════════════════ RECOUVREMENT FERME MODAL ══ */
-function RecouvrementFermeModal({ onClose, profile }) {
+function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
   /* ── State global ── */
   const [activeMode, setActiveMode] = useState(null); // null | "auto" | "manual"
-  const [manualOpen, setManualOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(!!initialCase);
+  const recouvrementCases = useMemo(() => getRecouvrementCases(history), [history]);
+
+  const applyCase = (rc) => {
+    setManDebtor(rc.clientName);
+    setManClientType(rc.typeClient);
+    setManDueDate(rc.dueDate);
+    setManClientEmail(rc.clientEmail);
+    setManAmount(String(rc.amount));
+    setManDetails(rc.mission);
+    setManualOpen(true);
+    setManStep("form");
+  };
 
   /* ── State mode AUTO (Sophie Martin pré-rempli) ── */
   const AUTO_CASE_DUE = "2026-05-27";
@@ -6550,16 +6601,17 @@ function RecouvrementFermeModal({ onClose, profile }) {
   const [autoDots, setAutoDots]     = useState(1);
 
   /* ── State mode MANUEL ── */
-  const [manDebtor,  setManDebtor]  = useState("");
-  const [manClientType, setManClientType] = useState("professionnel");
-  const [manDueDate, setManDueDate] = useState("");
-  const [manClientEmail, setManClientEmail] = useState("");
+  const [manDebtor,  setManDebtor]  = useState(initialCase?.clientName || "");
+  const [manClientType, setManClientType] = useState(initialCase?.typeClient || "professionnel");
+  const [manDueDate, setManDueDate] = useState(initialCase?.dueDate || "");
+  const [manClientEmail, setManClientEmail] = useState(initialCase?.clientEmail || "");
   const [manClientPhone, setManClientPhone] = useState("");
-  const [manAmount,  setManAmount]  = useState("");
-  const [manDetails, setManDetails] = useState("");
+  const [manAmount,  setManAmount]  = useState(initialCase?.amount ? String(initialCase.amount) : "");
+  const [manDetails, setManDetails] = useState(initialCase?.mission || "");
   const [manStep,    setManStep]    = useState("form"); // form | loading | result
   const [manLetter,  setManLetter]  = useState("");
   const [manTotal,   setManTotal]   = useState(0);
+  const [manLetterType, setManLetterType] = useState("formal"); // "formal" | "preventive"
   const [manCopying, setManCopying] = useState(false);
   const [manDots,    setManDots]    = useState(1);
 
@@ -6652,6 +6704,30 @@ IMPORTANT — Ne jamais affirmer des faits non fournis dans les informations ci-
 Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
   };
 
+  // Relance PRÉVENTIVE — pour une échéance pas encore dépassée. Ton amical, pas de menace, pas de pénalités (rien n'est dû, l'échéance n'est pas encore atteinte).
+  const buildPreventivePrompt = (debtor, amount, dueDate, mission, clientEmail) => {
+    const p = profile || {};
+    const senderName = p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" ") || "le prestataire";
+    return `Tu es un freelance qui envoie un rappel amical avant l'échéance d'un paiement. Rédige un court message de RELANCE PRÉVENTIVE, professionnel et cordial — PAS une mise en demeure, aucune menace, aucune mention de pénalités (rien n'est en retard).
+
+De la part de : ${senderName}
+Client : ${debtor}
+Montant à régler : ${amount} €
+Date d'échéance à venir : ${dueDate}
+Mission concernée : ${mission}
+
+Le message doit :
+1. Rappeler gentiment que le paiement arrive bientôt à échéance
+2. Mentionner le montant et la mission concernée
+3. Indiquer qu'un lien de paiement sécurisé est joint pour faciliter le règlement
+4. Rester bref (4-6 phrases), chaleureux et professionnel, sans jargon juridique
+5. Ne JAMAIS mentionner de pénalités, de mise en demeure, ou de conséquences — rien n'est en retard
+
+Termine par une formule de politesse simple et la signature "${senderName}".
+
+Réponds uniquement avec le texte du message, sans titre ni introduction.`;
+  };
+
   const callAI = async (prompt) => {
     const res = await fetch("/api/generate", {
       method:"POST",
@@ -6688,17 +6764,31 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
     if (!manDebtor.trim() || !manAmount.trim()) return;
     setManStep("loading");
     try {
-      const dueDateLabel = manDueDate ? new Date(manDueDate).toLocaleDateString("fr-FR") : "Non renseignée";
-      const realDaysLate = manDueDate
-        ? Math.max(1, Math.floor((new Date() - new Date(manDueDate)) / (1000 * 60 * 60 * 24)))
-        : 30; // valeur par défaut raisonnable si aucune date n'est renseignée
       const isPart = manClientType === "particulier";
-      const prompt = buildPrompt(manDebtor, manAmount, dueDateLabel, manDetails || "Mission freelance", realDaysLate, isPart);
-      const { total } = computeDueTotal(manAmount, realDaysLate, isPart);
-      setManTotal(total);
-      const text = await callAI(prompt);
-      setManLetter(text);
-      setManStep("result");
+      // Jours écoulés depuis l'échéance : positif = dépassée, négatif = pas encore atteinte
+      const rawDiff = manDueDate ? Math.floor((new Date() - new Date(manDueDate)) / (1000 * 60 * 60 * 24)) : 30;
+
+      if (manDueDate && rawDiff < 0) {
+        // ── Échéance PAS ENCORE atteinte → relance préventive (ton amical, pas de pénalités) ──
+        setManLetterType("preventive");
+        const dueDateLabel = new Date(manDueDate).toLocaleDateString("fr-FR");
+        const prompt = buildPreventivePrompt(manDebtor, manAmount, dueDateLabel, manDetails || "Mission freelance", manClientEmail);
+        setManTotal(parseFloat(manAmount) || 0); // pas de pénalités : le total à régler est simplement le montant dû
+        const text = await callAI(prompt);
+        setManLetter(text);
+        setManStep("result");
+      } else {
+        // ── Échéance dépassée (ou non renseignée) → mise en demeure formelle ──
+        setManLetterType("formal");
+        const dueDateLabel = manDueDate ? new Date(manDueDate).toLocaleDateString("fr-FR") : "Non renseignée";
+        const realDaysLate = Math.max(1, rawDiff);
+        const prompt = buildPrompt(manDebtor, manAmount, dueDateLabel, manDetails || "Mission freelance", realDaysLate, isPart);
+        const { total } = computeDueTotal(manAmount, realDaysLate, isPart);
+        setManTotal(total);
+        const text = await callAI(prompt);
+        setManLetter(text);
+        setManStep("result");
+      }
     } catch {
       setManLetter("Erreur de génération. Vérifie ta connexion et réessaie.");
       setManStep("result");
@@ -6715,16 +6805,25 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
   const labelSt = { display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:7 };
 
   /* ── Loading screen shared ── */
-  const LoadingScreen = ({ dots }) => (
+  const LoadingScreen = ({ dots, type = "formal" }) => {
+    const isPrev = type === "preventive";
+    return (
     <div style={{ textAlign:"center", padding:"36px 0" }}>
-      <div style={{ width:52, height:52, border:"3px solid #FEE2E2", borderTopColor:"#DC2626", borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 18px" }} />
-      <div style={{ fontFamily:T.display, fontSize:17, color:"#7F1D1D", fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
+      <div style={{ width:52, height:52, border: isPrev ? "3px solid #FEF3C7" : "3px solid #FEE2E2", borderTopColor: isPrev ? "#D97706" : "#DC2626", borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 18px" }} />
+      <div style={{ fontFamily:T.display, fontSize:17, color: isPrev ? "#92400E" : "#7F1D1D", fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
       <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, lineHeight:1.7 }}>
-        Calcul des pénalités de retard…<br/>
-        <span style={{ color:"#DC2626", fontWeight:600 }}>Art. L441-10 · L441-11 · D441-5 C.com.</span>
+        {isPrev ? (
+          <>Préparation du rappel amical…</>
+        ) : (
+          <>
+            Calcul des pénalités de retard…<br/>
+            <span style={{ color:"#DC2626", fontWeight:600 }}>Art. L441-10 · L441-11 · D441-5 C.com.</span>
+          </>
+        )}
       </div>
     </div>
-  );
+    );
+  };
 
   /* ── Result screen shared ── */
   const handleGeneratePaymentLink = async (total, clientName, mission, clientEmail) => {
@@ -6754,11 +6853,12 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
     }
   };
 
-  const downloadLetterPDF = async (letter, clientName, total, mission, clientEmail) => {
+  const downloadLetterPDF = async (letter, clientName, total, mission, clientEmail, letterType = "formal") => {
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!letter) { alert("Aucune lettre à télécharger."); return; }
+    const isPreventive = letterType === "preventive";
     try {
-      // 1. Récupérer (ou générer) le lien de paiement Stripe pour le montant total avec pénalités
+      // 1. Récupérer (ou générer) le lien de paiement Stripe pour le montant dû
       let payUrl = stripeLinkUrl;
       if (!payUrl && total > 0) {
         payUrl = await handleGeneratePaymentLink(total, clientName, mission, clientEmail);
@@ -6787,14 +6887,15 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "mm", format: "a4" });
       const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-      const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
+      const NAVY = isPreventive ? [180, 140, 70] : [26, 54, 93];
+      const GOLD = [180, 140, 70];
       const today = new Date().toLocaleDateString("fr-FR");
       doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
       doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
       doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
-      doc.text("MISE EN DEMEURE DE PAIEMENT", ML, 15);
+      doc.text(isPreventive ? "RAPPEL AVANT ÉCHÉANCE" : "MISE EN DEMEURE DE PAIEMENT", ML, 15);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-      doc.text(`Établie le ${today} via Freeley — Recouvrement Ferme`, ML, 23);
+      doc.text(`Établi le ${today} via Freeley${isPreventive ? "" : " — Recouvrement Ferme"}`, ML, 23);
       let y = 42;
       doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
       const cleanText = String(letter).replace(/^#+\s*/gm, "").replace(/\*\*/g, "");
@@ -6804,39 +6905,45 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
         doc.text(l, ML, y); y += 5.4;
       });
 
-      // 3. Bloc paiement (IBAN existe déjà dans le corps de la lettre) + QR carte
+      // 3. Bloc paiement + QR carte
       if (qrBase64) {
         if (y > 235) { doc.addPage(); y = 20; }
         y += 8;
         const boxH = 36;
         doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, cw, boxH, 2, 2, "F");
         doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-        doc.text("RÉGLER CETTE MISE EN DEMEURE PAR CARTE", ML + 4, y + 8);
+        doc.text(isPreventive ? "RÉGLER PAR CARTE" : "RÉGLER CETTE MISE EN DEMEURE PAR CARTE", ML + 4, y + 8);
         doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(80,80,80);
-        doc.text(doc.splitTextToSize(`Scanner ce code pour régler immédiatement le montant total de ${total.toFixed ? total.toFixed(2) : total} € (principal + pénalités + indemnité).`, cw - 40), ML + 4, y + 15);
+        const totalLabel = total && total.toFixed ? total.toFixed(2) : total;
+        const boxText = isPreventive
+          ? `Scanner ce code pour régler dès maintenant le montant de ${totalLabel} € avant l'échéance.`
+          : `Scanner ce code pour régler immédiatement le montant total de ${totalLabel} € (principal + pénalités + indemnité).`;
+        doc.text(doc.splitTextToSize(boxText, cw - 40), ML + 4, y + 15);
         try { doc.addImage(qrBase64, "PNG", ML + cw - 32, y + 3, 30, 30); } catch(e) {}
         y += boxH;
       }
 
-      doc.save(`Mise_en_demeure_${(clientName||"client").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+      doc.save(`${isPreventive ? "Rappel" : "Mise_en_demeure"}_${(clientName||"client").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
     } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
   };
 
-  const ResultScreen = ({ letter, onEdit, clientName, clientEmail, clientPhone, total, mission }) => (
+  const ResultScreen = ({ letter, onEdit, clientName, clientEmail, clientPhone, total, mission, type = "formal" }) => {
+    const isPreventive = type === "preventive";
+    return (
     <div className="fade-up">
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:10, padding:"11px 16px" }}>
-        <span>🚨</span>
-        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#991B1B" }}>Mise en demeure prête · Pénalités de retard calculées</div>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background: isPreventive ? "#FFFBEB" : "#FEF2F2", border:`1px solid ${isPreventive ? "#FCD34D" : "#FCA5A5"}`, borderRadius:10, padding:"11px 16px" }}>
+        <span>{isPreventive ? "⏰" : "🚨"}</span>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isPreventive ? "#92400E" : "#991B1B" }}>{isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
       </div>
       <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"18px 20px", maxHeight:260, overflowY:"auto", marginBottom:14 }}>
         <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{letter}</pre>
       </div>
 
-      {/* Paiement du montant total (principal + pénalités + indemnité) */}
+      {/* Paiement du montant dû */}
       <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
-        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Faire régler le montant total ({total ? total.toFixed(2) : "0.00"} €) par carte</div>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Faire régler {isPreventive ? "" : "le montant total "}({total ? total.toFixed(2) : "0.00"} €) par carte</div>
         <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:10 }}>
-          Ce lien inclut le principal, les pénalités calculées et l'indemnité — le client règle tout en un clic.
+          {isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien inclut le principal, les pénalités calculées et l'indemnité — le client règle tout en un clic."}
         </div>
         <button
           onClick={() => handleGeneratePaymentLink(total, clientName || AUTO_CASE.clientName, mission, clientEmail)}
@@ -6856,18 +6963,18 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
       <div style={{ display:"flex", gap:10 }}>
         <button onClick={onEdit} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
         <button
-          onClick={() => downloadLetterPDF(letter, clientName || AUTO_CASE.clientName, total, mission, clientEmail)}
+          onClick={() => downloadLetterPDF(letter, clientName || AUTO_CASE.clientName, total, mission, clientEmail, type)}
           style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}
           onMouseOver={e=>e.currentTarget.style.background="#F5F3FF"}
           onMouseOut={e=>e.currentTarget.style.background=C.white}
         >⬇ PDF</button>
         <button
-          onClick={() => setSendModal({ letter, clientName: clientName || AUTO_CASE.clientName, clientEmail, clientPhone, total })}
-          style={{ flex:2, padding:"12px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
-          onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 28px rgba(185,28,28,0.45)";}}
-          onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 5px 18px rgba(185,28,28,0.3)";}}
+          onClick={() => setSendModal({ letter, clientName: clientName || AUTO_CASE.clientName, clientEmail, clientPhone, total, type })}
+          style={{ flex:2, padding:"12px", background: isPreventive ? "linear-gradient(135deg, #B45309 0%, #D97706 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: isPreventive ? "0 5px 18px rgba(217,119,6,0.3)" : "0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
+          onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";}}
+          onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";}}
         >
-          <span style={{ fontSize:16 }}>✉️</span> Envoyer la mise en demeure
+          <span style={{ fontSize:16 }}>✉️</span> {isPreventive ? "Envoyer le rappel" : "Envoyer la mise en demeure"}
         </button>
       </div>
 
@@ -6903,8 +7010,9 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
               {/* Option Email */}
               <button
                 onClick={() => {
-                  const subject = `Mise en demeure de paiement — ${sendModal.clientName}`;
-                  const body = (sendModal.letter || "") + (stripeLinkUrl ? `\n\n---\nRéglez immédiatement par carte via ce lien sécurisé :\n${stripeLinkUrl}` : "");
+                  const isPrev = sendModal.type === "preventive";
+                  const subject = isPrev ? `Rappel avant échéance — ${sendModal.clientName}` : `Mise en demeure de paiement — ${sendModal.clientName}`;
+                  const body = (sendModal.letter || "") + (stripeLinkUrl ? `\n\n---\nRéglez ${isPrev ? "" : "immédiatement "}par carte via ce lien sécurisé :\n${stripeLinkUrl}` : "");
                   const to = sendModal.clientEmail || "";
                   window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
                   setSendSuccess(sendModal.clientName);
@@ -6925,7 +7033,9 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
               {/* Option SMS */}
               <button
                 onClick={() => {
-                  const msg = `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement.${stripeLinkUrl ? ` Réglez ici : ${stripeLinkUrl}` : ""} Cordialement.`;
+                  const msg = sendModal.type === "preventive"
+                    ? `Bonjour ${sendModal.clientName}, petit rappel amical : ton paiement arrive bientôt à échéance.${stripeLinkUrl ? ` Tu peux régler ici : ${stripeLinkUrl}` : ""} Merci !`
+                    : `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement.${stripeLinkUrl ? ` Réglez ici : ${stripeLinkUrl}` : ""} Cordialement.`;
                   window.location.href = `sms:${sendModal.clientPhone || ""}?body=${encodeURIComponent(msg)}`;
                   setSendSuccess(sendModal.clientName);
                 }}
@@ -6947,6 +7057,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
       )}
     </div>
   );
+  };
 
   return (
     <div
@@ -6972,6 +7083,39 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
 
         {/* ── BODY ── */}
         <div style={{ flex:1, overflowY:"auto", padding:"22px 26px 26px" }}>
+
+          {/* ════ BLOC 0 — DOSSIERS EN COURS (avant + après échéance) ════ */}
+          {recouvrementCases.length > 0 && (
+            <div className="fade-up" style={{ marginBottom:16 }}>
+              <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:10 }}>
+                📋 {recouvrementCases.length} DOSSIER{recouvrementCases.length > 1 ? "S" : ""} À SURVEILLER
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:220, overflowY:"auto" }}>
+                {recouvrementCases.map(rc => (
+                  <div key={rc.id} style={{
+                    display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
+                    background: rc.status === "late" ? "#FEF2F2" : "#FFFBEB",
+                    border:`1px solid ${rc.status === "late" ? "#FCA5A5" : "#FCD34D"}`,
+                    borderRadius:10, padding:"10px 12px",
+                  }}>
+                    <div style={{ minWidth:0, flex:1 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
+                        <span style={{ fontSize:12 }}>{rc.status === "late" ? "⚠️" : "⏰"}</span>
+                        <span style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color: rc.status === "late" ? "#991B1B" : "#92400E" }}>{rc.clientName}</span>
+                      </div>
+                      <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textM, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                        {rc.mission} · {rc.amount ? rc.amount + " €" : "—"} · {rc.status === "late" ? `${Math.abs(rc.diffDays)} j de retard` : rc.diffDays === 0 ? "échéance aujourd'hui" : `échéance dans ${rc.diffDays} j`}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => applyCase(rc)}
+                      style={{ flexShrink:0, padding:"7px 12px", background: rc.status === "late" ? "#DC2626" : "#D97706", color:"#fff", border:"none", borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}
+                    >Traiter →</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* ════ BLOC 1 — MODE AUTOMATIQUE ════ */}
           <div className="fade-up" style={{ marginBottom:16 }}>
@@ -7049,6 +7193,12 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                 <div className="fade-up" style={{ background:C.white, border:`1.5px solid ${C.border}`, borderTop:"none", borderRadius:"0 0 13px 13px", padding:"18px 18px 20px" }}>
                   {manStep === "form" && (
                     <>
+                      {initialCase && (
+                        <div style={{ display:"flex", alignItems:"center", gap:8, background:"#FEF3C7", border:"1px solid #FCD34D", borderRadius:8, padding:"9px 12px", marginBottom:14 }}>
+                          <span style={{ fontSize:14 }}>✨</span>
+                          <div style={{ fontFamily:T.body, fontSize:11, color:"#92400E", fontWeight:600 }}>Champs pré-remplis depuis ton dossier suivi — vérifie puis génère.</div>
+                        </div>
+                      )}
                       <div style={{ marginBottom:12 }}>
                         <label style={labelSt}>NOM DU CLIENT</label>
                         <input style={inputStyle} value={manDebtor} onChange={e=>setManDebtor(e.target.value)} placeholder="Ex : Pierre Durand / Agence Nova" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
@@ -7117,7 +7267,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                       </button>
                     </>
                   )}
-                  {manStep === "loading" && <LoadingScreen dots={manDots} />}
+                  {manStep === "loading" && <LoadingScreen dots={manDots} type={manDueDate && (new Date(manDueDate) - new Date()) > 0 ? "preventive" : "formal"} />}
                   {manStep === "result" && (
                     <ResultScreen
                       letter={manLetter}
@@ -7127,6 +7277,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                       clientPhone={manClientPhone}
                       total={manTotal}
                       mission={manDetails || "Prestation freelance"}
+                      type={manLetterType}
                     />
                   )}
                 </div>
