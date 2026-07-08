@@ -308,7 +308,7 @@ const submitClientSignature = async (contractId, clientSignature) => {
 const initialForm = {
   freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
   freelanceEmail: "",
-  clientName: "", clientCompany: "", clientAddress: "", clientEmail: "", typeClient: "professionnel",
+  clientName: "", clientCompany: "", clientAddress: "", clientEmail: "", clientPhone: "", typeClient: "professionnel",
   missionTitle: "", missionDescription: "", categorieMetier: "autre", startDate: "", endDate: "",
   price: "", paymentTerms: "Comptant", revisions: "2", latePaymentPenalty: true, acomptePourcentage: "0",
 };
@@ -2392,6 +2392,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           dueDate: entry.endDate || "",
           mission: entry.missionTitle || "",
           clientEmail: entry.clientEmail || entry.form?.clientEmail || "",
+          clientPhone: entry.clientPhone || entry.form?.clientPhone || "",
           typeClient: entry.form?.typeClient || "professionnel",
         });
         setShowRecouvrementModal(true);
@@ -2959,6 +2960,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <Field label="Nom du client *" value={form.clientName} onChange={v=>update("clientName",v)} placeholder="Marie Martin" error={errors.clientName} delay={2} />
               <Field label="Entreprise" value={form.clientCompany} onChange={v=>update("clientCompany",v)} placeholder="Startup SAS (optionnel)" delay={3} />
               <Field label="Email du client *" value={form.clientEmail} onChange={v=>update("clientEmail",v)} placeholder="marie@startup.com" type="email" error={errors.clientEmail} delay={4} />
+              <Field label="Téléphone du client" value={form.clientPhone} onChange={v=>update("clientPhone",v)} placeholder="06 12 34 56 78 (optionnel)" type="tel" delay={5} />
               {/* Badge note client (système fantôme) */}
               {(() => {
                 const rating = form.clientEmail ? getClientRating(form.clientEmail) : null;
@@ -5895,6 +5897,7 @@ function getRecouvrementCases(history) {
       dueDate: c.endDate,
       mission: c.missionTitle || "Sans titre",
       clientEmail: c.clientEmail || c.form?.clientEmail || "",
+      clientPhone: c.clientPhone || c.form?.clientPhone || "",
       typeClient: c.form?.typeClient || "professionnel",
       diffDays,
       status: diffDays < 0 ? "late" : "soon",
@@ -7201,6 +7204,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                     onEdit={() => { setAutoStep("alert"); setAutoLetter(""); }}
                     clientName={autoCase.clientName || "Client"}
                     clientEmail={autoCase.clientEmail}
+                    clientPhone={autoCase.clientPhone}
                     total={autoTotal}
                     mission={autoCase.mission}
                     type={autoLetterType}
