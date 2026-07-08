@@ -9799,6 +9799,12 @@ ${freelanceName}`;
         ? "Règlement à réception de facture. Ce paiement conditionne le démarrage de la mission."
         : `Acompte de ${depositPct}% conditionnant le démarrage de la mission. Le solde sera facturé à la livraison.`;
       doc.text(doc.splitTextToSize(foot, cw), ML, y);
+      y += 9;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+      const penaltyMention = form.typeClient === "particulier"
+        ? "Pénalités de retard : en cas de paiement au-delà de la date d'échéance, des pénalités calculées au taux d'intérêt légal en vigueur applicable aux consommateurs seront appliquées de plein droit."
+        : "Pénalités de retard : taux BCE majoré de 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.";
+      doc.text(doc.splitTextToSize(penaltyMention, cw), ML, y);
 
       doc.save(`Facture_${invoiceNum}.pdf`);
       reserveInvoiceNumber();
@@ -10053,7 +10059,10 @@ ${freelanceName}`;
             borderTop:`1px solid ${C.borderL}`, paddingTop:12, marginBottom:20,
             fontFamily:T.body, fontSize:10, color:C.textL, lineHeight:1.6,
           }}>
-            Pénalités de retard : Taux BCE + 10 points. Indemnité forfaitaire de recouvrement : 40€.
+            {form.typeClient === "particulier"
+              ? "Pénalités de retard : taux d'intérêt légal en vigueur applicable aux consommateurs, appliqué de plein droit en cas de paiement au-delà de l'échéance."
+              : "Pénalités de retard : taux BCE + 10 points (minimum légal : 3x le taux d'intérêt légal). Indemnité forfaitaire de recouvrement : 40€ (art. L441-10, D441-5 C. com.)."
+            }
           </div>
         </div>
 
