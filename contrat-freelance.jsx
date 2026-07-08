@@ -10962,8 +10962,6 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
     setTimeout(()=>setPhase("result"),300);
   };
 
-  const [extractedData, setExtractedData] = useState(initialResults?.extractedData || null);
-
   const handleExtraction = async () => {
     if (!fileData) return;
     try {
@@ -10974,13 +10972,12 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
       const data = await res.json();
       const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
       const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
-      setExtractedData(parsed);
       const existingRes = JSON.parse(localStorage.getItem("freeley_scan_results") || "{}");
       const updatedRes = { ...existingRes, extractedData: parsed };
       localStorage.setItem("freeley_scan_results", JSON.stringify(updatedRes));
       const scanList = JSON.parse(localStorage.getItem("freeley_scan_list") || "[]");
       if (scanList.length > 0) { scanList[0] = updatedRes; localStorage.setItem("freeley_scan_list", JSON.stringify(scanList)); }
-    } catch(e) { setExtractedData(null); }
+    } catch(e) { /* extraction secondaire optionnelle : on garde l'analyse de risques déjà obtenue */ }
   };
 
   const findings = [
@@ -11682,85 +11679,6 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.6,
               }}>
                 ⚖ Analyse à titre indicatif. Pour un contrat à fort enjeu, consultez un juriste spécialisé.
-              </div>
-
-              {/* ════ EXTRACTION MAGIQUE ════ */}
-              <div className="fade-up" style={{
-                background:"linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 60%, #FAF5FF 100%)",
-                border:"1.5px solid #C4B5FD",
-                borderRadius:16, overflow:"hidden", marginBottom:20,
-                boxShadow:"0 6px 28px #7C3AED18",
-                animation:"fadeUp 0.4s cubic-bezier(.22,.68,0,1.2) both",
-              }}>
-                {/* Header extraction */}
-                <div style={{
-                  background:"linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)",
-                  padding:"16px 20px",
-                  display:"flex", alignItems:"center", justifyContent:"space-between",
-                }}>
-                  <div>
-                    <div style={{ fontFamily:T.display, fontSize:16, fontWeight:700, color:"#FFFFFF", marginBottom:3 }}>
-                      🪄 Extraction magique des données
-                    </div>
-                    <div style={{ fontFamily:T.body, fontSize:11, color:"#C4B5FD", lineHeight:1.5 }}>
-                      L'IA a détecté et extrait automatiquement les informations clés de votre document :
-                    </div>
-                  </div>
-                  <div style={{
-                    width:40, height:40, borderRadius:10, flexShrink:0,
-                    background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.25)",
-                    display:"flex", alignItems:"center", justifyContent:"center", fontSize:20,
-                  }}>🪄</div>
-                </div>
-
-                {/* Données extraites */}
-                <div style={{ padding:"18px 20px 4px" }}>
-                  <div style={{ fontFamily:T.body, fontSize:10, fontWeight:700, letterSpacing:"0.12em", color:"#6D28D9", marginBottom:14 }}>
-                    DONNÉES DÉTECTÉES PAR L'IA
-                  </div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:18 }}>
-                    {[
-                      { icon:"👤", label:"Client détecté", value: extractedData?.client || "Non détecté", color:"#5B21B6", bg:"#EDE9FE", border:"#C4B5FD" },
-                      { icon:"💼", label:"Type de mission", value: extractedData?.mission || "Non détecté", color:"#1D4ED8", bg:"#EFF6FF", border:"#BFDBFE" },
-                      { icon:"💰", label:"Montant global", value: extractedData?.montant || "Non détecté", color:"#166534", bg:"#F0FDF4", border:"#86EFAC" },
-                      { icon:"💳", label:"Acompte requis (30%)", value: extractedData?.acompte || "Non détecté", color:"#92400E", bg:"#FFFBEB", border:"#FDE68A" },
-                      { icon:"📅", label:"Dates de la mission", value: extractedData?.dates || "Non détecté", color:"#0F4C75", bg:"#F0F9FF", border:"#BAE6FD" },
-                    ].map((field, i) => (
-                      <div key={i} style={{
-                        display:"flex", alignItems:"center", gap:12,
-                        background:"#FFFFFF", border:`1.5px solid ${field.border}`,
-                        borderRadius:10, padding:"11px 14px",
-                        animation:`fadeUp 0.35s ${i * 0.07}s both cubic-bezier(.22,.68,0,1.2)`,
-                        position:"relative", overflow:"hidden",
-                      }}>
-                        {/* Accent bar left */}
-                        <div style={{ position:"absolute", left:0, top:0, bottom:0, width:3, background:field.border, borderRadius:"10px 0 0 10px" }} />
-                        {/* Icon badge */}
-                        <div style={{
-                          width:34, height:34, borderRadius:8, flexShrink:0,
-                          background:field.bg, border:`1px solid ${field.border}`,
-                          display:"flex", alignItems:"center", justifyContent:"center", fontSize:16,
-                        }}>{field.icon}</div>
-                        {/* Label + Value */}
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontFamily:T.body, fontSize:10, fontWeight:700, color:C.textL, letterSpacing:"0.08em", marginBottom:2 }}>
-                            {field.label.toUpperCase()}
-                          </div>
-                          <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:field.color, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                            {field.value}
-                          </div>
-                        </div>
-                        {/* Lock icon */}
-                        <div style={{
-                          width:22, height:22, borderRadius:6, flexShrink:0,
-                          background:field.bg, border:`1px solid ${field.border}`,
-                          display:"flex", alignItems:"center", justifyContent:"center", fontSize:11,
-                        }}>🔒</div>
-                      </div>
-                    ))}
-                  </div>
-
-                </div>
               </div>
 
               {/* CTA */}
