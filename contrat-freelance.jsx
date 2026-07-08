@@ -2654,7 +2654,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onGoToProfileTva={goToProfileFacturation}
         />
       )}
-      {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} />}
+      {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} profile={profile} />}
       {showRecouvrementModal && (
         <RecouvrementFermeModal
           onClose={() => { setShowRecouvrementModal(false); setRecouvrementInitialCase(null); }}
@@ -6396,14 +6396,26 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
 
 /* ══════════════════════════════════════════ AUTH MODAL ══ */
 /* ══════════════════════════════════════════════════════════ NDA EXPRESS MODAL ══ */
-function NdaExpressModal({ onClose }) {
+function NdaExpressModal({ onClose, profile }) {
   const [step, setStep]           = useState("form"); // "form" | "loading" | "result"
-  const [partieA, setPartieA]     = useState("");
+  const [partieA, setPartieA]     = useState(() => {
+    const p = profile || {};
+    return p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" ") || "";
+  });
   const [partieB, setPartieB]     = useState("");
+  const [partieBEmail, setPartieBEmail] = useState("");
   const [objet, setObjet]         = useState("");
+  const [ndaType, setNdaType]     = useState("unilateral"); // "unilateral" | "mutuel"
+  const [duration, setDuration]   = useState("3"); // "2" | "3" | "5" | "indeterminee"
   const [nda, setNda]             = useState("");
+  const [ndaRef, setNdaRef]       = useState("");
   const [copying, setCopying]     = useState(false);
   const [dots, setDots]           = useState(1);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const ndaHistory = (() => {
+    try { return JSON.parse(localStorage.getItem("freeley_nda_list") || "[]"); } catch(e) { return []; }
+  })();
 
   useEffect(() => {
     if (step !== "loading") return;
@@ -6411,26 +6423,44 @@ function NdaExpressModal({ onClose }) {
     return () => clearInterval(id);
   }, [step]);
 
+  // Filet de sécurité : nettoie tout résidu de markdown (tableaux, gras, titres) si l'IA en génère malgré les instructions
+  const cleanNdaText = (text) => String(text || "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/\*\*/g, "")
+    .split("\n")
+    .filter(line => !/^[\s|:\-]+$/.test(line))
+    .map(line => line.includes("|") ? line.split("|").map(s => s.trim()).filter(Boolean).join(" — ") : line)
+    .join("\n");
+
+  const durationLabel = { "2":"2 ans", "3":"3 ans", "5":"5 ans", "indeterminee":"durée indéterminée, jusqu'à ce que l'information devienne publique" }[duration];
+
   const generate = async () => {
     if (!partieA.trim() || !partieB.trim() || !objet.trim()) return;
     setStep("loading");
+    // Référence générée par l'app (pas par l'IA) : garantit un identifiant réel et unique, jamais inventé au hasard
+    const ref = `NDA-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
+    setNdaRef(ref);
     try {
       const prompt = `Tu es un avocat d'affaires français. Rédige un NDA (Non-Disclosure Agreement) express, complet et juridiquement solide en droit français, entre :
 
-Partie A (divulgatrice) : ${partieA}
-Partie B (réceptrice) : ${partieB}
+Partie A : ${partieA}
+Partie B : ${partieB}
 Objet / contexte du projet confidentiel : ${objet}
+Type d'accord : ${ndaType === "mutuel" ? "MUTUEL / BILATÉRAL — les deux parties se divulguent mutuellement des informations confidentielles et sont réciproquement tenues aux mêmes obligations" : "UNILATÉRAL — seule la Partie A divulgue des informations confidentielles, la Partie B les reçoit et s'engage à les protéger"}
+Durée de l'obligation de confidentialité : ${durationLabel}
 
 Structure OBLIGATOIRE :
-- En-tête : "ACCORD DE CONFIDENTIALITÉ (NDA)" + date du jour + N° NDA-[AAAA]-[4 chiffres]
-- ARTICLE 1 — DÉFINITION DES INFORMATIONS CONFIDENTIELLES
-- ARTICLE 2 — OBLIGATIONS DE CONFIDENTIALITÉ (durée : 3 ans)
+- En-tête : "ACCORD DE CONFIDENTIALITÉ (NDA)" + date du jour + référence — utilise EXACTEMENT cette référence, ne l'invente pas et ne la modifie pas : N° ${ref}
+- ARTICLE 1 — DÉFINITION DES INFORMATIONS CONFIDENTIELLES (adapte la rédaction selon que l'accord est unilatéral ou mutuel, précisé ci-dessus)
+- ARTICLE 2 — OBLIGATIONS DE CONFIDENTIALITÉ (durée : ${durationLabel} — reprends cette durée telle quelle, ne la recalcule pas)
 - ARTICLE 3 — EXCLUSIONS (information déjà publique, connue indépendamment…)
 - ARTICLE 4 — PROPRIÉTÉ DES INFORMATIONS
 - ARTICLE 5 — DURÉE ET RÉSILIATION
 - ARTICLE 6 — SANCTIONS ET RÉPARATION (référence art. 1240 Code civil, dommages et intérêts)
 - ARTICLE 7 — LOI APPLICABLE ET JURIDICTION (droit français, tribunal compétent)
 - BLOC SIGNATURES des deux parties
+
+MISE EN FORME — ce texte sera affiché tel quel, SANS interprétation du markdown : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Présente le texte avec des tirets ou retours à la ligne classiques uniquement.
 
 Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juridique précis. Maximum 500 mots.`;
 
@@ -6443,6 +6473,12 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
       setNda(text);
       setStep("result");
+      // Sauvegarde locale (les 15 derniers NDA), pour pouvoir les retrouver après fermeture
+      try {
+        const existing = JSON.parse(localStorage.getItem("freeley_nda_list") || "[]");
+        existing.unshift({ partieA, partieB, partieBEmail, objet, ndaType, duration, ndaRef: ref, nda: text, date: new Date().toLocaleDateString("fr-FR") });
+        localStorage.setItem("freeley_nda_list", JSON.stringify(existing.slice(0, 15)));
+      } catch(e) {}
     } catch(e) {
       setNda("Erreur de génération. Vérifie ta connexion et réessaie.");
       setStep("result");
@@ -6450,7 +6486,36 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
   };
 
   const copy = () => {
-    navigator.clipboard.writeText(nda).then(() => { setCopying(true); setTimeout(()=>setCopying(false), 2000); });
+    navigator.clipboard.writeText(cleanNdaText(nda)).then(() => { setCopying(true); setTimeout(()=>setCopying(false), 2000); });
+  };
+
+  const sendByEmail = () => {
+    const subject = `Accord de confidentialité (NDA) — ${partieA} / ${partieB}`;
+    window.location.href = `mailto:${partieBEmail || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(cleanNdaText(nda))}`;
+  };
+
+  const downloadNdaPDF = () => {
+    if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+    if (!nda) { alert("Aucun NDA à télécharger."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+    const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
+    const today = new Date().toLocaleDateString("fr-FR");
+    doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
+    doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
+    doc.text("ACCORD DE CONFIDENTIALITÉ (NDA)", ML, 15);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
+    doc.text(`${ndaRef} · Établi le ${today} via Freeley`, ML, 23);
+    let y = 42;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
+    const lines = doc.splitTextToSize(cleanNdaText(nda), cw);
+    lines.forEach(l => {
+      if (y > 270) { doc.addPage(); y = 20; }
+      doc.text(l, ML, y); y += 5.4;
+    });
+    doc.save(`NDA_${(partieB||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
   };
 
   const inputStyle = {
@@ -6460,6 +6525,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
     background:C.white, transition:"border-color 0.16s",
     boxSizing:"border-box",
   };
+  const labelSt = { display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:7 };
 
   return (
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{ position:"fixed",inset:0,background:"rgba(10,18,32,0.74)",zIndex:10100,display:"flex",alignItems:"center",justifyContent:"center",padding:20,backdropFilter:"blur(10px)" }}>
@@ -6488,18 +6554,67 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.65, marginBottom:22, background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px" }}>
                 🛡️ <strong style={{color:"#1E40AF"}}>Protégez vos idées avant d'envoyer votre brief.</strong> Ce NDA est généré par l'IA en 15 secondes et couvre toutes les obligations contractuelles françaises.
               </div>
+
+              {/* Type d'accord */}
               <div style={{ marginBottom:14 }}>
-                <label style={{ display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:7 }}>PARTIE A — VOUS (divulgatrice)</label>
+                <label style={labelSt}>TYPE D'ACCORD</label>
+                <div style={{ display:"flex", gap:8 }}>
+                  {[
+                    { key:"unilateral", label:"Unilatéral (A → B)" },
+                    { key:"mutuel", label:"Mutuel (A ⇄ B)" },
+                  ].map(o => (
+                    <button key={o.key} type="button" onClick={() => setNdaType(o.key)} style={{
+                      flex:1, padding:"9px 0", borderRadius:8, cursor:"pointer",
+                      fontFamily:T.body, fontSize:12.5, fontWeight:700,
+                      background: ndaType === o.key ? C.navy : C.white,
+                      color: ndaType === o.key ? "#fff" : C.textM,
+                      border: `1.5px solid ${ndaType === o.key ? C.navy : C.border}`,
+                    }}>{o.label}</button>
+                  ))}
+                </div>
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
+                  {ndaType === "mutuel" ? "Les deux parties se partagent des informations confidentielles et ont les mêmes obligations." : "Seule la Partie A partage des informations ; la Partie B s'engage à les protéger."}
+                </div>
+              </div>
+
+              <div style={{ marginBottom:14 }}>
+                <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE A — VOUS" : "PARTIE A — VOUS (divulgatrice)"}</label>
                 <input style={inputStyle} value={partieA} onChange={e=>setPartieA(e.target.value)} placeholder="Votre nom ou raison sociale" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
               </div>
               <div style={{ marginBottom:14 }}>
-                <label style={{ display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:7 }}>PARTIE B — LE DESTINATAIRE (réceptrice)</label>
+                <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE B — L'AUTRE PARTIE" : "PARTIE B — LE DESTINATAIRE (réceptrice)"}</label>
                 <input style={inputStyle} value={partieB} onChange={e=>setPartieB(e.target.value)} placeholder="Nom du client / partenaire" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
               </div>
-              <div style={{ marginBottom:22 }}>
-                <label style={{ display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:7 }}>OBJET / CONTEXTE DU PROJET</label>
+              <div style={{ marginBottom:14 }}>
+                <label style={labelSt}>EMAIL DU DESTINATAIRE (optionnel)</label>
+                <input type="email" style={inputStyle} value={partieBEmail} onChange={e=>setPartieBEmail(e.target.value)} placeholder="client@exemple.com" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+              </div>
+              <div style={{ marginBottom:14 }}>
+                <label style={labelSt}>OBJET / CONTEXTE DU PROJET</label>
                 <textarea style={{ ...inputStyle, resize:"vertical", minHeight:80, lineHeight:1.6 }} value={objet} onChange={e=>setObjet(e.target.value)} placeholder="Ex : Développement d'une application mobile de e-commerce…" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
               </div>
+
+              {/* Durée */}
+              <div style={{ marginBottom:22 }}>
+                <label style={labelSt}>DURÉE DE CONFIDENTIALITÉ</label>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  {[
+                    { key:"2", label:"2 ans" },
+                    { key:"3", label:"3 ans" },
+                    { key:"5", label:"5 ans" },
+                    { key:"indeterminee", label:"Indéterminée" },
+                  ].map(o => (
+                    <button key={o.key} type="button" onClick={() => setDuration(o.key)} style={{
+                      flex:"1 1 auto", minWidth:80, padding:"9px 8px", borderRadius:8, cursor:"pointer",
+                      fontFamily:T.body, fontSize:12, fontWeight:700,
+                      background: duration === o.key ? C.navy : C.white,
+                      color: duration === o.key ? "#fff" : C.textM,
+                      border: `1.5px solid ${duration === o.key ? C.navy : C.border}`,
+                    }}>{o.label}</button>
+                  ))}
+                </div>
+              </div>
+
               <button
                 onClick={generate}
                 disabled={!partieA.trim()||!partieB.trim()||!objet.trim()}
@@ -6509,6 +6624,25 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               >
                 <span style={{ fontSize:16 }}>🔒</span> Générer le NDA en 15 sec
               </button>
+
+              {/* Historique local */}
+              {ndaHistory.length > 0 && (
+                <div style={{ marginTop:20 }}>
+                  <span onClick={() => setHistoryOpen(v => !v)} style={{ fontFamily:T.body, fontSize:12, color:C.navy, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}>
+                    📜 Mes NDA précédents ({ndaHistory.length}) {historyOpen ? "▲" : "▼"}
+                  </span>
+                  {historyOpen && (
+                    <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:8 }}>
+                      {ndaHistory.map((h, i) => (
+                        <div key={i} onClick={() => { setNda(h.nda); setNdaRef(h.ndaRef); setPartieA(h.partieA); setPartieB(h.partieB); setPartieBEmail(h.partieBEmail||""); setObjet(h.objet); setNdaType(h.ndaType||"unilateral"); setDuration(h.duration||"3"); setStep("result"); }}
+                          style={{ padding:"10px 12px", background:C.creamD, border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, color:C.textM }}>
+                          <strong style={{ color:C.navy }}>{h.partieA} ↔ {h.partieB}</strong> · {h.date}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -6518,7 +6652,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               <div style={{ fontFamily:T.display, fontSize:18, color:C.navy, fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
               <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, lineHeight:1.7 }}>
                 L'IA rédige votre NDA conforme au droit français…<br/>
-                <span style={{ color:C.gold, fontWeight:600 }}>Article 1240 Code civil · 3 ans de protection</span>
+                <span style={{ color:C.gold, fontWeight:600 }}>Article 1240 Code civil · {durationLabel}</span>
               </div>
             </div>
           )}
@@ -6530,14 +6664,18 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
                 <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}>NDA généré avec succès · Prêt à envoyer</div>
               </div>
               <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"20px 20px", maxHeight:320, overflowY:"auto", marginBottom:16 }}>
-                <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{nda}</pre>
+                <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(nda)}</pre>
               </div>
-              <div style={{ display:"flex", gap:10 }}>
+              <div style={{ display:"flex", gap:10, marginBottom:10 }}>
                 <button onClick={() => { setStep("form"); setNda(""); }} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM, transition:"all 0.15s" }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
+                <button onClick={downloadNdaPDF} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
                 <button onClick={copy} style={{ flex:2, padding:"12px", background: copying ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px #1B2E4B30", transition:"all 0.2s" }}>
-                  {copying ? <><span>✓</span> Copié !</> : <><span>📋</span> Copier le NDA</>}
+                  {copying ? <><span>✓</span> Copié !</> : <><span>📋</span> Copier</>}
                 </button>
               </div>
+              <button onClick={sendByEmail} style={{ width:"100%", padding:"12px", background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px rgba(59,130,246,0.3)" }}>
+                <span>📧</span> Envoyer par email{partieB ? ` à ${partieB}` : ""}
+              </button>
             </div>
           )}
         </div>
