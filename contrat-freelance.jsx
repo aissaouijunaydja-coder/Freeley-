@@ -1159,6 +1159,11 @@ function AppInner() {
   });
   const updateProfile = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
+  // Sauvegarde automatique du profil (survit au rafraîchissement de page)
+  useEffect(() => {
+    try { localStorage.setItem("freeley_profile", JSON.stringify(profile)); } catch(e) {}
+  }, [profile]);
+
   // ── Init : session mock + données utilisateur ──
   useEffect(() => {
     if (window.jspdf) { setPDFReady(true); }
@@ -2623,7 +2628,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         />
       )}
       {showInvoiceModal && (
-        <InvoiceModal form={form} setForm={setForm} profile={profile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} />
+        <InvoiceModal form={form} setForm={setForm} profile={profile} setProfile={setProfile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} />
       )}
       {magicFillTarget && (
         <CameraCapture
@@ -2653,6 +2658,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           form={form}
           setForm={setForm}
           profile={profile}
+          setProfile={setProfile}
           depositPct={invoiceDepositPct}
           onClose={() => setShowTactileSign(false)}
           onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
@@ -6502,13 +6508,14 @@ function RecouvrementFermeModal({ onClose }) {
   const [manualOpen, setManualOpen] = useState(false);
 
   /* ── State mode AUTO (Sophie Martin pré-rempli) ── */
+  const AUTO_CASE_DUE = "2026-05-27";
   const AUTO_CASE = {
     clientName: "Sophie Martin",
     company: "TechStart SAS",
     mission: "Développement Web — Contrat CP-2026-3301",
     amount: "388",
-    daysLate: 14,
-    dueDate: "2026-05-27",
+    daysLate: Math.max(1, Math.floor((new Date() - new Date(AUTO_CASE_DUE)) / (1000 * 60 * 60 * 24))),
+    dueDate: AUTO_CASE_DUE,
   };
   const [autoStep, setAutoStep]     = useState("alert"); // alert | loading | result
   const [autoLetter, setAutoLetter] = useState("");
@@ -6517,6 +6524,7 @@ function RecouvrementFermeModal({ onClose }) {
 
   /* ── State mode MANUEL ── */
   const [manDebtor,  setManDebtor]  = useState("");
+  const [manClientType, setManClientType] = useState("professionnel");
   const [manAmount,  setManAmount]  = useState("");
   const [manDetails, setManDetails] = useState("");
   const [manStep,    setManStep]    = useState("form"); // form | loading | result
@@ -6541,7 +6549,7 @@ function RecouvrementFermeModal({ onClose }) {
   }, [manStep]);
 
   /* ── Génération IA ── */
-  const buildPrompt = (debtor, amount, dueDate, mission, daysLate) => `Tu es un avocat spécialisé en recouvrement de créances en droit français. Rédige une MISE EN DEMEURE DE PAIEMENT ferme et juridiquement solide.
+  const buildPrompt = (debtor, amount, dueDate, mission, daysLate, isParticulier) => `Tu es un avocat spécialisé en recouvrement de créances en droit français. Rédige une MISE EN DEMEURE DE PAIEMENT ferme et juridiquement solide.
 
 Débiteur : ${debtor}
 Montant impayé HT : ${amount} €
@@ -6549,16 +6557,23 @@ Date d'échéance dépassée : ${dueDate}
 Retard : ${daysLate} jours
 Mission concernée : ${mission}
 Date de la lettre : ${new Date().toLocaleDateString("fr-FR")}
+Nature du débiteur : ${isParticulier ? "PARTICULIER (consommateur, non professionnel)" : "PROFESSIONNEL (entreprise/société)"}
 
 La lettre doit :
-1. Mentionner EXPLICITEMENT les articles L441-10 et L441-11 du Code de commerce (pénalités de retard légales)
+${isParticulier
+  ? `1. Le débiteur étant un PARTICULIER, NE PAS appliquer le régime du Code de commerce (articles L441-10/L441-11) ni l'indemnité forfaitaire de 40 € — ce régime est réservé aux professionnels et son application à un consommateur serait juridiquement incorrecte.
+2. Calculer et réclamer uniquement des intérêts de retard au taux d'intérêt légal en vigueur pour les particuliers (fixé semestriellement par la Banque de France), appliqué au montant impayé prorata temporis.
+3. Fixer un délai de 8 JOURS pour régulariser sous peine de poursuites judiciaires.
+4. Mentionner le recours possible à l'injonction de payer (art. 1405 CPC) devant le tribunal judiciaire compétent.
+5. Ton ferme mais mesuré, conforme au droit de la consommation.`
+  : `1. Mentionner EXPLICITEMENT les articles L441-10 et L441-11 du Code de commerce (pénalités de retard légales, réservées aux professionnels)
 2. Calculer les pénalités au taux BCE + 10 points appliquées au montant exact
 3. Mentionner l'indemnité forfaitaire de 40 € pour frais de recouvrement (art. D441-5 C.com.)
 4. Fixer un délai de 8 JOURS OUVRÉS pour régulariser sous peine de poursuites judiciaires
 5. Mentionner le recours possible à l'injonction de payer (art. 1405 CPC) et au recouvrement par huissier
-6. Ton ferme, professionnel, sans agressivité mais sans concession
+6. Ton ferme, professionnel, sans agressivité mais sans concession`}
 
-Structure : Objet → Rappel des faits → Montant total dû avec calcul détaillé (capital + pénalités + 40€) → Mise en demeure formelle → Délai + conséquences → Formule de clôture
+Structure : Objet → Rappel des faits → Montant total dû avec calcul détaillé → Mise en demeure formelle → Délai + conséquences → Formule de clôture
 
 Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
 
@@ -6580,7 +6595,8 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
         AUTO_CASE.amount,
         AUTO_CASE.dueDate,
         AUTO_CASE.mission,
-        AUTO_CASE.daysLate
+        AUTO_CASE.daysLate,
+        false
       );
       const text = await callAI(prompt);
       setAutoLetter(text);
@@ -6595,7 +6611,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
     if (!manDebtor.trim() || !manAmount.trim()) return;
     setManStep("loading");
     try {
-      const prompt = buildPrompt(manDebtor, manAmount, new Date().toLocaleDateString("fr-FR"), manDetails || "Mission freelance", "—");
+      const prompt = buildPrompt(manDebtor, manAmount, new Date().toLocaleDateString("fr-FR"), manDetails || "Mission freelance", "—", manClientType === "particulier");
       const text = await callAI(prompt);
       setManLetter(text);
       setManStep("result");
@@ -6627,6 +6643,33 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
   );
 
   /* ── Result screen shared ── */
+  const downloadLetterPDF = (letter, clientName) => {
+    if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+    if (!letter) { alert("Aucune lettre à télécharger."); return; }
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+      const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
+      const today = new Date().toLocaleDateString("fr-FR");
+      doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
+      doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
+      doc.text("MISE EN DEMEURE DE PAIEMENT", ML, 15);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
+      doc.text(`Établie le ${today} via Freeley — Recouvrement Ferme`, ML, 23);
+      let y = 42;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
+      const cleanText = String(letter).replace(/^#+\s*/gm, "").replace(/\*\*/g, "");
+      const lines = doc.splitTextToSize(cleanText, cw);
+      lines.forEach(l => {
+        if (y > 275) { doc.addPage(); y = 20; }
+        doc.text(l, ML, y); y += 5.4;
+      });
+      doc.save(`Mise_en_demeure_${(clientName||"client").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+    } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
+  };
+
   const ResultScreen = ({ letter, onEdit, clientName }) => (
     <div className="fade-up">
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:10, padding:"11px 16px" }}>
@@ -6638,6 +6681,12 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
       </div>
       <div style={{ display:"flex", gap:10 }}>
         <button onClick={onEdit} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
+        <button
+          onClick={() => downloadLetterPDF(letter, clientName || AUTO_CASE.clientName)}
+          style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}
+          onMouseOver={e=>e.currentTarget.style.background="#F5F3FF"}
+          onMouseOut={e=>e.currentTarget.style.background=C.white}
+        >⬇ PDF</button>
         <button
           onClick={() => setSendModal({ letter, clientName: clientName || AUTO_CASE.clientName })}
           style={{ flex:2, padding:"12px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
@@ -6827,6 +6876,31 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                       <div style={{ marginBottom:12 }}>
                         <label style={labelSt}>NOM DU CLIENT</label>
                         <input style={inputStyle} value={manDebtor} onChange={e=>setManDebtor(e.target.value)} placeholder="Ex : Pierre Durand / Agence Nova" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
+                      </div>
+                      <div style={{ marginBottom:12 }}>
+                        <label style={labelSt}>TYPE DE CLIENT</label>
+                        <div style={{ display:"flex", gap:8 }}>
+                          {[
+                            { key:"professionnel", label:"Pro (B2B)" },
+                            { key:"particulier", label:"Particulier (B2C)" },
+                          ].map(o => (
+                            <button
+                              key={o.key}
+                              type="button"
+                              onClick={() => setManClientType(o.key)}
+                              style={{
+                                flex:1, padding:"9px 0", borderRadius:8, cursor:"pointer",
+                                fontFamily:T.body, fontSize:12.5, fontWeight:700,
+                                background: manClientType === o.key ? "#7F1D1D" : C.white,
+                                color: manClientType === o.key ? "#fff" : C.textM,
+                                border: `1.5px solid ${manClientType === o.key ? "#7F1D1D" : C.border}`,
+                              }}
+                            >{o.label}</button>
+                          ))}
+                        </div>
+                        <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
+                          {manClientType === "particulier" ? "Taux d'intérêt légal consommateur — pas d'indemnité de 40€ (réservée aux pros)." : "Régime légal complet : BCE + 10 pts + indemnité de 40€."}
+                        </div>
                       </div>
                       <div style={{ marginBottom:12 }}>
                         <label style={labelSt}>MONTANT DÛ (€ HT)</label>
@@ -9515,7 +9589,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 }
 
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
-function InvoiceModal({ form, setForm, profile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva }) {
+function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva }) {
   const [downloaded, setDownloaded] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
@@ -10112,6 +10186,39 @@ ${freelanceName}`;
                 fontFamily:T.body, fontSize:11, fontWeight:700,
                 letterSpacing:"0.12em", color:"#8BA3C0",
               }}>PAIEMENT PAR VIREMENT</span>
+            </div>
+
+            {/* IBAN éditable — se sauvegarde automatiquement dans le profil */}
+            <div style={{ marginBottom:14, display:"flex", flexDirection:"column", gap:8 }}>
+              <input
+                value={profile?.iban || ""}
+                onChange={e => setProfile && setProfile(p => ({ ...p, iban: e.target.value }))}
+                placeholder="IBAN (ex: FR76 3000 1007 9412 3456 7890 185)"
+                style={{ fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", width:"100%", boxSizing:"border-box" }}
+                onFocus={e=>e.target.style.borderColor="#B8965A"}
+                onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
+              />
+              <div style={{ display:"flex", gap:8 }}>
+                <input
+                  value={profile?.bic || ""}
+                  onChange={e => setProfile && setProfile(p => ({ ...p, bic: e.target.value }))}
+                  placeholder="BIC"
+                  style={{ flex:1, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                  onFocus={e=>e.target.style.borderColor="#B8965A"}
+                  onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
+                />
+                <input
+                  value={profile?.bankName || ""}
+                  onChange={e => setProfile && setProfile(p => ({ ...p, bankName: e.target.value }))}
+                  placeholder="Banque"
+                  style={{ flex:1, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                  onFocus={e=>e.target.style.borderColor="#B8965A"}
+                  onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
+                />
+              </div>
+              {profile?.iban && (
+                <div style={{ fontFamily:T.body, fontSize:9.5, color:"#8BA3C0" }}>✓ Sauvegardé automatiquement dans ton profil</div>
+              )}
             </div>
 
             {/* Content row */}
@@ -11581,7 +11688,7 @@ function ScannerModal({ onClose, onImportToDashboard, onRequestCamera, onShowAut
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, setForm, profile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp }) {
+function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -12198,6 +12305,7 @@ function TactileSignatureModal({ form, setForm, profile, onClose, onGoToProfile,
           form={form}
           setForm={setForm}
           profile={profile}
+          setProfile={setProfile}
           depositPctProp={acomptePct}
           onClose={() => setShowDepositInvoiceModal(false)}
           onGoToProfileTva={onGoToProfileTva}
