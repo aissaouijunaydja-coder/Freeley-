@@ -6585,44 +6585,38 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
 function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
   /* ── State global ── */
   const [activeMode, setActiveMode] = useState(null); // null | "auto" | "manual"
-  const [manualOpen, setManualOpen] = useState(!!initialCase);
+  const [manualOpen, setManualOpen] = useState(false); // le mode manuel démarre toujours fermé et vide
   const recouvrementCases = useMemo(() => getRecouvrementCases(history), [history]);
 
-  const applyCase = (rc) => {
-    setManDebtor(rc.clientName);
-    setManClientType(rc.typeClient);
-    setManDueDate(rc.dueDate);
-    setManClientEmail(rc.clientEmail);
-    setManAmount(String(rc.amount));
-    setManDetails(rc.mission);
-    setManualOpen(true);
-    setManStep("form");
+  /* ── Dossier actif pour le mode AUTO : celui de l'alerte cliquée (initialCase),
+     celui choisi via "Traiter" dans la liste, ou à défaut le plus urgent suivi ── */
+  const [selectedCase, setSelectedCase] = useState(initialCase || null);
+  const autoCase = selectedCase || recouvrementCases[0] || null;
+  const autoDiffDays = autoCase?.dueDate ? Math.floor((new Date(autoCase.dueDate) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+  const autoIsLate = autoDiffDays !== null && autoDiffDays < 0;
+
+  // Sélectionne un dossier suivi comme dossier actif du mode Auto (bouton "Traiter")
+  const selectCase = (rc) => {
+    setSelectedCase(rc);
+    setAutoStep("alert");
+    setAutoLetter("");
   };
 
-  /* ── State mode AUTO (Sophie Martin pré-rempli) ── */
-  const AUTO_CASE_DUE = "2026-05-27";
-  const AUTO_CASE = {
-    clientName: "Sophie Martin",
-    company: "TechStart SAS",
-    mission: "Développement Web — Contrat CP-2026-3301",
-    amount: "388",
-    daysLate: Math.max(1, Math.floor((new Date() - new Date(AUTO_CASE_DUE)) / (1000 * 60 * 60 * 24))),
-    dueDate: AUTO_CASE_DUE,
-  };
   const [autoStep, setAutoStep]     = useState("alert"); // alert | loading | result
   const [autoLetter, setAutoLetter] = useState("");
+  const [autoLetterType, setAutoLetterType] = useState("formal"); // "formal" | "preventive"
   const [autoTotal, setAutoTotal]   = useState(0);
   const [autoCopying, setAutoCopying] = useState(false);
   const [autoDots, setAutoDots]     = useState(1);
 
-  /* ── State mode MANUEL ── */
-  const [manDebtor,  setManDebtor]  = useState(initialCase?.clientName || "");
-  const [manClientType, setManClientType] = useState(initialCase?.typeClient || "professionnel");
-  const [manDueDate, setManDueDate] = useState(initialCase?.dueDate || "");
-  const [manClientEmail, setManClientEmail] = useState(initialCase?.clientEmail || "");
+  /* ── State mode MANUEL — toujours vide au départ, à écrire à la main ── */
+  const [manDebtor,  setManDebtor]  = useState("");
+  const [manClientType, setManClientType] = useState("professionnel");
+  const [manDueDate, setManDueDate] = useState("");
+  const [manClientEmail, setManClientEmail] = useState("");
   const [manClientPhone, setManClientPhone] = useState("");
-  const [manAmount,  setManAmount]  = useState(initialCase?.amount ? String(initialCase.amount) : "");
-  const [manDetails, setManDetails] = useState(initialCase?.mission || "");
+  const [manAmount,  setManAmount]  = useState("");
+  const [manDetails, setManDetails] = useState("");
   const [manStep,    setManStep]    = useState("form"); // form | loading | result
   const [manLetter,  setManLetter]  = useState("");
   const [manTotal,   setManTotal]   = useState(0);
@@ -6756,21 +6750,34 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   };
 
   const generateAuto = async () => {
+    if (!autoCase) return;
     setAutoStep("loading");
     try {
-      const prompt = buildPrompt(
-        `${AUTO_CASE.clientName} (${AUTO_CASE.company})`,
-        AUTO_CASE.amount,
-        AUTO_CASE.dueDate,
-        AUTO_CASE.mission,
-        AUTO_CASE.daysLate,
-        false
-      );
-      const { total } = computeDueTotal(AUTO_CASE.amount, AUTO_CASE.daysLate, false);
-      setAutoTotal(total);
-      const text = await callAI(prompt);
-      setAutoLetter(text);
-      setAutoStep("result");
+      const isPart = autoCase.typeClient === "particulier";
+      // Jours écoulés depuis l'échéance : positif = dépassée, négatif = pas encore atteinte
+      const rawDiff = autoCase.dueDate ? Math.floor((new Date() - new Date(autoCase.dueDate)) / (1000 * 60 * 60 * 24)) : 30;
+
+      if (autoCase.dueDate && rawDiff < 0) {
+        // ── Échéance PAS ENCORE atteinte → relance préventive ──
+        setAutoLetterType("preventive");
+        const dueDateLabel = new Date(autoCase.dueDate).toLocaleDateString("fr-FR");
+        const prompt = buildPreventivePrompt(autoCase.clientName, autoCase.amount, dueDateLabel, autoCase.mission || "Mission freelance", autoCase.clientEmail);
+        setAutoTotal(parseFloat(autoCase.amount) || 0);
+        const text = await callAI(prompt);
+        setAutoLetter(text);
+        setAutoStep("result");
+      } else {
+        // ── Échéance dépassée (ou non renseignée) → mise en demeure formelle ──
+        setAutoLetterType("formal");
+        const dueDateLabel = autoCase.dueDate ? new Date(autoCase.dueDate).toLocaleDateString("fr-FR") : "Non renseignée";
+        const realDaysLate = Math.max(1, rawDiff);
+        const prompt = buildPrompt(autoCase.clientName, autoCase.amount, dueDateLabel, autoCase.mission || "Mission freelance", realDaysLate, isPart);
+        const { total } = computeDueTotal(autoCase.amount, realDaysLate, isPart);
+        setAutoTotal(total);
+        const text = await callAI(prompt);
+        setAutoLetter(text);
+        setAutoStep("result");
+      }
     } catch {
       setAutoLetter("Erreur de génération. Vérifie ta connexion et réessaie.");
       setAutoStep("result");
@@ -6972,7 +6979,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
           {isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien inclut le principal, les pénalités calculées et l'indemnité — le client règle tout en un clic."}
         </div>
         <button
-          onClick={() => handleGeneratePaymentLink(total, clientName || AUTO_CASE.clientName, mission, clientEmail)}
+          onClick={() => handleGeneratePaymentLink(total, clientName || "Client", mission, clientEmail)}
           disabled={stripeLinkGenerating}
           style={{ width:"100%", padding:"10px", background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.gold, color: stripeLinkCopied ? "#fff" : C.navyD, border:"none", borderRadius:8, cursor: stripeLinkGenerating ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, opacity: stripeLinkGenerating ? 0.7 : 1 }}
         >
@@ -6989,13 +6996,13 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       <div style={{ display:"flex", gap:10 }}>
         <button onClick={onEdit} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
         <button
-          onClick={() => downloadLetterPDF(letter, clientName || AUTO_CASE.clientName, total, mission, clientEmail, type)}
+          onClick={() => downloadLetterPDF(letter, clientName || "Client", total, mission, clientEmail, type)}
           style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}
           onMouseOver={e=>e.currentTarget.style.background="#F5F3FF"}
           onMouseOut={e=>e.currentTarget.style.background=C.white}
         >⬇ PDF</button>
         <button
-          onClick={() => setSendModal({ letter, clientName: clientName || AUTO_CASE.clientName, clientEmail, clientPhone, total, type })}
+          onClick={() => setSendModal({ letter, clientName: clientName || "Client", clientEmail, clientPhone, total, type })}
           style={{ flex:2, padding:"12px", background: isPreventive ? "linear-gradient(135deg, #B45309 0%, #D97706 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: isPreventive ? "0 5px 18px rgba(217,119,6,0.3)" : "0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
           onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";}}
           onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";}}
@@ -7134,7 +7141,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                       </div>
                     </div>
                     <button
-                      onClick={() => applyCase(rc)}
+                      onClick={() => selectCase(rc)}
                       style={{ flexShrink:0, padding:"7px 12px", background: rc.status === "late" ? "#DC2626" : "#D97706", color:"#fff", border:"none", borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}
                     >Traiter →</button>
                   </div>
@@ -7143,50 +7150,70 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
             </div>
           )}
 
-          {/* ════ BLOC 1 — MODE AUTOMATIQUE ════ */}
+          {/* ════ BLOC 1 — MODE AUTOMATIQUE (dossier réel suivi) ════ */}
           <div className="fade-up" style={{ marginBottom:16 }}>
-            {/* Alerte prioritaire */}
-            <div style={{ background:"linear-gradient(135deg, #FFF1F2 0%, #FEF2F2 100%)", border:"1.5px solid #FECACA", borderRadius:14, padding:"16px 18px", marginBottom: autoStep !== "alert" ? 14 : 0 }}>
-              <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:12 }}>
-                <div style={{ width:36, height:36, background:"#FEE2E2", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>⏳</div>
-                <div style={{ flex:1 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
-                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#991B1B" }}>Exemple de relance</div>
-                    <span style={{ fontFamily:T.body, fontSize:9, fontWeight:700, color:"#92400E", background:"#FEF3C7", border:"1px solid #FCD34D", borderRadius:5, padding:"1px 6px", letterSpacing:"0.05em" }}>DÉMO</span>
+            {autoCase ? (
+              <>
+                {/* Résumé du dossier réel */}
+                <div style={{ background:"linear-gradient(135deg, #FFF1F2 0%, #FEF2F2 100%)", border:"1.5px solid #FECACA", borderRadius:14, padding:"16px 18px", marginBottom: autoStep !== "alert" ? 14 : 0 }}>
+                  <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:12 }}>
+                    <div style={{ width:36, height:36, background:"#FEE2E2", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>{autoIsLate ? "⚠️" : "⏰"}</div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
+                        <div style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#991B1B" }}>Dossier suivi</div>
+                      </div>
+                      <div style={{ fontFamily:T.body, fontSize:12, color:"#7F1D1D", lineHeight:1.6 }}>
+                        <strong>{autoCase.clientName || "Client sans nom"}</strong>
+                        {autoCase.amount && <> — <strong>{autoCase.amount} € TTC</strong></>}
+                        {autoDiffDays !== null && (
+                          autoIsLate
+                            ? <> en retard de <strong>{Math.abs(autoDiffDays)} jour{Math.abs(autoDiffDays) > 1 ? "s" : ""}</strong></>
+                            : <> — échéance {autoDiffDays === 0 ? "aujourd'hui" : <>dans <strong>{autoDiffDays} jour{autoDiffDays > 1 ? "s" : ""}</strong></>}</>
+                        )}.
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ fontFamily:T.body, fontSize:12, color:"#7F1D1D", lineHeight:1.6 }}>
-                    <strong>{AUTO_CASE.clientName}</strong> ({AUTO_CASE.company}) — Facture finale de <strong>{AUTO_CASE.amount} € TTC</strong> en retard de <strong>{AUTO_CASE.daysLate} jours</strong>. <em>Teste la génération sur ce cas, ou saisis ton vrai dossier plus bas.</em>
-                  </div>
+                  {/* Détails mission */}
+                  {autoCase.mission && (
+                    <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.7)", borderRadius:8, padding:"8px 12px", marginBottom:12, border:"1px solid #FECACA" }}>
+                      <span style={{ fontSize:13 }}>📋</span>
+                      <div style={{ fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", fontWeight:500 }}>{autoCase.mission}</div>
+                    </div>
+                  )}
+                  {/* Bouton génération auto */}
+                  {autoStep === "alert" && (
+                    <button
+                      onClick={generateAuto}
+                      style={{ width:"100%", padding:"13px 16px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:"0 6px 24px rgba(185,28,28,0.45)", transition:"all 0.2s", letterSpacing:"0.02em" }}
+                      onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 32px rgba(185,28,28,0.55)";}}
+                      onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 6px 24px rgba(185,28,28,0.45)";}}
+                    >
+                      <span style={{ fontSize:16 }}>⚡</span> Générer la mise en demeure IA
+                    </button>
+                  )}
+                </div>
+
+                {/* Loading / Résultat mode auto */}
+                {autoStep === "loading" && <LoadingScreen dots={autoDots} type={autoLetterType} />}
+                {autoStep === "result" && (
+                  <ResultScreen
+                    letter={autoLetter}
+                    onEdit={() => { setAutoStep("alert"); setAutoLetter(""); }}
+                    clientName={autoCase.clientName || "Client"}
+                    clientEmail={autoCase.clientEmail}
+                    total={autoTotal}
+                    mission={autoCase.mission}
+                    type={autoLetterType}
+                  />
+                )}
+              </>
+            ) : (
+              <div style={{ background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"22px 18px", textAlign:"center" }}>
+                <div style={{ fontSize:22, marginBottom:8 }}>📭</div>
+                <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, lineHeight:1.6 }}>
+                  Aucun dossier suivi pour le moment.<br/>Renseigne un client et une date d'échéance sur un contrat pour qu'il apparaisse ici automatiquement — ou utilise la saisie manuelle ci-dessous.
                 </div>
               </div>
-              {/* Détails mission */}
-              <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.7)", borderRadius:8, padding:"8px 12px", marginBottom:12, border:"1px solid #FECACA" }}>
-                <span style={{ fontSize:13 }}>📋</span>
-                <div style={{ fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", fontWeight:500 }}>{AUTO_CASE.mission}</div>
-              </div>
-              {/* Bouton génération auto */}
-              {autoStep === "alert" && (
-                <button
-                  onClick={generateAuto}
-                  style={{ width:"100%", padding:"13px 16px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:"0 6px 24px rgba(185,28,28,0.45)", transition:"all 0.2s", letterSpacing:"0.02em" }}
-                  onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 32px rgba(185,28,28,0.55)";}}
-                  onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 6px 24px rgba(185,28,28,0.45)";}}
-                >
-                  <span style={{ fontSize:16 }}>⚡</span> Générer la mise en demeure IA
-                </button>
-              )}
-            </div>
-
-            {/* Loading / Résultat mode auto */}
-            {autoStep === "loading" && <LoadingScreen dots={autoDots} />}
-            {autoStep === "result" && (
-              <ResultScreen
-                letter={autoLetter}
-                onEdit={() => { setAutoStep("alert"); setAutoLetter(""); }}
-                clientName={AUTO_CASE.clientName}
-                total={autoTotal}
-                mission={AUTO_CASE.mission}
-              />
             )}
           </div>
 
@@ -7219,12 +7246,6 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                 <div className="fade-up" style={{ background:C.white, border:`1.5px solid ${C.border}`, borderTop:"none", borderRadius:"0 0 13px 13px", padding:"18px 18px 20px" }}>
                   {manStep === "form" && (
                     <>
-                      {initialCase && (
-                        <div style={{ display:"flex", alignItems:"center", gap:8, background:"#FEF3C7", border:"1px solid #FCD34D", borderRadius:8, padding:"9px 12px", marginBottom:14 }}>
-                          <span style={{ fontSize:14 }}>✨</span>
-                          <div style={{ fontFamily:T.body, fontSize:11, color:"#92400E", fontWeight:600 }}>Champs pré-remplis depuis ton dossier suivi — vérifie puis génère.</div>
-                        </div>
-                      )}
                       <div style={{ marginBottom:12 }}>
                         <label style={labelSt}>NOM DU CLIENT</label>
                         <input style={inputStyle} value={manDebtor} onChange={e=>setManDebtor(e.target.value)} placeholder="Ex : Pierre Durand / Agence Nova" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
