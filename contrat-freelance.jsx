@@ -2367,7 +2367,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onOpenNda: () => setShowNdaModal(true),
     onAlertsChanged: () => setAlertsTick(t => t + 1),
     onOpenMission: (alert) => {
-      const contractId = alert?.id ? alert.id.replace(/^(recouvre_|sign_)/, "") : null;
+      const contractId = alert?.id ? alert.id.replace(/^(recouvre_|sign_|soon_)/, "") : null;
       const entry = contractId ? history.find(c => String(c.id) === String(contractId)) : null;
       if (entry) { setHistoryView(entry); goToScreen("history"); }
       else { goToScreen("history"); }
@@ -2666,7 +2666,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         />
       )}
       {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} />}
-      {showRecouvrementModal && <RecouvrementFermeModal onClose={() => setShowRecouvrementModal(false)} />}
+      {showRecouvrementModal && <RecouvrementFermeModal onClose={() => setShowRecouvrementModal(false)} profile={profile} />}
 
       {/* ── 📷 Popup permission caméra (simulation iOS/Android) ── */}
       {showCameraPermissionModal && (
@@ -5841,13 +5841,39 @@ function buildAlertsFromHistory(history) {
   if (!Array.isArray(history) || !history.length) return [];
   const alerts = [];
   const now = new Date();
+
+  // Statuts de paiement déjà enregistrés par le freelance (✓ Payé / ⏳ En attente / ⚠️ En retard)
+  let payStatus = {};
+  try { payStatus = JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) {}
+
   history.forEach(c => {
-    // Alerte 1 : mission terminée (date de fin passée) → relance paiement / recouvrement
-    if (c.endDate) {
+    const isPaid = payStatus[c.id] === "paid";
+
+    if (c.endDate && !isPaid) {
       const end = new Date(c.endDate);
-      if (!isNaN(end) && end < now) {
-        const daysLate = Math.floor((now - end) / (1000 * 60 * 60 * 24));
-        if (daysLate >= 0) {
+      if (!isNaN(end)) {
+        const diffDays = Math.floor((end - now) / (1000 * 60 * 60 * 24)); // >0 = pas encore atteint, <0 = dépassé
+
+        // Alerte AVANT échéance : reste 0 à 3 jours avant la date de fin/paiement
+        if (diffDays >= 0 && diffDays <= 3) {
+          alerts.push({
+            id: "soon_" + c.id,
+            read: false,
+            icon: "⏰",
+            accentBg: "#FFFBEB",
+            accentIcon: "#FEF3C7",
+            accentBorder: "#FCD34D",
+            badgeBg: "#D97706",
+            badgeText: "ÉCHÉANCE PROCHE",
+            title: diffDays === 0 ? "Échéance aujourd'hui" : `Échéance dans ${diffDays} j`,
+            detail: `Mission « ${c.missionTitle || "Sans titre"} »${c.clientName ? " · " + c.clientName : ""} arrive à échéance${c.price ? " · " + c.price + " €" : ""} — envoie un rappel préventif avant que des pénalités s'appliquent.`,
+            action: "recouvrement",
+          });
+        }
+
+        // Alerte APRÈS échéance : date dépassée → relance / recouvrement
+        if (diffDays < 0) {
+          const daysLate = Math.abs(diffDays);
           alerts.push({
             id: "recouvre_" + c.id,
             read: false,
@@ -6502,7 +6528,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
 }
 
 /* ══════════════════════════════════════════════════════════ RECOUVREMENT FERME MODAL ══ */
-function RecouvrementFermeModal({ onClose }) {
+function RecouvrementFermeModal({ onClose, profile }) {
   /* ── State global ── */
   const [activeMode, setActiveMode] = useState(null); // null | "auto" | "manual"
   const [manualOpen, setManualOpen] = useState(false);
@@ -6519,22 +6545,30 @@ function RecouvrementFermeModal({ onClose }) {
   };
   const [autoStep, setAutoStep]     = useState("alert"); // alert | loading | result
   const [autoLetter, setAutoLetter] = useState("");
+  const [autoTotal, setAutoTotal]   = useState(0);
   const [autoCopying, setAutoCopying] = useState(false);
   const [autoDots, setAutoDots]     = useState(1);
 
   /* ── State mode MANUEL ── */
   const [manDebtor,  setManDebtor]  = useState("");
   const [manClientType, setManClientType] = useState("professionnel");
+  const [manDueDate, setManDueDate] = useState("");
+  const [manClientEmail, setManClientEmail] = useState("");
+  const [manClientPhone, setManClientPhone] = useState("");
   const [manAmount,  setManAmount]  = useState("");
   const [manDetails, setManDetails] = useState("");
   const [manStep,    setManStep]    = useState("form"); // form | loading | result
   const [manLetter,  setManLetter]  = useState("");
+  const [manTotal,   setManTotal]   = useState(0);
   const [manCopying, setManCopying] = useState(false);
   const [manDots,    setManDots]    = useState(1);
 
   /* ── State envoi mise en demeure ── */
   const [sendModal, setSendModal]   = useState(null); // null | { letter, clientName }
   const [sendSuccess, setSendSuccess] = useState(null); // null | clientName
+  const [stripeLinkGenerating, setStripeLinkGenerating] = useState(false);
+  const [stripeLinkUrl, setStripeLinkUrl] = useState("");
+  const [stripeLinkCopied, setStripeLinkCopied] = useState(false);
 
   /* ── Dots animation ── */
   useEffect(() => {
@@ -6549,39 +6583,80 @@ function RecouvrementFermeModal({ onClose }) {
   }, [manStep]);
 
   /* ── Génération IA ── */
-  const buildPrompt = (debtor, amount, dueDate, mission, daysLate, isParticulier) => `Tu es un avocat spécialisé en recouvrement de créances en droit français. Rédige une MISE EN DEMEURE DE PAIEMENT ferme et juridiquement solide.
+  // ⚠️ Taux légaux en vigueur — À METTRE À JOUR CHAQUE 1er JANVIER ET 1er JUILLET
+  // Sources : service-public.gouv.fr + arrêté au J.O. (vérifié pour S2 2026 : BCE 2,40% + 10 pts)
+  const CURRENT_PENALTY_RATE_B2B = 0.1240;  // Taux BCE + 10 pts pour pros — S2 2026 (1 juil. → 31 déc. 2026)
+  const CURRENT_LEGAL_RATE_B2C   = 0.0684;  // Taux d'intérêt légal particuliers — S2 2026
+
+  const computeDueTotal = (amount, daysLate, isParticulier) => {
+    const numAmount = parseFloat(amount) || 0;
+    const numDays = Number(daysLate) || 0;
+    const rate = isParticulier ? CURRENT_LEGAL_RATE_B2C : CURRENT_PENALTY_RATE_B2B;
+    const penaltyAmount = (numAmount * rate * numDays / 365).toFixed(2);
+    const indemnite = isParticulier ? 0 : 40;
+    const total = (numAmount + parseFloat(penaltyAmount) + indemnite).toFixed(2);
+    return { rate, penaltyAmount, indemnite, total: parseFloat(total) };
+  };
+
+  const buildPrompt = (debtor, amount, dueDate, mission, daysLate, isParticulier) => {
+    const { rate, penaltyAmount, indemnite, total } = computeDueTotal(amount, daysLate, isParticulier);
+
+    const p = profile || {};
+    const senderName = p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" ") || null;
+    const senderAddress = p.address || null;
+    const senderSiret = p.siret || null;
+    const senderIban = p.iban ? `IBAN : ${p.iban}${p.bic ? " · BIC : " + p.bic : ""}${p.bankName ? " · " + p.bankName : ""}` : null;
+
+    return `Tu es un avocat spécialisé en recouvrement de créances en droit français. Rédige une MISE EN DEMEURE DE PAIEMENT ferme et juridiquement solide.
 
 Débiteur : ${debtor}
-Montant impayé HT : ${amount} €
+Montant impayé TTC (toutes taxes comprises, montant réellement dû) : ${amount} €
 Date d'échéance dépassée : ${dueDate}
 Retard : ${daysLate} jours
 Mission concernée : ${mission}
 Date de la lettre : ${new Date().toLocaleDateString("fr-FR")}
 Nature du débiteur : ${isParticulier ? "PARTICULIER (consommateur, non professionnel)" : "PROFESSIONNEL (entreprise/société)"}
 
+IDENTITÉ DE L'ÉMETTEUR (le prestataire qui envoie la lettre) :
+- Nom / raison sociale : ${senderName || "Non renseigné — laisser le placeholder [Votre nom/raison sociale]"}
+- Adresse : ${senderAddress || "Non renseignée — laisser le placeholder [Votre adresse]"}
+- SIRET : ${senderSiret || "Non renseigné — laisser le placeholder [SIRET]"}
+- Coordonnées bancaires pour le règlement : ${senderIban || "Non renseignées — laisser le placeholder [Coordonnées bancaires - IBAN/BIC]"}
+IMPORTANT : utilise ces informations réelles TELLES QUELLES dans l'en-tête et la section paiement de la lettre quand elles sont fournies. Ne remplace JAMAIS une information réelle fournie ci-dessus par un placeholder générique entre crochets — les placeholders ne doivent apparaître que pour les champs explicitement marqués "Non renseigné(e)".
+
+CALCULS DÉJÀ EFFECTUÉS (à reprendre TELS QUELS dans la lettre, ne recalcule surtout pas toi-même — le taux légal change chaque semestre et tu n'as pas accès à sa valeur actuelle) :
+- Taux applicable : ${(rate * 100).toFixed(2)}% annuel ${isParticulier ? "(taux d'intérêt légal particuliers en vigueur ce semestre)" : "(taux BCE + 10 points en vigueur ce semestre, art. L441-10 C.com.)"}
+- Montant des pénalités pour ${daysLate} jours : ${penaltyAmount} € (calcul : ${amount} € × ${(rate*100).toFixed(2)}% × ${daysLate}/365)
+${isParticulier ? "" : `- Indemnité forfaitaire de recouvrement : 40,00 € (art. D441-5 C.com.)`}
+- MONTANT TOTAL EXIGIBLE : ${total} €
+
 La lettre doit :
 ${isParticulier
   ? `1. Le débiteur étant un PARTICULIER, NE PAS appliquer le régime du Code de commerce (articles L441-10/L441-11) ni l'indemnité forfaitaire de 40 € — ce régime est réservé aux professionnels et son application à un consommateur serait juridiquement incorrecte.
-2. Calculer et réclamer uniquement des intérêts de retard au taux d'intérêt légal en vigueur pour les particuliers (fixé semestriellement par la Banque de France), appliqué au montant impayé prorata temporis.
+2. Reprendre TEL QUEL le montant des pénalités déjà calculé ci-dessus (taux d'intérêt légal particuliers), sans le recalculer.
 3. Fixer un délai de 8 JOURS pour régulariser sous peine de poursuites judiciaires.
 4. Mentionner le recours possible à l'injonction de payer (art. 1405 CPC) devant le tribunal judiciaire compétent.
 5. Ton ferme mais mesuré, conforme au droit de la consommation.`
   : `1. Mentionner EXPLICITEMENT les articles L441-10 et L441-11 du Code de commerce (pénalités de retard légales, réservées aux professionnels)
-2. Calculer les pénalités au taux BCE + 10 points appliquées au montant exact
+2. Reprendre TEL QUEL le taux et le montant des pénalités déjà calculés ci-dessus, sans les recalculer toi-même
 3. Mentionner l'indemnité forfaitaire de 40 € pour frais de recouvrement (art. D441-5 C.com.)
 4. Fixer un délai de 8 JOURS OUVRÉS pour régulariser sous peine de poursuites judiciaires
 5. Mentionner le recours possible à l'injonction de payer (art. 1405 CPC) et au recouvrement par huissier
-6. Ton ferme, professionnel, sans agressivité mais sans concession`}
+6. Ton ferme, professionnel, sans agressivité mais sans concession
+7. IMPORTANT — Titre de civilité : si la forme juridique de l'entreprise est mentionnée (SAS/SASU → dirigeant = "Président(e)" ; SARL/EURL → dirigeant = "Gérant(e)" ; autre/inconnue → rester neutre avec "Madame/Monsieur" sans titre de fonction). Ne jamais employer "Gérant(e)" pour une SAS ou SASU, ni "Président(e)" pour une SARL — ce sont des titres juridiques distincts et non interchangeables.`}
 
-Structure : Objet → Rappel des faits → Montant total dû avec calcul détaillé → Mise en demeure formelle → Délai + conséquences → Formule de clôture
+Structure : Objet → Rappel des faits → Montant total dû avec calcul détaillé (reprendre les chiffres exacts fournis ci-dessus) → Mise en demeure formelle → Délai + conséquences → Formule de clôture
+
+IMPORTANT — Ne jamais affirmer des faits non fournis dans les informations ci-dessus (par exemple, ne pas prétendre que des relances amiables ont déjà été envoyées, sauf si cela est explicitement mentionné dans la mission/les détails du litige). Reste factuel et ne complète pas l'historique par des suppositions.
 
 Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
+  };
 
   const callAI = async (prompt) => {
     const res = await fetch("/api/generate", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:1200, messages:[{role:"user",content:prompt}] }),
+      body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:2500, messages:[{role:"user",content:prompt}] }),
     });
     const data = await res.json();
     return (data.content||[]).map(i=>i.text||"").join("\n").trim();
@@ -6598,6 +6673,8 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
         AUTO_CASE.daysLate,
         false
       );
+      const { total } = computeDueTotal(AUTO_CASE.amount, AUTO_CASE.daysLate, false);
+      setAutoTotal(total);
       const text = await callAI(prompt);
       setAutoLetter(text);
       setAutoStep("result");
@@ -6611,7 +6688,14 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
     if (!manDebtor.trim() || !manAmount.trim()) return;
     setManStep("loading");
     try {
-      const prompt = buildPrompt(manDebtor, manAmount, new Date().toLocaleDateString("fr-FR"), manDetails || "Mission freelance", "—", manClientType === "particulier");
+      const dueDateLabel = manDueDate ? new Date(manDueDate).toLocaleDateString("fr-FR") : "Non renseignée";
+      const realDaysLate = manDueDate
+        ? Math.max(1, Math.floor((new Date() - new Date(manDueDate)) / (1000 * 60 * 60 * 24)))
+        : 30; // valeur par défaut raisonnable si aucune date n'est renseignée
+      const isPart = manClientType === "particulier";
+      const prompt = buildPrompt(manDebtor, manAmount, dueDateLabel, manDetails || "Mission freelance", realDaysLate, isPart);
+      const { total } = computeDueTotal(manAmount, realDaysLate, isPart);
+      setManTotal(total);
       const text = await callAI(prompt);
       setManLetter(text);
       setManStep("result");
@@ -6643,10 +6727,63 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
   );
 
   /* ── Result screen shared ── */
-  const downloadLetterPDF = (letter, clientName) => {
+  const handleGeneratePaymentLink = async (total, clientName, mission, clientEmail) => {
+    if (stripeLinkGenerating || !total || total <= 0) return;
+    setStripeLinkGenerating(true);
+    try {
+      const res = await fetch("/api/create-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: total,
+          description: `Règlement mise en demeure — ${mission || clientName}`,
+          customerEmail: clientEmail || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      setStripeLinkUrl(data.url);
+      navigator.clipboard.writeText(data.url).catch(()=>{});
+      setStripeLinkCopied(true);
+      setTimeout(() => setStripeLinkCopied(false), 2800);
+      return data.url;
+    } catch(e) {
+      alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
+    } finally {
+      setStripeLinkGenerating(false);
+    }
+  };
+
+  const downloadLetterPDF = async (letter, clientName, total, mission, clientEmail) => {
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!letter) { alert("Aucune lettre à télécharger."); return; }
     try {
+      // 1. Récupérer (ou générer) le lien de paiement Stripe pour le montant total avec pénalités
+      let payUrl = stripeLinkUrl;
+      if (!payUrl && total > 0) {
+        payUrl = await handleGeneratePaymentLink(total, clientName, mission, clientEmail);
+      }
+
+      // 2. Convertir le QR code en base64 pour l'intégrer au PDF
+      let qrBase64 = null;
+      if (payUrl) {
+        try {
+          qrBase64 = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              canvas.width = img.width; canvas.height = img.height;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0);
+              try { resolve(canvas.toDataURL("image/png")); } catch(e) { reject(e); }
+            };
+            img.onerror = reject;
+            img.src = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=2&data=${encodeURIComponent(payUrl)}`;
+          });
+        } catch(e) { qrBase64 = null; }
+      }
+
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "mm", format: "a4" });
       const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
@@ -6663,14 +6800,29 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
       const cleanText = String(letter).replace(/^#+\s*/gm, "").replace(/\*\*/g, "");
       const lines = doc.splitTextToSize(cleanText, cw);
       lines.forEach(l => {
-        if (y > 275) { doc.addPage(); y = 20; }
+        if (y > 270) { doc.addPage(); y = 20; }
         doc.text(l, ML, y); y += 5.4;
       });
+
+      // 3. Bloc paiement (IBAN existe déjà dans le corps de la lettre) + QR carte
+      if (qrBase64) {
+        if (y > 235) { doc.addPage(); y = 20; }
+        y += 8;
+        const boxH = 36;
+        doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, cw, boxH, 2, 2, "F");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+        doc.text("RÉGLER CETTE MISE EN DEMEURE PAR CARTE", ML + 4, y + 8);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(80,80,80);
+        doc.text(doc.splitTextToSize(`Scanner ce code pour régler immédiatement le montant total de ${total.toFixed ? total.toFixed(2) : total} € (principal + pénalités + indemnité).`, cw - 40), ML + 4, y + 15);
+        try { doc.addImage(qrBase64, "PNG", ML + cw - 32, y + 3, 30, 30); } catch(e) {}
+        y += boxH;
+      }
+
       doc.save(`Mise_en_demeure_${(clientName||"client").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
     } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
   };
 
-  const ResultScreen = ({ letter, onEdit, clientName }) => (
+  const ResultScreen = ({ letter, onEdit, clientName, clientEmail, clientPhone, total, mission }) => (
     <div className="fade-up">
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:10, padding:"11px 16px" }}>
         <span>🚨</span>
@@ -6679,16 +6831,38 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
       <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"18px 20px", maxHeight:260, overflowY:"auto", marginBottom:14 }}>
         <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{letter}</pre>
       </div>
+
+      {/* Paiement du montant total (principal + pénalités + indemnité) */}
+      <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Faire régler le montant total ({total ? total.toFixed(2) : "0.00"} €) par carte</div>
+        <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:10 }}>
+          Ce lien inclut le principal, les pénalités calculées et l'indemnité — le client règle tout en un clic.
+        </div>
+        <button
+          onClick={() => handleGeneratePaymentLink(total, clientName || AUTO_CASE.clientName, mission, clientEmail)}
+          disabled={stripeLinkGenerating}
+          style={{ width:"100%", padding:"10px", background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.gold, color: stripeLinkCopied ? "#fff" : C.navyD, border:"none", borderRadius:8, cursor: stripeLinkGenerating ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, opacity: stripeLinkGenerating ? 0.7 : 1 }}
+        >
+          {stripeLinkGenerating ? "⏳ Génération…" : stripeLinkCopied ? "✅ Lien copié !" : "💳 Copier le lien de paiement"}
+        </button>
+        {stripeLinkUrl && (
+          <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:10 }}>
+            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=2&data=${encodeURIComponent(stripeLinkUrl)}`} alt="QR paiement" width={64} height={64} style={{ borderRadius:6, background:"#fff", flexShrink:0 }} />
+            <div style={{ fontFamily:T.body, fontSize:10, color:"#8BA3C0", lineHeight:1.5 }}>Scannable ou partageable — ce lien est aussi intégré automatiquement au PDF téléchargé.</div>
+          </div>
+        )}
+      </div>
+
       <div style={{ display:"flex", gap:10 }}>
         <button onClick={onEdit} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
         <button
-          onClick={() => downloadLetterPDF(letter, clientName || AUTO_CASE.clientName)}
+          onClick={() => downloadLetterPDF(letter, clientName || AUTO_CASE.clientName, total, mission, clientEmail)}
           style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}
           onMouseOver={e=>e.currentTarget.style.background="#F5F3FF"}
           onMouseOut={e=>e.currentTarget.style.background=C.white}
         >⬇ PDF</button>
         <button
-          onClick={() => setSendModal({ letter, clientName: clientName || AUTO_CASE.clientName })}
+          onClick={() => setSendModal({ letter, clientName: clientName || AUTO_CASE.clientName, clientEmail, clientPhone, total })}
           style={{ flex:2, padding:"12px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
           onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 28px rgba(185,28,28,0.45)";}}
           onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 5px 18px rgba(185,28,28,0.3)";}}
@@ -6730,7 +6904,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
               <button
                 onClick={() => {
                   const subject = `Mise en demeure de paiement — ${sendModal.clientName}`;
-                  const body = sendModal.letter || "";
+                  const body = (sendModal.letter || "") + (stripeLinkUrl ? `\n\n---\nRéglez immédiatement par carte via ce lien sécurisé :\n${stripeLinkUrl}` : "");
                   const to = sendModal.clientEmail || "";
                   window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
                   setSendSuccess(sendModal.clientName);
@@ -6751,7 +6925,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
               {/* Option SMS */}
               <button
                 onClick={() => {
-                  const msg = `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement. Cordialement.`;
+                  const msg = `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement.${stripeLinkUrl ? ` Réglez ici : ${stripeLinkUrl}` : ""} Cordialement.`;
                   window.location.href = `sms:${sendModal.clientPhone || ""}?body=${encodeURIComponent(msg)}`;
                   setSendSuccess(sendModal.clientName);
                 }}
@@ -6811,7 +6985,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                     <span style={{ fontFamily:T.body, fontSize:9, fontWeight:700, color:"#92400E", background:"#FEF3C7", border:"1px solid #FCD34D", borderRadius:5, padding:"1px 6px", letterSpacing:"0.05em" }}>DÉMO</span>
                   </div>
                   <div style={{ fontFamily:T.body, fontSize:12, color:"#7F1D1D", lineHeight:1.6 }}>
-                    <strong>{AUTO_CASE.clientName}</strong> ({AUTO_CASE.company}) — Facture finale de <strong>{AUTO_CASE.amount} € HT</strong> en retard de <strong>{AUTO_CASE.daysLate} jours</strong>. <em>Teste la génération sur ce cas, ou saisis ton vrai dossier plus bas.</em>
+                    <strong>{AUTO_CASE.clientName}</strong> ({AUTO_CASE.company}) — Facture finale de <strong>{AUTO_CASE.amount} € TTC</strong> en retard de <strong>{AUTO_CASE.daysLate} jours</strong>. <em>Teste la génération sur ce cas, ou saisis ton vrai dossier plus bas.</em>
                   </div>
                 </div>
               </div>
@@ -6840,6 +7014,8 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                 letter={autoLetter}
                 onEdit={() => { setAutoStep("alert"); setAutoLetter(""); }}
                 clientName={AUTO_CASE.clientName}
+                total={autoTotal}
+                mission={AUTO_CASE.mission}
               />
             )}
           </div>
@@ -6903,8 +7079,22 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                         </div>
                       </div>
                       <div style={{ marginBottom:12 }}>
-                        <label style={labelSt}>MONTANT DÛ (€ HT)</label>
-                        <input type="number" style={inputStyle} value={manAmount} onChange={e=>setManAmount(e.target.value)} placeholder="Ex : 1 500" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
+                        <label style={labelSt}>MONTANT TOTAL DÛ (€ TTC)</label>
+                        <input type="number" style={inputStyle} value={manAmount} onChange={e=>setManAmount(e.target.value)} placeholder="Ex : 1 500 (montant total de la facture impayée)" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
+                      </div>
+                      <div style={{ marginBottom:12 }}>
+                        <label style={labelSt}>DATE D'ÉCHÉANCE DÉPASSÉE</label>
+                        <input type="date" style={inputStyle} value={manDueDate} onChange={e=>setManDueDate(e.target.value)} onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
+                      </div>
+                      <div style={{ marginBottom:12, display:"flex", gap:10 }}>
+                        <div style={{ flex:1 }}>
+                          <label style={labelSt}>EMAIL DU CLIENT (optionnel)</label>
+                          <input type="email" style={inputStyle} value={manClientEmail} onChange={e=>setManClientEmail(e.target.value)} placeholder="client@exemple.com" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
+                        </div>
+                        <div style={{ flex:1 }}>
+                          <label style={labelSt}>TÉLÉPHONE (optionnel)</label>
+                          <input type="tel" style={inputStyle} value={manClientPhone} onChange={e=>setManClientPhone(e.target.value)} placeholder="06 12 34 56 78" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
+                        </div>
                       </div>
                       <div style={{ marginBottom:18 }}>
                         <label style={labelSt}>DÉTAILS OU HISTORIQUE DU LITIGE</label>
@@ -6933,6 +7123,10 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
                       letter={manLetter}
                       onEdit={() => { setManStep("form"); setManLetter(""); }}
                       clientName={manDebtor}
+                      clientEmail={manClientEmail}
+                      clientPhone={manClientPhone}
+                      total={manTotal}
+                      mission={manDetails || "Prestation freelance"}
                     />
                   )}
                 </div>
