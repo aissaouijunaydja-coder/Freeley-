@@ -7025,7 +7025,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
             /* ── Écran confirmation succès ── */
             <div className="fade-up" style={{ background:C.white, borderRadius:20, padding:"24px 16px", maxWidth:400, width:"100%", textAlign:"center", boxShadow:"0 40px 100px rgba(0,0,0,0.35)", border:"1px solid #BBF7D0" }}>
               <div style={{ width:64, height:64, background:"linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%)", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:30, margin:"0 auto 18px" }}>🚀</div>
-              <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:"#065F46", marginBottom:10, lineHeight:1.3 }}>Notification officielle envoyée avec succès à {sendSuccess}.</div>
+              <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:"#065F46", marginBottom:10, lineHeight:1.3 }}>{sendModal?.type === "preventive" ? "Rappel" : "Notification officielle"} envoyé{sendModal?.type === "preventive" ? "" : "e"} avec succès à {sendSuccess}.</div>
               <div style={{ fontFamily:T.body, fontSize:13, color:"#047857", marginBottom:24, lineHeight:1.65 }}>Le dossier est mis à jour.</div>
               <button
                 onClick={() => { setSendSuccess(null); setSendModal(null); }}
@@ -7062,7 +7062,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   <div style={{ width:44, height:44, background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>📧</div>
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#1E3A8A", marginBottom:3 }}>Par Email</div>
-                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Ouvre ton application email avec la mise en demeure déjà rédigée, prête à envoyer à {sendModal.clientName}.</div>
+                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Ouvre ton application email avec {sendModal.type === "preventive" ? "le rappel" : "la mise en demeure"} déjà rédigé{sendModal.type === "preventive" ? "" : "e"}, prêt{sendModal.type === "preventive" ? "" : "e"} à envoyer à {sendModal.clientName}.</div>
                   </div>
                 </div>
               </button>
@@ -7111,7 +7111,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
               <div style={{ width:42, height:42, background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:13, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>🚨</div>
               <div>
                 <div style={{ fontFamily:T.display, fontSize:17, fontWeight:700, color:"#fff", lineHeight:1.2 }}>Recouvrement Ferme</div>
-                <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>Mise en demeure · Art. L441-10 C.com.</div>
+                <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>Rappels avant échéance & mises en demeure</div>
               </div>
             </div>
             <button onClick={onClose} style={{ width:30, height:30, borderRadius:"50%", background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.18)", cursor:"pointer", color:"rgba(255,255,255,0.75)", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>×</button>
@@ -7285,8 +7285,11 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         <input type="number" style={inputStyle} value={manAmount} onChange={e=>setManAmount(e.target.value)} placeholder="Ex : 1 500 (montant total de la facture impayée)" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
                       </div>
                       <div style={{ marginBottom:12 }}>
-                        <label style={labelSt}>DATE D'ÉCHÉANCE DÉPASSÉE</label>
+                        <label style={labelSt}>DATE D'ÉCHÉANCE</label>
                         <input type="date" style={inputStyle} value={manDueDate} onChange={e=>setManDueDate(e.target.value)} onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
+                        <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
+                          Dépassée ou à venir — Freeley choisit automatiquement le bon courrier : rappel préventif (pas encore due) ou mise en demeure (en retard).
+                        </div>
                       </div>
                       <div style={{ marginBottom:12, display:"flex", gap:10 }}>
                         <div style={{ flex:1 }}>
@@ -7319,7 +7322,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                       </button>
                     </>
                   )}
-                  {manStep === "loading" && <LoadingScreen dots={manDots} type={manDueDate && (new Date(manDueDate) - new Date()) > 0 ? "preventive" : "formal"} />}
+                  {manStep === "loading" && <LoadingScreen dots={manDots} type={manLetterType} />}
                   {manStep === "result" && (
                     <ResultScreen
                       letter={manLetter}
