@@ -9524,8 +9524,6 @@ function InvoiceModal({ form, setForm, profile, onClose, depositPctProp, onDepos
     setLocalDepositPct(v);
     if (onDepositPctChange) onDepositPctChange(v);
   };
-  const [copiedSms, setCopiedSms]       = useState(false);
-  const [copiedEmailRelance, setCopiedEmailRelance] = useState(false);
   const [stripeLinkGenerating, setStripeLinkGenerating] = useState(false);
   const [stripeLinkCopied, setStripeLinkCopied] = useState(false);
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
@@ -9922,6 +9920,24 @@ ${freelanceName}`;
               />
               {form.clientCompany && <div style={{ fontFamily:T.body, fontSize:11, color:C.textM }}>{form.clientCompany}</div>}
               {form.clientEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>{form.clientEmail}</div>}
+              <div style={{ display:"flex", gap:6, marginTop:8 }}>
+                {[
+                  { key:"professionnel", label:"Pro (B2B)" },
+                  { key:"particulier", label:"Particulier (B2C)" },
+                ].map(o => (
+                  <button
+                    key={o.key}
+                    onClick={() => setForm(f => ({ ...f, typeClient: o.key }))}
+                    style={{
+                      padding:"4px 9px", borderRadius:6, cursor:"pointer",
+                      fontFamily:T.body, fontSize:10, fontWeight:600,
+                      background: form.typeClient === o.key ? C.navy : "transparent",
+                      color: form.typeClient === o.key ? "#fff" : C.textM,
+                      border: `1px solid ${form.typeClient === o.key ? C.navy : C.border}`,
+                    }}
+                  >{o.label}</button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -10168,6 +10184,28 @@ ${freelanceName}`;
           </div>
         </div>
 
+        {/* Bouton télécharger PDF — juste après le bloc paiement */}
+        <div style={{ padding:"0 24px 20px" }}>
+          <button onClick={handleFakeDownload} disabled={pdfGenerating} style={{
+            width:"100%", padding:"12px",
+            background: downloaded ? "#16A34A" : C.gold,
+            border:"none", borderRadius:8, cursor: pdfGenerating ? "wait" : "pointer",
+            fontSize:13, fontFamily:T.body, fontWeight:700,
+            color: downloaded ? C.white : C.navyD,
+            display:"flex", alignItems:"center", justifyContent:"center", gap:7,
+            transition:"background 0.25s",
+            boxShadow: downloaded ? "none" : "0 4px 14px #B8965A35",
+            opacity: pdfGenerating ? 0.7 : 1,
+          }}>
+            {pdfGenerating
+              ? <><span style={{fontSize:15}}>⏳</span> Préparation du PDF…</>
+              : downloaded
+              ? <><span style={{fontSize:15}}>✓</span> Facture générée !</>
+              : <><span style={{fontSize:15}}>⬇</span> Télécharger la facture PDF</>
+            }
+          </button>
+        </div>
+
         {/* ══ ENVOYER LA FACTURE (premier envoi) ══ */}
         <div style={{ padding:"0 24px 20px" }}>
           <div style={{
@@ -10204,145 +10242,6 @@ ${freelanceName}`;
           })()}
         </div>
 
-        {/* ══ RELANCE ACOMPTE ══ */}
-        <div style={{ padding:"0 24px 20px" }}>
-          {/* Titre section */}
-          <div style={{
-            display:"flex", alignItems:"center", gap:8, marginBottom:14,
-          }}>
-            <div style={{ flex:1, height:1, background:C.borderL }} />
-            <span style={{
-              fontFamily:T.body, fontSize:10, fontWeight:700, letterSpacing:"0.12em",
-              color:C.textL, whiteSpace:"nowrap",
-            }}>📬 {isComptant ? "RELANCER POUR LE PAIEMENT" : "RELANCER VOTRE CLIENT"}</span>
-            <div style={{ flex:1, height:1, background:C.borderL }} />
-          </div>
-
-          {/* Bloc SMS */}
-          <div style={{
-            background:"#F0F9FF", border:"1px solid #BAE6FD",
-            borderRadius:12, padding:"14px 16px", marginBottom:12,
-          }}>
-            <div style={{
-              display:"flex", alignItems:"center", gap:6, marginBottom:10,
-            }}>
-              <span style={{ fontSize:14 }}>📱</span>
-              <span style={{
-                fontFamily:T.body, fontSize:11, fontWeight:700,
-                color:"#0369A1", letterSpacing:"0.05em",
-              }}>VERSION SMS</span>
-            </div>
-            <div style={{
-              background:C.white, border:"1px solid #BAE6FD",
-              borderRadius:8, padding:"10px 13px", marginBottom:10,
-              fontFamily:T.body, fontSize:12, color:"#0C4A6E",
-              lineHeight:1.65, fontStyle:"italic",
-            }}>
-              {smsText}
-            </div>
-            <div style={{ display:"flex", gap:8 }}>
-              <button
-                onClick={() => handleCopyRelance(smsText, setCopiedSms)}
-                style={{
-                  flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-                  padding:"9px 0",
-                  background: copiedSms ? "#16A34A" : C.white,
-                  border:`1.5px solid ${copiedSms ? "#16A34A" : "#BAE6FD"}`,
-                  borderRadius:8, cursor:"pointer",
-                  fontFamily:T.body, fontSize:12, fontWeight:600,
-                  color: copiedSms ? C.white : "#0369A1",
-                  transition:"all 0.2s",
-                }}
-              >
-                {copiedSms ? "✓ Copié !" : "📋 Copier"}
-              </button>
-              <a
-                href={smsLink}
-                style={{
-                  flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-                  padding:"9px 0",
-                  background:"#0EA5E9",
-                  border:"none",
-                  borderRadius:8, cursor:"pointer",
-                  fontFamily:T.body, fontSize:12, fontWeight:700,
-                  color:C.white, textDecoration:"none",
-                  transition:"all 0.2s",
-                  boxShadow:"0 3px 10px #0EA5E930",
-                }}
-              >
-                📱 Envoyer par SMS
-              </a>
-            </div>
-          </div>
-
-          {/* Bloc Email */}
-          <div style={{
-            background:"#F5F3FF", border:"1px solid #DDD6FE",
-            borderRadius:12, padding:"14px 16px",
-          }}>
-            <div style={{
-              display:"flex", alignItems:"center", gap:6, marginBottom:10,
-            }}>
-              <span style={{ fontSize:14 }}>✉️</span>
-              <span style={{
-                fontFamily:T.body, fontSize:11, fontWeight:700,
-                color:"#6D28D9", letterSpacing:"0.05em",
-              }}>VERSION E-MAIL</span>
-              {clientEmail && (
-                <span style={{
-                  marginLeft:"auto", fontFamily:T.body, fontSize:10,
-                  color:"#7C3AED", background:"#EDE9FE",
-                  padding:"2px 8px", borderRadius:20, fontWeight:600,
-                }}>
-                  → {clientEmail}
-                </span>
-              )}
-            </div>
-            <div style={{
-              background:C.white, border:"1px solid #DDD6FE",
-              borderRadius:8, padding:"10px 13px", marginBottom:10,
-              fontFamily:T.body, fontSize:12, color:"#3B0764",
-              lineHeight:1.7, fontStyle:"italic",
-              whiteSpace:"pre-line",
-            }}>
-              {emailBody}
-            </div>
-            <div style={{ display:"flex", gap:8 }}>
-              <button
-                onClick={() => handleCopyRelance(emailBody, setCopiedEmailRelance)}
-                style={{
-                  flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-                  padding:"9px 0",
-                  background: copiedEmailRelance ? "#16A34A" : C.white,
-                  border:`1.5px solid ${copiedEmailRelance ? "#16A34A" : "#DDD6FE"}`,
-                  borderRadius:8, cursor:"pointer",
-                  fontFamily:T.body, fontSize:12, fontWeight:600,
-                  color: copiedEmailRelance ? C.white : "#6D28D9",
-                  transition:"all 0.2s",
-                }}
-              >
-                {copiedEmailRelance ? "✓ Copié !" : "📋 Copier"}
-              </button>
-              <a
-                href={mailtoLink}
-                style={{
-                  flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-                  padding:"9px 0",
-                  background:"#7C3AED",
-                  border:"none",
-                  borderRadius:8, cursor:"pointer",
-                  fontFamily:T.body, fontSize:12, fontWeight:700,
-                  color:C.white, textDecoration:"none",
-                  transition:"all 0.2s",
-                  boxShadow:"0 3px 10px #7C3AED30",
-                }}
-              >
-                ✉️ Ouvrir dans mon Mail
-              </a>
-            </div>
-          </div>
-        </div>
-
         {/* Footer boutons */}
         <div style={{ padding:"0 24px 20px", display:"flex", gap:10 }}>
           <button onClick={onClose} style={{
@@ -10350,24 +10249,6 @@ ${freelanceName}`;
             borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body,
             color:C.textM, fontWeight:500,
           }}>Fermer</button>
-          <button onClick={handleFakeDownload} disabled={pdfGenerating} style={{
-            flex:2, padding:"12px",
-            background: downloaded ? "#16A34A" : C.gold,
-            border:"none", borderRadius:8, cursor: pdfGenerating ? "wait" : "pointer",
-            fontSize:13, fontFamily:T.body, fontWeight:700,
-            color: downloaded ? C.white : C.navyD,
-            display:"flex", alignItems:"center", justifyContent:"center", gap:7,
-            transition:"background 0.25s",
-            boxShadow: downloaded ? "none" : "0 4px 14px #B8965A35",
-            opacity: pdfGenerating ? 0.7 : 1,
-          }}>
-            {pdfGenerating
-              ? <><span style={{fontSize:15}}>⏳</span> Préparation du PDF…</>
-              : downloaded
-              ? <><span style={{fontSize:15}}>✓</span> Facture générée !</>
-              : <><span style={{fontSize:15}}>⬇</span> Télécharger la facture PDF</>
-            }
-          </button>
         </div>
 
       </div>
