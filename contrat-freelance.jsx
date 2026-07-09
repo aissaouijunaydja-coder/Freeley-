@@ -305,6 +305,27 @@ const submitClientSignature = async (contractId, clientSignature) => {
   return true;
 };
 
+// Le client (sans compte) charge le NDA à signer via son id public
+const getNdaForSigning = async (ndaId) => {
+  const { data, error } = await supabase
+    .from("ndas")
+    .select("id, partie_a, partie_b, content, status")
+    .eq("id", ndaId)
+    .single();
+  if (error) { console.error("getNdaForSigning error:", error); return null; }
+  return data;
+};
+
+// Le client signe le NDA : on enregistre sa signature et on passe le statut à "signed"
+const submitNdaSignature = async (ndaId, clientSignature) => {
+  const { error } = await supabase
+    .from("ndas")
+    .update({ client_signature: clientSignature, status: "signed", signed_at: new Date().toISOString() })
+    .eq("id", ndaId);
+  if (error) { console.error("submitNdaSignature error:", error); return false; }
+  return true;
+};
+
 const initialForm = {
   freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
   freelanceEmail: "",
@@ -1026,10 +1047,12 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results","profile-gate","dashboard","cgu","drafts"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","profile-gate","dashboard","cgu","drafts","mes-ndas"].includes(saved) ? saved : "app";
   });
   const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
+  const [myNdas, setMyNdas]       = useState([]);
+  const [myNdasLoading, setMyNdasLoading] = useState(false);
   const [historyView, setHistoryView] = useState(null);
   const [animDone, setAnimDone]   = useState(false);
   const animDoneRef               = useRef(false); // ref pour lecture correcte dans les closures async
@@ -1224,7 +1247,19 @@ function AppInner() {
     return () => clearTimeout(timer);
   }, [profile, authUser]);
 
-  // ── Init : session mock + données utilisateur ──
+  // Charge la liste des NDA depuis Supabase quand on arrive sur la page "Mes NDA"
+  useEffect(() => {
+    if (screen !== "mes-ndas" || !authUser?.id) return;
+    setMyNdasLoading(true);
+    supabase.from("ndas").select("*").eq("user_id", authUser.id).order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        setMyNdasLoading(false);
+        if (error) { console.error("Erreur chargement Mes NDA:", error); return; }
+        setMyNdas(data || []);
+      });
+  }, [screen, authUser]);
+
+
   useEffect(() => {
     if (window.jspdf) { setPDFReady(true); }
     else {
@@ -2451,6 +2486,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onDashboard: () => goToScreen("dashboard"),
     onDrafts: () => goToScreen("drafts"),
     onCGU: () => goToScreen("cgu"),
+    onMyNdas: () => goToScreen("mes-ndas"),
     onProfile: () => authUser ? goToScreen("profile") : setScreen("profile-gate"),
     onOpenRecouvrement: () => setShowRecouvrementModal(true),
     onOpenNda: () => setShowNdaModal(true),
@@ -2563,6 +2599,46 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       })}
       {scanList.length === 0 && <p style={{color:"#8A8780",fontSize:13}}>Aucune analyse sauvegardée.</p>}
     </div></Shell>);
+  }
+  if (screen === "mes-ndas") {
+    const deleteNda = async (id) => {
+      try { await supabase.from("ndas").delete().eq("id", id); } catch(e) { console.error("Erreur suppression NDA:", e); }
+      setMyNdas(prev => prev.filter(n => n.id !== id));
+    };
+    return (<Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <div style={{maxWidth:640,margin:"0 auto",padding:"24px 16px 80px"}}>
+        <button onClick={()=>{ goToScreen("app"); }} style={{background:"none",border:"none",cursor:"pointer",color:C.navy,fontSize:13,marginBottom:16,fontFamily:T.body}}>← Retour</button>
+        <h2 style={{fontFamily:T.display,fontSize:22,color:C.navy,marginBottom:8}}>Mes NDA</h2>
+        <p style={{fontSize:13,color:C.textL,marginBottom:20,fontFamily:T.body}}>
+          {myNdasLoading ? "Chargement…" : `${myNdas.length} NDA sauvegardé${myNdas.length > 1 ? "s" : ""}`}
+        </p>
+        {!myNdasLoading && myNdas.length === 0 && (
+          <div style={{textAlign:"center", padding:"40px 20px", background:C.creamD, borderRadius:12, fontFamily:T.body, fontSize:13, color:C.textL}}>
+            Aucun NDA généré pour le moment.<br/>Utilise « NDA Express » depuis le menu pour en créer un.
+          </div>
+        )}
+        {myNdas.map((n) => (
+          <details key={n.id} style={{marginBottom:12, border:`1.5px solid ${C.border}`, borderRadius:12, overflow:"hidden"}}>
+            <summary style={{padding:"14px 16px", cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600, color:C.navy, background:C.creamD, listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:6}}>
+              <span>🔒 {n.partie_a} ↔ {n.partie_b}</span>
+              <span style={{fontSize:11, color:C.textL, fontWeight:500}}>{n.created_at ? new Date(n.created_at).toLocaleDateString("fr-FR") : ""}</span>
+            </summary>
+            <div style={{padding:"14px 16px"}}>
+              {n.objet && <p style={{fontSize:12,color:C.textL,marginBottom:10,fontFamily:T.body}}>{n.objet}</p>}
+              <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", maxHeight:260, overflowY:"auto", marginBottom:12 }}>
+                <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(n.content)}</pre>
+              </div>
+              <div style={{display:"flex", gap:8}}>
+                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_b)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
+                <button onClick={()=>deleteNda(n.id)} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:T.body}}>🗑 Supprimer</button>
+              </div>
+            </div>
+          </details>
+        ))}
+      </div>
+    </Shell>);
   }
   if (screen === "reset-password") return (
     <Shell>
@@ -6281,7 +6357,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onDrafts, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
+function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onDrafts, onMyNdas, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
   const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -6471,6 +6547,15 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
                 >📝 Mes brouillons</button>
+                <button onClick={() => { setUserMenu(false); if(onMyNdas) onMyNdas(); }} style={{
+                  width:"100%", textAlign:"left",
+                  padding:"10px 16px", background:"none", border:"none",
+                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
+                  display:"flex", alignItems:"center", gap:8,
+                }}
+                  onMouseOver={e=>e.currentTarget.style.background=C.creamD}
+                  onMouseOut={e=>e.currentTarget.style.background="none"}
+                >🔒 Mes NDA</button>
                 <button onClick={() => { setUserMenu(false); if(onCGU) onCGU(); }} style={{
                   width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
@@ -6511,6 +6596,40 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
 
 /* ══════════════════════════════════════════ AUTH MODAL ══ */
 /* ══════════════════════════════════════════════════════════ NDA EXPRESS MODAL ══ */
+// Nettoie tout résidu de markdown (tableaux, gras, titres) d'un texte de NDA — partagé entre la fenêtre de création et la page "Mes NDA"
+const cleanNdaText = (text) => String(text || "")
+  .replace(/^#+\s*/gm, "")
+  .replace(/\*\*/g, "")
+  .split("\n")
+  .filter(line => !/^[\s|:\-]+$/.test(line))
+  .map(line => line.includes("|") ? line.split("|").map(s => s.trim()).filter(Boolean).join(" — ") : line)
+  .join("\n");
+
+// Génère le PDF d'un NDA — partagé entre la fenêtre de création et la page "Mes NDA"
+const downloadNdaPDF = (ndaText, ndaRef, partieBName) => {
+  if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+  if (!ndaText) { alert("Aucun NDA à télécharger."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+  const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
+  const today = new Date().toLocaleDateString("fr-FR");
+  doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
+  doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
+  doc.text("ACCORD DE CONFIDENTIALITÉ (NDA)", ML, 15);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
+  doc.text(`${ndaRef || ""} · Établi le ${today} via Freeley`, ML, 23);
+  let y = 42;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
+  const lines = doc.splitTextToSize(cleanNdaText(ndaText), cw);
+  lines.forEach(l => {
+    if (y > 270) { doc.addPage(); y = 20; }
+    doc.text(l, ML, y); y += 5.4;
+  });
+  doc.save(`NDA_${(partieBName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+};
+
 function NdaExpressModal({ onClose, profile, authUser }) {
   const [step, setStep]           = useState("form"); // "form" | "loading" | "result"
   const [partieA, setPartieA]     = useState(() => {
@@ -6527,6 +6646,10 @@ function NdaExpressModal({ onClose, profile, authUser }) {
   const [copying, setCopying]     = useState(false);
   const [dots, setDots]           = useState(1);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [ndaRowId, setNdaRowId] = useState(null);
+  const [signLink, setSignLink] = useState("");
+  const [signLinkGenerating, setSignLinkGenerating] = useState(false);
+  const [signLinkCopied, setSignLinkCopied] = useState(false);
 
   // Historique : local en secours immédiat, Supabase comme vraie source dès que le compte est connu
   const [ndaHistory, setNdaHistory] = useState(() => {
@@ -6561,15 +6684,6 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     const id = setInterval(() => setDots(d => d < 3 ? d+1 : 1), 500);
     return () => clearInterval(id);
   }, [step]);
-
-  // Filet de sécurité : nettoie tout résidu de markdown (tableaux, gras, titres) si l'IA en génère malgré les instructions
-  const cleanNdaText = (text) => String(text || "")
-    .replace(/^#+\s*/gm, "")
-    .replace(/\*\*/g, "")
-    .split("\n")
-    .filter(line => !/^[\s|:\-]+$/.test(line))
-    .map(line => line.includes("|") ? line.split("|").map(s => s.trim()).filter(Boolean).join(" — ") : line)
-    .join("\n");
 
   const durationLabel = { "2":"2 ans", "3":"3 ans", "5":"5 ans", "indeterminee":"durée indéterminée, jusqu'à ce que l'information devienne publique" }[duration];
 
@@ -6612,11 +6726,15 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
       setNda(text);
       setStep("result");
+      setSignLink(""); setNdaRowId(null); // repart de zéro : ce nouveau NDA n'a pas encore d'id ni de lien de signature
       // Sauvegarde de l'historique : Supabase si connecté (source réelle), sinon repli local
       const entry = { partieA, partieB, partieBEmail, objet, ndaType, duration, ndaRef: ref, nda: text, date: new Date().toLocaleDateString("fr-FR") };
       if (authUser?.id) {
-        supabase.from("ndas").insert(ndaToRow(entry, authUser.id))
-          .then(({ error }) => { if (error) console.error("Erreur sauvegarde NDA Supabase:", error); });
+        supabase.from("ndas").insert(ndaToRow(entry, authUser.id)).select().single()
+          .then(({ data, error }) => {
+            if (error) { console.error("Erreur sauvegarde NDA Supabase:", error); return; }
+            setNdaRowId(data.id);
+          });
       }
       setNdaHistory(prev => {
         const next = [entry, ...prev].slice(0, 15);
@@ -6638,28 +6756,21 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
     window.location.href = `mailto:${partieBEmail || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(cleanNdaText(nda))}`;
   };
 
-  const downloadNdaPDF = () => {
-    if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
-    if (!nda) { alert("Aucun NDA à télécharger."); return; }
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-    const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
-    const today = new Date().toLocaleDateString("fr-FR");
-    doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
-    doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
-    doc.text("ACCORD DE CONFIDENTIALITÉ (NDA)", ML, 15);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-    doc.text(`${ndaRef} · Établi le ${today} via Freeley`, ML, 23);
-    let y = 42;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
-    const lines = doc.splitTextToSize(cleanNdaText(nda), cw);
-    lines.forEach(l => {
-      if (y > 270) { doc.addPage(); y = 20; }
-      doc.text(l, ML, y); y += 5.4;
-    });
-    doc.save(`NDA_${(partieB||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+  // Génère un lien de signature à distance, sur le même principe que les contrats (mini-Yousign)
+  const generateSignLink = async () => {
+    if (!ndaRowId) {
+      alert("Connecte-toi pour pouvoir générer un lien de signature (le NDA doit d'abord être sauvegardé).");
+      return;
+    }
+    setSignLinkGenerating(true);
+    const { error } = await supabase.from("ndas").update({ status: "pending_signature" }).eq("id", ndaRowId);
+    setSignLinkGenerating(false);
+    if (error) { console.error("Erreur génération lien signature NDA:", error); alert("Erreur lors de la génération du lien. Réessaie."); return; }
+    setSignLink(`${window.location.origin}${window.location.pathname}?sign-nda=${ndaRowId}`);
+  };
+
+  const copySignLink = () => {
+    navigator.clipboard.writeText(signLink).then(() => { setSignLinkCopied(true); setTimeout(()=>setSignLinkCopied(false), 2200); });
   };
 
   const inputStyle = {
@@ -6812,7 +6923,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               </div>
               <div style={{ display:"flex", gap:10, marginBottom:10 }}>
                 <button onClick={() => { setStep("form"); setNda(""); }} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM, transition:"all 0.15s" }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
-                <button onClick={downloadNdaPDF} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
+                <button onClick={() => downloadNdaPDF(nda, ndaRef, partieB)} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
                 <button onClick={copy} style={{ flex:2, padding:"12px", background: copying ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px #1B2E4B30", transition:"all 0.2s" }}>
                   {copying ? <><span>✓</span> Copié !</> : <><span>📋</span> Copier</>}
                 </button>
@@ -6820,6 +6931,28 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               <button onClick={sendByEmail} style={{ width:"100%", padding:"12px", background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px rgba(59,130,246,0.3)" }}>
                 <span>📧</span> Envoyer par email{partieB ? ` à ${partieB}` : ""}
               </button>
+
+              {/* Signature à distance */}
+              <div style={{ marginTop:14, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
+                {!signLink ? (
+                  <button
+                    onClick={generateSignLink}
+                    disabled={signLinkGenerating}
+                    style={{ width:"100%", padding:"12px", background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:10, cursor: signLinkGenerating ? "default" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
+                  >
+                    {signLinkGenerating ? "Génération du lien…" : <><span>✍️</span> Envoyer pour signature à distance</>}
+                  </button>
+                ) : (
+                  <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 14px" }}>
+                    <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534", marginBottom:8 }}>✓ Lien de signature prêt à envoyer</div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <input readOnly value={signLink} style={{ flex:1, padding:"8px 10px", border:"1px solid #BBF7D0", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#166534", background:"#fff" }} onFocus={e=>e.target.select()} />
+                      <button onClick={copySignLink} style={{ flexShrink:0, padding:"8px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{signLinkCopied ? "Copié !" : "Copier"}</button>
+                    </div>
+                    <div style={{ fontFamily:T.body, fontSize:10.5, color:"#166534", marginTop:8, lineHeight:1.5, opacity:0.85 }}>Envoie ce lien à {partieB || "ton contact"} (SMS, email, WhatsApp). Il pourra le lire et le signer depuis son téléphone, sans créer de compte.</div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -13624,6 +13757,123 @@ function ClientSignaturePage({ contractId }) {
   );
 }
 
+function NdaSignaturePage({ ndaId }) {
+  const [loading, setLoading] = useState(true);
+  const [ndaData, setNdaData] = useState(null);
+  const [error, setError] = useState("");
+  const [signing, setSigning] = useState(false);
+  const [done, setDone] = useState(false);
+  const canvasRef = useRef(null);
+  const [hasStrokes, setHasStrokes] = useState(false);
+  const drawing = useRef(false);
+
+  useEffect(() => {
+    getNdaForSigning(ndaId)
+      .then(data => {
+        if (!data) { setError("NDA introuvable ou lien expiré."); }
+        else if (data.status === "signed") { setError("Ce NDA a déjà été signé. Merci !"); }
+        else { setNdaData(data); }
+        setLoading(false);
+      })
+      .catch(() => { setError("Erreur de chargement."); setLoading(false); });
+  }, [ndaId]);
+
+  // Dessin signature (identique au système des contrats)
+  const getPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return { x: (touch.clientX - rect.left) * (canvas.width / rect.width), y: (touch.clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const startDraw = (e) => { e.preventDefault(); drawing.current = true; const ctx = canvasRef.current.getContext("2d"); const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const draw = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const p = getPos(e);
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    setHasStrokes(true);
+  };
+  const endDraw = () => { drawing.current = false; };
+  const clearCanvas = () => { const c = canvasRef.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); setHasStrokes(false); };
+
+  const handleSign = async () => {
+    if (!hasStrokes) return;
+    setSigning(true);
+    const sig = canvasRef.current.toDataURL("image/png");
+    const ok = await submitNdaSignature(ndaId, sig);
+    setSigning(false);
+    if (ok) setDone(true);
+    else setError("Erreur lors de l'enregistrement. Réessaie.");
+  };
+
+  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+
+  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1B2E4B", fontSize:15 }}>Chargement du NDA…</div></div>;
+
+  if (error) return (
+    <div style={{ ...wrap, justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:32, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
+        <div style={{ fontSize:38, marginBottom:12 }}>{error.includes("déjà") ? "✅" : "⚠️"}</div>
+        <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>{error}</div>
+      </div>
+    </div>
+  );
+
+  if (done) return (
+    <div style={{ ...wrap, justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
+        <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>NDA signé !</div>
+        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Ta signature a bien été enregistrée. L'autre partie en est informée.</div>
+      </div>
+    </div>
+  );
+
+  const ndaText = ndaData?.content || "";
+
+  return (
+    <div style={wrap}>
+      <div style={{ width:"100%", maxWidth:560 }}>
+        <div style={{ textAlign:"center", marginBottom:20 }}>
+          <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
+          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique — Accord de confidentialité (NDA)</div>
+        </div>
+
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>NDA À SIGNER</div>
+          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
+            {cleanNdaText(ndaText) || "Contenu du NDA indisponible."}
+          </div>
+        </div>
+
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Ta signature</div>
+          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signe ci-dessous avec ton doigt (ou ta souris) pour accepter les termes de ce NDA.</div>
+          <canvas
+            ref={canvasRef}
+            width={520} height={180}
+            onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+            onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+            style={{ width:"100%", height:180, border:"2px dashed #C9A961", borderRadius:10, background:"#FFFDF9", touchAction:"none", cursor:"crosshair" }}
+          />
+          <div style={{ display:"flex", gap:10, marginTop:14 }}>
+            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:13, color:"#5A6B80", fontWeight:500 }}>Effacer</button>
+            <button
+              onClick={handleSign}
+              disabled={!hasStrokes || signing}
+              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+            >{signing ? "Enregistrement…" : "✓ Signer le NDA"}</button>
+          </div>
+          <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
+            En signant, tu acceptes les termes de ce NDA. Signature horodatée et conservée conformément au droit français.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // Lien de signature client : ?sign=<contractId>
   const signParam = new URLSearchParams(window.location.search).get("sign");
@@ -13631,6 +13881,15 @@ export default function App() {
     return (
       <ErrorBoundary>
         <ClientSignaturePage contractId={signParam} />
+      </ErrorBoundary>
+    );
+  }
+  // Lien de signature NDA : ?sign-nda=<ndaId>
+  const signNdaParam = new URLSearchParams(window.location.search).get("sign-nda");
+  if (signNdaParam) {
+    return (
+      <ErrorBoundary>
+        <NdaSignaturePage ndaId={signNdaParam} />
       </ErrorBoundary>
     );
   }
