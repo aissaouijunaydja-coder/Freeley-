@@ -1050,6 +1050,9 @@ function AppInner() {
   const [history, setHistory]     = useState([]);
   const [myNdas, setMyNdas]       = useState([]);
   const [myNdasLoading, setMyNdasLoading] = useState(false);
+  const [ndaSignLinks, setNdaSignLinks] = useState({});
+  const [ndaSignGenerating, setNdaSignGenerating] = useState(null);
+  const [ndaSignCopied, setNdaSignCopied] = useState(null);
   const [historyView, setHistoryView] = useState(null);
   const [animDone, setAnimDone]   = useState(false);
   const animDoneRef               = useRef(false); // ref pour lecture correcte dans les closures async
@@ -2602,6 +2605,21 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       try { await supabase.from("ndas").delete().eq("id", id); } catch(e) { console.error("Erreur suppression NDA:", e); }
       setMyNdas(prev => prev.filter(n => n.id !== id));
     };
+    const requestSignatureFor = async (n) => {
+      setNdaSignGenerating(n.id);
+      const { error } = await supabase.rpc("request_nda_signature", { nda_id: n.id });
+      setNdaSignGenerating(null);
+      if (error) { console.error("Erreur génération lien signature NDA:", error); alert("Erreur lors de la génération du lien. Réessaie."); return; }
+      const link = `${window.location.origin}${window.location.pathname}?sign-nda=${n.id}`;
+      setNdaSignLinks(prev => ({ ...prev, [n.id]: link }));
+      setMyNdas(prev => prev.map(x => x.id === n.id ? { ...x, status: "pending_signature" } : x));
+    };
+    const copySignLinkFor = (id) => {
+      navigator.clipboard.writeText(ndaSignLinks[id]).then(() => {
+        setNdaSignCopied(id);
+        setTimeout(() => setNdaSignCopied(c => c === id ? null : c), 2200);
+      });
+    };
     return (<Shell>
       {AuthModalEl}
       <Header {...headerProps} />
@@ -2620,17 +2638,35 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           <details key={n.id} style={{marginBottom:12, border:`1.5px solid ${C.border}`, borderRadius:12, overflow:"hidden"}}>
             <summary style={{padding:"14px 16px", cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600, color:C.navy, background:C.creamD, listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:6}}>
               <span>🔒 {n.partie_a} ↔ {n.partie_b}</span>
-              <span style={{fontSize:11, color:C.textL, fontWeight:500}}>{n.created_at ? new Date(n.created_at).toLocaleDateString("fr-FR") : ""}</span>
+              <span style={{fontSize:11, color:C.textL, fontWeight:500}}>
+                {n.created_at ? new Date(n.created_at).toLocaleDateString("fr-FR") : ""}
+                {n.status === "signed" ? " · ✓ Signé" : n.status === "pending_signature" ? " · ⏳ En attente" : ""}
+              </span>
             </summary>
             <div style={{padding:"14px 16px"}}>
               {n.objet && <p style={{fontSize:12,color:C.textL,marginBottom:10,fontFamily:T.body}}>{n.objet}</p>}
               <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", maxHeight:260, overflowY:"auto", marginBottom:12 }}>
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(n.content)}</pre>
               </div>
-              <div style={{display:"flex", gap:8}}>
+              <div style={{display:"flex", gap:8, marginBottom: (n.status === "signed" || ndaSignLinks[n.id]) ? 10 : 0}}>
                 <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_b)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
                 <button onClick={()=>deleteNda(n.id)} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:T.body}}>🗑 Supprimer</button>
               </div>
+              {n.status !== "signed" && !ndaSignLinks[n.id] && (
+                <button
+                  onClick={()=>requestSignatureFor(n)}
+                  disabled={ndaSignGenerating === n.id}
+                  style={{width:"100%", padding:"9px 14px", background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:8, color:C.navy, fontSize:12, fontWeight:700, cursor: ndaSignGenerating === n.id ? "default" : "pointer", fontFamily:T.body, display:"flex", alignItems:"center", justifyContent:"center", gap:6}}
+                >{ndaSignGenerating === n.id ? "Génération du lien…" : <><span>✍️</span> Envoyer pour signature à distance</>}</button>
+              )}
+              {ndaSignLinks[n.id] && n.status !== "signed" && (
+                <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8, padding:"10px 12px" }}>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input readOnly value={ndaSignLinks[n.id]} style={{ flex:1, padding:"7px 9px", border:"1px solid #BBF7D0", borderRadius:6, fontFamily:T.body, fontSize:10.5, color:"#166534", background:"#fff" }} onFocus={e=>e.target.select()} />
+                    <button onClick={()=>copySignLinkFor(n.id)} style={{ flexShrink:0, padding:"7px 12px", background:"#166534", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700 }}>{ndaSignCopied === n.id ? "Copié !" : "Copier"}</button>
+                  </div>
+                </div>
+              )}
             </div>
           </details>
         ))}
@@ -6662,6 +6698,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     nda_ref: n.ndaRef, content: n.nda,
   });
   const rowToNda = (row) => ({
+    id: row.id, status: row.status || "draft",
     partieA: row.partie_a || "", partieB: row.partie_b || "", partieBEmail: row.partie_b_email || "",
     objet: row.objet || "", ndaType: row.nda_type || "unilateral", duration: row.duration || "3",
     ndaRef: row.nda_ref || "", nda: row.content || "",
@@ -6900,9 +6937,14 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
                   {historyOpen && (
                     <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:8 }}>
                       {ndaHistory.map((h, i) => (
-                        <div key={i} onClick={() => { setNda(h.nda); setNdaRef(h.ndaRef); setPartieA(h.partieA); setPartieB(h.partieB); setPartieBEmail(h.partieBEmail||""); setObjet(h.objet); setNdaType(h.ndaType||"unilateral"); setDuration(h.duration||"3"); setStep("result"); }}
+                        <div key={i} onClick={() => {
+                          setNda(h.nda); setNdaRef(h.ndaRef); setPartieA(h.partieA); setPartieB(h.partieB); setPartieBEmail(h.partieBEmail||""); setObjet(h.objet); setNdaType(h.ndaType||"unilateral"); setDuration(h.duration||"3");
+                          setNdaRowId(h.id || null); setNdaSaveError(false);
+                          setSignLink(h.id && (h.status === "pending_signature" || h.status === "signed") ? `${window.location.origin}${window.location.pathname}?sign-nda=${h.id}` : "");
+                          setStep("result");
+                        }}
                           style={{ padding:"10px 12px", background:C.creamD, border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, color:C.textM }}>
-                          <strong style={{ color:C.navy }}>{h.partieA} ↔ {h.partieB}</strong> · {h.date}
+                          <strong style={{ color:C.navy }}>{h.partieA} ↔ {h.partieB}</strong> · {h.date} {h.status === "signed" ? "· ✓ Signé" : h.status === "pending_signature" ? "· ⏳ En attente de signature" : ""}
                         </div>
                       ))}
                     </div>
