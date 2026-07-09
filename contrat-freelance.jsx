@@ -13115,10 +13115,6 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
               <label style={labelStyle}>BIOGRAPHIE / PRÉSENTATION</label>
               <textarea value={profile.bio} onChange={e => updateProfile("bio", e.target.value)} placeholder="Décris ce que tu fais, ta spécialité, tes valeurs…" rows={5} style={{ ...inputStyle, resize:"vertical", lineHeight:1.65, minHeight:100, maxHeight:240 }} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
             </div>
-            <div style={{ marginBottom:14 }}>
-              <label style={labelStyle}>NUMÉRO SIRET</label>
-              <input style={inputStyle} value={profile.siret} placeholder="123 456 789 00012" onChange={e => updateProfile("siret", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
-            </div>
             <div>
               <label style={labelStyle}>TJM — TARIF JOURNALIER MOYEN</label>
               <div style={{ position:"relative" }}>
@@ -13203,6 +13199,10 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             <div style={{ marginBottom:14 }}>
               <label style={labelStyle}>RAISON SOCIALE / NOM COMMERCIAL</label>
               <input style={inputStyle} value={profile.companyName} placeholder="Jean Dupont EI" onChange={e => updateProfile("companyName", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <label style={labelStyle}>NUMÉRO SIRET</label>
+              <input style={inputStyle} value={profile.siret} placeholder="123 456 789 00012" onChange={e => updateProfile("siret", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
             </div>
             <div style={{ marginBottom:14 }}>
               <label style={labelStyle}>STATUT JURIDIQUE</label>
