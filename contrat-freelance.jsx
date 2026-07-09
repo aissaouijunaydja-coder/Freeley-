@@ -6647,6 +6647,8 @@ function NdaExpressModal({ onClose, profile, authUser }) {
   const [dots, setDots]           = useState(1);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [ndaRowId, setNdaRowId] = useState(null);
+  const [ndaSaving, setNdaSaving] = useState(false);
+  const [ndaSaveError, setNdaSaveError] = useState(false);
   const [signLink, setSignLink] = useState("");
   const [signLinkGenerating, setSignLinkGenerating] = useState(false);
   const [signLinkCopied, setSignLinkCopied] = useState(false);
@@ -6726,13 +6728,15 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
       setNda(text);
       setStep("result");
-      setSignLink(""); setNdaRowId(null); // repart de zéro : ce nouveau NDA n'a pas encore d'id ni de lien de signature
+      setSignLink(""); setNdaRowId(null); setNdaSaveError(false); // repart de zéro : ce nouveau NDA n'a pas encore d'id ni de lien de signature
       // Sauvegarde de l'historique : Supabase si connecté (source réelle), sinon repli local
       const entry = { partieA, partieB, partieBEmail, objet, ndaType, duration, ndaRef: ref, nda: text, date: new Date().toLocaleDateString("fr-FR") };
       if (authUser?.id) {
+        setNdaSaving(true);
         supabase.from("ndas").insert(ndaToRow(entry, authUser.id)).select().single()
           .then(({ data, error }) => {
-            if (error) { console.error("Erreur sauvegarde NDA Supabase:", error); return; }
+            setNdaSaving(false);
+            if (error) { console.error("Erreur sauvegarde NDA Supabase:", error); setNdaSaveError(true); return; }
             setNdaRowId(data.id);
           });
       }
@@ -6758,8 +6762,16 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
 
   // Génère un lien de signature à distance, sur le même principe que les contrats (mini-Yousign)
   const generateSignLink = async () => {
+    if (!authUser?.id) {
+      alert("Connecte-toi pour pouvoir générer un lien de signature.");
+      return;
+    }
+    if (ndaSaving) {
+      alert("Le NDA est encore en train de se sauvegarder, réessaie dans un instant.");
+      return;
+    }
     if (!ndaRowId) {
-      alert("Connecte-toi pour pouvoir générer un lien de signature (le NDA doit d'abord être sauvegardé).");
+      alert(ndaSaveError ? "La sauvegarde du NDA a échoué. Vérifie ta connexion et régénère le NDA." : "Le NDA n'a pas encore d'identifiant. Réessaie dans un instant.");
       return;
     }
     setSignLinkGenerating(true);
@@ -6937,10 +6949,10 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
                 {!signLink ? (
                   <button
                     onClick={generateSignLink}
-                    disabled={signLinkGenerating}
-                    style={{ width:"100%", padding:"12px", background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:10, cursor: signLinkGenerating ? "default" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
+                    disabled={signLinkGenerating || ndaSaving}
+                    style={{ width:"100%", padding:"12px", background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:10, cursor: (signLinkGenerating || ndaSaving) ? "default" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, display:"flex", alignItems:"center", justifyContent:"center", gap:8, opacity: ndaSaving ? 0.6 : 1 }}
                   >
-                    {signLinkGenerating ? "Génération du lien…" : <><span>✍️</span> Envoyer pour signature à distance</>}
+                    {ndaSaving ? "Sauvegarde du NDA en cours…" : signLinkGenerating ? "Génération du lien…" : <><span>✍️</span> Envoyer pour signature à distance</>}
                   </button>
                 ) : (
                   <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 14px" }}>
