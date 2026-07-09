@@ -10361,22 +10361,20 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* Contract list */}
-      {history.length > 0 && (
+      {history.length > 0 && (() => {
+        const filtered = history.filter(entry => {
+          if (filter === "pending") return entry.signatureStatus === "pending_client" || entry.signatureStatus === "none" || !entry.signatureStatus;
+          if (filter === "signed") return entry.signatureStatus === "signed";
+          return true;
+        });
+        return (
         <div className="fade-up fade-up-2" style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {history.filter(entry => {
-            if (filter === "pending") return entry.signatureStatus === "pending" || entry.signatureStatus === "none" || !entry.signatureStatus;
-            if (filter === "signed") return entry.signatureStatus === "signed";
-            return true;
-          }).length === 0 && filter !== "tous" && (
+          {filtered.length === 0 && filter !== "tous" && (
             <div style={{ textAlign:"center", padding:"40px 24px", fontFamily:T.body, fontSize:13, color:C.textL, background:C.white, border:`1px solid ${C.border}`, borderRadius:12 }}>
               Aucun contrat dans cette catégorie.
             </div>
           )}
-          {history.filter(entry => {
-            if (filter === "pending") return entry.signatureStatus === "pending" || entry.signatureStatus === "none" || !entry.signatureStatus;
-            if (filter === "signed") return entry.signatureStatus === "signed";
-            return true;
-          }).map((entry, i) => {
+          {filtered.map((entry, i) => {
             const isLocked = !isPremium && i >= FREE_LIMIT;
             return (
             <div key={entry.id} className={deletingId === entry.id ? "card-deleting" : ""} style={{
@@ -10508,7 +10506,8 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             );
           })}
         </div>
-      )}
+        );
+      })()}
 
       {/* Confirm delete modal (list view) */}
       {confirmDelete && (
