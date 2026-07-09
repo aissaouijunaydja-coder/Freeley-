@@ -2655,7 +2655,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(n.content)}</pre>
               </div>
               <div style={{display:"flex", gap:8, marginBottom: (n.status === "signed" || ndaSignLinks[n.id]) ? 10 : 0}}>
-                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_b)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
+                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
                 <button onClick={()=>deleteNda(n.id)} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:T.body}}>🗑 Supprimer</button>
               </div>
               {n.status !== "signed" && !ndaSignLinks[n.id] && (
@@ -6665,7 +6665,7 @@ const cleanNdaText = (text) => String(text || "")
   .join("\n");
 
 // Génère le PDF d'un NDA — partagé entre la fenêtre de création et la page "Mes NDA"
-const downloadNdaPDF = (ndaText, ndaRef, partieBName) => {
+const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSignature, clientSignature, signedAt) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   if (!ndaText) { alert("Aucun NDA à télécharger."); return; }
   const { jsPDF } = window.jspdf;
@@ -6686,6 +6686,42 @@ const downloadNdaPDF = (ndaText, ndaRef, partieBName) => {
     if (y > 270) { doc.addPage(); y = 20; }
     doc.text(l, ML, y); y += 5.4;
   });
+
+  // Certificat de signature électronique — affiche chaque signature réellement capturée
+  if (freelanceSignature || clientSignature) {
+    if (y > 200) { doc.addPage(); y = 20; }
+    y += 10;
+    doc.setDrawColor(...GOLD); doc.setLineWidth(0.5); doc.line(ML, y, PW - MR, y);
+    y += 10;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
+    doc.text("CERTIFICAT DE SIGNATURE ÉLECTRONIQUE", ML, y);
+    y += 10;
+
+    const halfW = (cw - 10) / 2;
+    const colStartY = y;
+    let yA = colStartY, yB = colStartY;
+
+    if (freelanceSignature) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
+      doc.text(`${partieAName || "Partie A"} (Partie Divulgatrice)`, ML, yA); yA += 6;
+      try { doc.addImage(freelanceSignature, "PNG", ML, yA, halfW, 26); yA += 30; } catch(e) {}
+      doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(120,120,120);
+      doc.text("Signée à la création du document.", ML, yA); yA += 5;
+    }
+    if (clientSignature) {
+      const xB = ML + halfW + 10;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
+      doc.text(`${partieBName || "Partie B"} (Partie Réceptrice)`, xB, yB); yB += 6;
+      try { doc.addImage(clientSignature, "PNG", xB, yB, halfW, 26); yB += 30; } catch(e) {}
+      doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(120,120,120);
+      const signedLabel = signedAt ? new Date(signedAt).toLocaleString("fr-FR") : today;
+      doc.text(`Signée à distance le ${signedLabel}.`, xB, yB); yB += 5;
+    }
+    y = Math.max(yA, yB) + 6;
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(120,120,120);
+    doc.text("Signatures capturées électroniquement et horodatées par Freeley.", ML, y);
+  }
+
   doc.save(`NDA_${(partieBName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
 };
 
@@ -6706,6 +6742,12 @@ function NdaExpressModal({ onClose, profile, authUser }) {
   const [dots, setDots]           = useState(1);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [ndaRowId, setNdaRowId] = useState(null);
+  const [ndaClientSignature, setNdaClientSignature] = useState(null);
+  const [ndaSignedAt, setNdaSignedAt] = useState(null);
+  const [ndaFreelanceSignature, setNdaFreelanceSignature] = useState(null);
+  const canvasRefA = useRef(null);
+  const drawingRefA = useRef(false);
+  const [hasStrokesA, setHasStrokesA] = useState(false);
   const [ndaSaving, setNdaSaving] = useState(false);
   const [ndaSaveError, setNdaSaveError] = useState(false);
   const [signLink, setSignLink] = useState("");
@@ -6721,10 +6763,11 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     user_id: userId,
     partie_a: n.partieA, partie_b: n.partieB, partie_b_email: n.partieBEmail,
     objet: n.objet, nda_type: n.ndaType, duration: n.duration,
-    nda_ref: n.ndaRef, content: n.nda,
+    nda_ref: n.ndaRef, content: n.nda, freelance_signature: n.freelanceSignature || null,
   });
   const rowToNda = (row) => ({
     id: row.id, status: row.status || "draft",
+    clientSignature: row.client_signature || null, signedAt: row.signed_at || null, freelanceSignature: row.freelance_signature || null,
     partieA: row.partie_a || "", partieB: row.partie_b || "", partieBEmail: row.partie_b_email || "",
     objet: row.objet || "", ndaType: row.nda_type || "unilateral", duration: row.duration || "3",
     ndaRef: row.nda_ref || "", nda: row.content || "",
@@ -6749,8 +6792,29 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 
   const durationLabel = { "2":"2 ans", "3":"3 ans", "5":"5 ans", "indeterminee":"durée indéterminée, jusqu'à ce que l'information devienne publique" }[duration];
 
+  // Dessin de la signature de la Partie A (toi), directement dans le formulaire
+  const getPosA = (e) => {
+    const canvas = canvasRefA.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return { x: (touch.clientX - rect.left) * (canvas.width / rect.width), y: (touch.clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const startDrawA = (e) => { e.preventDefault(); drawingRefA.current = true; const ctx = canvasRefA.current.getContext("2d"); const p = getPosA(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const drawA = (e) => {
+    if (!drawingRefA.current) return;
+    e.preventDefault();
+    const ctx = canvasRefA.current.getContext("2d");
+    const p = getPosA(e);
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    setHasStrokesA(true);
+  };
+  const endDrawA = () => { drawingRefA.current = false; };
+  const clearSignatureA = () => { const c = canvasRefA.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); setHasStrokesA(false); };
+
   const generate = async () => {
     if (!partieA.trim() || !partieB.trim() || !objet.trim()) return;
+    if (!hasStrokesA) { alert("Signe en tant que Partie A avant de générer le NDA."); return; }
+    const freelanceSig = canvasRefA.current.toDataURL("image/png");
     setStep("loading");
     // Référence générée par l'app (pas par l'IA) : garantit un identifiant réel et unique, jamais inventé au hasard
     const ref = `NDA-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
@@ -6788,9 +6852,9 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
       setNda(text);
       setStep("result");
-      setSignLink(""); setNdaRowId(null); setNdaSaveError(false); // repart de zéro : ce nouveau NDA n'a pas encore d'id ni de lien de signature
+      setSignLink(""); setNdaRowId(null); setNdaSaveError(false); setNdaClientSignature(null); setNdaSignedAt(null); setNdaFreelanceSignature(freelanceSig); // repart de zéro : ce nouveau NDA n'a pas encore d'id ni de lien de signature
       // Sauvegarde de l'historique : Supabase si connecté (source réelle), sinon repli local
-      const entry = { partieA, partieB, partieBEmail, objet, ndaType, duration, ndaRef: ref, nda: text, date: new Date().toLocaleDateString("fr-FR") };
+      const entry = { partieA, partieB, partieBEmail, objet, ndaType, duration, ndaRef: ref, nda: text, freelanceSignature: freelanceSig, date: new Date().toLocaleDateString("fr-FR") };
       if (authUser?.id) {
         setNdaSaving(true);
         supabase.from("ndas").insert(ndaToRow(entry, authUser.id)).select().single()
@@ -6944,14 +7008,30 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
                 </div>
               </div>
 
+              {/* Signature de la Partie A (toi), requise avant de générer */}
+              <div style={{ marginBottom:14 }}>
+                <label style={labelSt}>TA SIGNATURE (PARTIE A)</label>
+                <canvas
+                  ref={canvasRefA}
+                  width={460} height={130}
+                  onMouseDown={startDrawA} onMouseMove={drawA} onMouseUp={endDrawA} onMouseLeave={endDrawA}
+                  onTouchStart={startDrawA} onTouchMove={drawA} onTouchEnd={endDrawA}
+                  style={{ width:"100%", height:130, border:`2px dashed ${C.gold}`, borderRadius:10, background:"#FFFDF9", touchAction:"none", cursor:"crosshair" }}
+                />
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:6 }}>
+                  <span style={{ fontFamily:T.body, fontSize:10, color:C.textL }}>Signe avec ton doigt ou ta souris — obligatoire pour générer le NDA.</span>
+                  <button type="button" onClick={clearSignatureA} style={{ padding:"4px 10px", background:"none", border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, color:C.textM }}>Effacer</button>
+                </div>
+              </div>
+
               <button
                 onClick={generate}
-                disabled={!partieA.trim()||!partieB.trim()||!objet.trim()}
-                style={{ width:"100%", padding:"15px", background:(!partieA.trim()||!partieB.trim()||!objet.trim()) ? C.creamDD : `linear-gradient(135deg, ${C.navyD} 0%, ${C.navy} 100%)`, color:(!partieA.trim()||!partieB.trim()||!objet.trim()) ? C.textL : C.white, border:"none", borderRadius:12, cursor:(!partieA.trim()||!partieB.trim()||!objet.trim()) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:14, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:(!partieA.trim()||!partieB.trim()||!objet.trim()) ? "none" : "0 8px 28px #1B2E4B35", transition:"all 0.2s" }}
-                onMouseOver={e=>{if(partieA.trim()&&partieB.trim()&&objet.trim()){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 12px 36px #1B2E4B45";}}}
-                onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=(!partieA.trim()||!partieB.trim()||!objet.trim())?"none":"0 8px 28px #1B2E4B35";}}
+                disabled={!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA}
+                style={{ width:"100%", padding:"15px", background:(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA) ? C.creamDD : `linear-gradient(135deg, ${C.navyD} 0%, ${C.navy} 100%)`, color:(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA) ? C.textL : C.white, border:"none", borderRadius:12, cursor:(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:14, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA) ? "none" : "0 8px 28px #1B2E4B35", transition:"all 0.2s" }}
+                onMouseOver={e=>{if(partieA.trim()&&partieB.trim()&&objet.trim()&&hasStrokesA){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 12px 36px #1B2E4B45";}}}
+                onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA)?"none":"0 8px 28px #1B2E4B35";}}
               >
-                <span style={{ fontSize:16 }}>🔒</span> Générer le NDA en 15 sec
+                <span style={{ fontSize:16 }}>🔒</span> Signer et générer le NDA
               </button>
 
               {/* Historique local */}
@@ -6966,6 +7046,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
                         <div key={i} onClick={() => {
                           setNda(h.nda); setNdaRef(h.ndaRef); setPartieA(h.partieA); setPartieB(h.partieB); setPartieBEmail(h.partieBEmail||""); setObjet(h.objet); setNdaType(h.ndaType||"unilateral"); setDuration(h.duration||"3");
                           setNdaRowId(h.id || null); setNdaSaveError(false);
+                          setNdaClientSignature(h.clientSignature || null); setNdaSignedAt(h.signedAt || null); setNdaFreelanceSignature(h.freelanceSignature || null);
                           setSignLink(h.id && (h.status === "pending_signature" || h.status === "signed") ? `${window.location.origin}${window.location.pathname}?sign-nda=${h.id}` : "");
                           setStep("result");
                         }}
@@ -7002,7 +7083,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               </div>
               <div style={{ display:"flex", gap:10, marginBottom:10 }}>
                 <button onClick={() => { setStep("form"); setNda(""); }} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM, transition:"all 0.15s" }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
-                <button onClick={() => downloadNdaPDF(nda, ndaRef, partieB)} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
+                <button onClick={() => downloadNdaPDF(nda, ndaRef, partieA, partieB, ndaFreelanceSignature, ndaClientSignature, ndaSignedAt)} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
                 <button onClick={copy} style={{ flex:2, padding:"12px", background: copying ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px #1B2E4B30", transition:"all 0.2s" }}>
                   {copying ? <><span>✓</span> Copié !</> : <><span>📋</span> Copier</>}
                 </button>
