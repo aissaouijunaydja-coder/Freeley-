@@ -2769,7 +2769,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onGoToProfileTva={goToProfileFacturation}
         />
       )}
-      {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} profile={profile} />}
+      {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} profile={profile} authUser={authUser} />}
       {showRecouvrementModal && (
         <RecouvrementFermeModal
           onClose={() => { setShowRecouvrementModal(false); setRecouvrementInitialCase(null); }}
@@ -6511,7 +6511,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
 
 /* ══════════════════════════════════════════ AUTH MODAL ══ */
 /* ══════════════════════════════════════════════════════════ NDA EXPRESS MODAL ══ */
-function NdaExpressModal({ onClose, profile }) {
+function NdaExpressModal({ onClose, profile, authUser }) {
   const [step, setStep]           = useState("form"); // "form" | "loading" | "result"
   const [partieA, setPartieA]     = useState(() => {
     const p = profile || {};
@@ -6528,9 +6528,33 @@ function NdaExpressModal({ onClose, profile }) {
   const [dots, setDots]           = useState(1);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const ndaHistory = (() => {
+  // Historique : local en secours immédiat, Supabase comme vraie source dès que le compte est connu
+  const [ndaHistory, setNdaHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem("freeley_nda_list") || "[]"); } catch(e) { return []; }
-  })();
+  });
+
+  const ndaToRow = (n, userId) => ({
+    user_id: userId,
+    partie_a: n.partieA, partie_b: n.partieB, partie_b_email: n.partieBEmail,
+    objet: n.objet, nda_type: n.ndaType, duration: n.duration,
+    nda_ref: n.ndaRef, content: n.nda,
+  });
+  const rowToNda = (row) => ({
+    partieA: row.partie_a || "", partieB: row.partie_b || "", partieBEmail: row.partie_b_email || "",
+    objet: row.objet || "", ndaType: row.nda_type || "unilateral", duration: row.duration || "3",
+    ndaRef: row.nda_ref || "", nda: row.content || "",
+    date: row.created_at ? new Date(row.created_at).toLocaleDateString("fr-FR") : "",
+  });
+
+  // Charge le vrai historique depuis Supabase (remplace le repli local dès que disponible)
+  useEffect(() => {
+    if (!authUser?.id) return;
+    supabase.from("ndas").select("*").eq("user_id", authUser.id).order("created_at", { ascending: false }).limit(15)
+      .then(({ data, error }) => {
+        if (error) { console.error("Erreur chargement historique NDA:", error); return; }
+        if (data) setNdaHistory(data.map(rowToNda));
+      });
+  }, [authUser]);
 
   useEffect(() => {
     if (step !== "loading") return;
@@ -6588,12 +6612,17 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
       setNda(text);
       setStep("result");
-      // Sauvegarde locale (les 15 derniers NDA), pour pouvoir les retrouver après fermeture
-      try {
-        const existing = JSON.parse(localStorage.getItem("freeley_nda_list") || "[]");
-        existing.unshift({ partieA, partieB, partieBEmail, objet, ndaType, duration, ndaRef: ref, nda: text, date: new Date().toLocaleDateString("fr-FR") });
-        localStorage.setItem("freeley_nda_list", JSON.stringify(existing.slice(0, 15)));
-      } catch(e) {}
+      // Sauvegarde de l'historique : Supabase si connecté (source réelle), sinon repli local
+      const entry = { partieA, partieB, partieBEmail, objet, ndaType, duration, ndaRef: ref, nda: text, date: new Date().toLocaleDateString("fr-FR") };
+      if (authUser?.id) {
+        supabase.from("ndas").insert(ndaToRow(entry, authUser.id))
+          .then(({ error }) => { if (error) console.error("Erreur sauvegarde NDA Supabase:", error); });
+      }
+      setNdaHistory(prev => {
+        const next = [entry, ...prev].slice(0, 15);
+        try { localStorage.setItem("freeley_nda_list", JSON.stringify(next)); } catch(e) {}
+        return next;
+      });
     } catch(e) {
       setNda("Erreur de génération. Vérifie ta connexion et réessaie.");
       setStep("result");
@@ -10579,11 +10608,6 @@ ${freelanceName}`;
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:12, marginBottom:18 }}>
             <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>PRESTATAIRE</div>
-              {profile?.photo && (
-                <div style={{ marginBottom:8 }}>
-                  <img src={profile.photo} alt="profil" style={{ width:36, height:36, borderRadius:"50%", objectFit:"cover", border:`2px solid ${C.border}` }} />
-                </div>
-              )}
               <input
                 value={form.freelanceName}
                 onChange={e => setForm(f => ({ ...f, freelanceName: e.target.value }))}
@@ -13291,7 +13315,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
         <div>
           <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#92400E", marginBottom:4 }}>Liaison magique activée</div>
           <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6, opacity:0.85 }}>
-            Ton nom, ton titre et ton SIRET remplissent automatiquement tes contrats. Ta photo et ton nom apparaissent dans la navigation et sur la facture d'acompte.
+            Ton nom, ton titre et ton SIRET remplissent automatiquement tes contrats et factures. Ta photo apparaît uniquement dans la navigation ; ton logo apparaît sur tes factures et contrats en PDF.
           </div>
         </div>
       </div>
