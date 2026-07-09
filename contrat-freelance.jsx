@@ -1015,6 +1015,10 @@ function AppInner() {
   const [scanStep0Success, setScanStep0Success] = useState(false);
   const [scanStep1Loading, setScanStep1Loading] = useState(false);
   const [scanStep1Success, setScanStep1Success] = useState(false);
+  const [profileScanTarget, setProfileScanTarget] = useState(false); // true = caméra ouverte pour scan RIB/justificatif
+  const [profileScanLoading, setProfileScanLoading] = useState(false);
+  const [profileScanSuccess, setProfileScanSuccess] = useState(false);
+  const [profileScanError, setProfileScanError] = useState("");
   const [copied, setCopied]       = useState(false);
   const [jsPDFReady, setPDFReady] = useState(false);
   const [showPaywall, setPaywall] = useState(false);
@@ -1165,7 +1169,7 @@ function AppInner() {
     const base = {
       firstName: "", lastName: "", jobTitle: "", bio: "", tjm: "",
       siret: "", linkedin: "", portfolio: "", github: "",
-      skills: [], photo: null, verified: false,
+      skills: [], photo: null,
       companyName: "", legalStatus: "", tvaNumber: "", address: "",
       iban: "", bic: "", bankName: "", logo: null,
     };
@@ -1177,10 +1181,48 @@ function AppInner() {
   });
   const updateProfile = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
-  // Sauvegarde automatique du profil (survit au rafraîchissement de page)
+  // Convertit le profil (camelCase, utilisé partout dans l'app) vers les colonnes Supabase (snake_case)
+  const profileToRow = (p, userId) => ({
+    id: userId,
+    first_name: p.firstName, last_name: p.lastName, job_title: p.jobTitle, bio: p.bio, tjm: p.tjm,
+    siret: p.siret, linkedin: p.linkedin, portfolio: p.portfolio, github: p.github,
+    skills: p.skills, photo: p.photo,
+    company_name: p.companyName, legal_status: p.legalStatus, tva_number: p.tvaNumber, address: p.address,
+    iban: p.iban, bic: p.bic, bank_name: p.bankName, logo: p.logo,
+    updated_at: new Date().toISOString(),
+  });
+
+  // Convertit une ligne Supabase (snake_case) vers le format du profil (camelCase)
+  const rowToProfile = (row) => ({
+    firstName: row.first_name || "", lastName: row.last_name || "", jobTitle: row.job_title || "",
+    bio: row.bio || "", tjm: row.tjm || "", siret: row.siret || "",
+    linkedin: row.linkedin || "", portfolio: row.portfolio || "", github: row.github || "",
+    skills: row.skills || [], photo: row.photo || null,
+    companyName: row.company_name || "", legalStatus: row.legal_status || "", tvaNumber: row.tva_number || "",
+    address: row.address || "", iban: row.iban || "", bic: row.bic || "", bankName: row.bank_name || "",
+    logo: row.logo || null,
+  });
+
+  // Récupère le profil réel depuis Supabase (appelée depuis loadUserData à la connexion)
+  const loadProfileFromSupabase = async (userId) => {
+    try {
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+      if (error) { console.error("Erreur chargement profil:", error); return; }
+      if (data) setProfile(p => ({ ...p, ...rowToProfile(data) }));
+    } catch(e) { console.error("Erreur chargement profil:", e); }
+  };
+
+  // Sauvegarde automatique du profil : instantanée en local (cache rapide, survit au rafraîchissement),
+  // et vers Supabase avec un léger délai pour ne pas envoyer une requête à chaque frappe.
   useEffect(() => {
     try { localStorage.setItem("freeley_profile", JSON.stringify(profile)); } catch(e) {}
-  }, [profile]);
+    if (!authUser?.id) return; // pas connecté : uniquement local pour l'instant
+    const timer = setTimeout(() => {
+      supabase.from("profiles").upsert(profileToRow(profile, authUser.id))
+        .then(({ error }) => { if (error) console.error("Erreur sauvegarde profil Supabase:", error); });
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [profile, authUser]);
 
   // ── Init : session mock + données utilisateur ──
   useEffect(() => {
@@ -1274,6 +1316,7 @@ function AppInner() {
     setContractsUsed(used);
     const hist = await getHistory();
     setHistory(hist);
+    if (user?.id) await loadProfileFromSupabase(user.id);
   };
 
   // Sync profil → form (step 0) quand le profil change
@@ -1289,7 +1332,69 @@ function AppInner() {
     if (errors[k]) setErrors(e => ({ ...e, [k]: undefined }));
   };
 
-  const magicFillStep0 = () => setMagicFillTarget("step0");
+  const startProfileScan = () => setProfileScanTarget(true);
+
+  // Scan d'un RIB ou justificatif (Kbis, notification INSEE...) pour remplir IBAN/BIC/banque/SIRET/société automatiquement
+  const handleProfileScanCapture = async ({ base64, type }) => {
+    setProfileScanTarget(false);
+    setProfileScanLoading(true);
+    setProfileScanSuccess(false);
+    setProfileScanError("");
+
+    const prompt = `Tu analyses la photo d'un document français (RIB / relevé d'identité bancaire, Kbis, notification INSEE de SIRET, ou en-tête de facture professionnelle). Extrais les informations pour remplir un profil freelance. Réponds UNIQUEMENT avec un objet JSON valide (aucun texte avant/après, pas de balises markdown) contenant EXACTEMENT ces clés :
+- iban (IBAN complet, sans espaces ni tirets superflus, garder le format tel qu'écrit)
+- bic (code BIC/SWIFT)
+- bankName (nom de la banque)
+- siret (numéro SIRET, 14 chiffres)
+- companyName (raison sociale / nom commercial de l'entreprise)
+
+Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'invente jamais d'information.`;
+
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5",
+          max_tokens: 800,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: type || "image/jpeg", data: base64 } },
+              { type: "text", text: prompt },
+            ],
+          }],
+        }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      let txt = (data.content || []).map(b => b.text || "").join("").trim();
+      txt = txt.replace(/```json|```/g, "").trim();
+      const extracted = JSON.parse(txt);
+      const fieldMap = { iban:"iban", bic:"bic", bankName:"bankName", siret:"siret", companyName:"companyName" };
+      let foundAny = false;
+      Object.keys(fieldMap).forEach(k => {
+        if (extracted[k] && String(extracted[k]).trim()) {
+          updateProfile(fieldMap[k], String(extracted[k]).trim());
+          foundAny = true;
+        }
+      });
+      setProfileScanLoading(false);
+      if (foundAny) {
+        setProfileScanSuccess(true);
+        setTimeout(() => setProfileScanSuccess(false), 3500);
+      } else {
+        setProfileScanError("Aucune information reconnue sur cette photo. Réessaie avec un RIB ou un Kbis bien net.");
+        setTimeout(() => setProfileScanError(""), 5000);
+      }
+    } catch(e) {
+      setProfileScanLoading(false);
+      setProfileScanError("Impossible de lire le document. Réessaie avec une photo plus nette ou remplis les champs manuellement.");
+      setTimeout(() => setProfileScanError(""), 5000);
+    }
+  };
+
+
   const magicFillStep1 = () => setMagicFillTarget("step1");
 
   // Extraction réelle via Claude Vision après capture photo
@@ -2405,6 +2510,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         onSignOut={handleSignOut}
         onGoHome={() => goToScreen("app")}
         initialSection={profileInitialTab}
+        onProfileScan={() => requestCameraPermission(startProfileScan)}
+        profileScanLoading={profileScanLoading}
+        profileScanSuccess={profileScanSuccess}
+        profileScanError={profileScanError}
       />
     </Shell>
   );
@@ -2632,6 +2741,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         <CameraCapture
           onCapture={handleMagicFillCapture}
           onClose={() => setMagicFillTarget(null)}
+        />
+      )}
+      {profileScanTarget && (
+        <CameraCapture
+          onCapture={handleProfileScanCapture}
+          onClose={() => setProfileScanTarget(false)}
         />
       )}
       {showScannerModal && (
@@ -12710,7 +12825,7 @@ function MiniPlanCard({ icon, title, price, sub, color, recommended, onSelect })
 }
 
 /* ══════════════════════════════════════════ PROFILE PAGE ══ */
-function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection }) {
+function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError }) {
   const [newSkill, setNewSkill] = useState("");
   const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState(initialSection || "identity");
@@ -12720,9 +12835,18 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const fileInputRef = useRef(null);
   const logoInputRef = useRef(null);
 
+  const [uploadError, setUploadError] = useState("");
+
   const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("Cette photo dépasse 5 Mo. Choisis une image plus légère (recadrée ou compressée).");
+      setTimeout(() => setUploadError(""), 5000);
+      e.target.value = "";
+      return;
+    }
+    setUploadError("");
     const reader = new FileReader();
     reader.onload = (ev) => updateProfile("photo", ev.target.result);
     reader.readAsDataURL(file);
@@ -12731,6 +12855,13 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const handleLogoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setUploadError("Ce logo dépasse 2 Mo. Choisis un fichier plus léger.");
+      setTimeout(() => setUploadError(""), 5000);
+      e.target.value = "";
+      return;
+    }
+    setUploadError("");
     const reader = new FileReader();
     reader.onload = (ev) => updateProfile("logo", ev.target.result);
     reader.readAsDataURL(file);
@@ -12859,13 +12990,6 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
               <span style={{ fontFamily:T.display, fontSize:22, color:C.white, fontWeight:700, letterSpacing:"0.01em" }}>
                 {fullName}
               </span>
-              {profile.verified && (
-                <span style={{
-                  background:"linear-gradient(135deg, #FFD700, #FFA500)",
-                  color:"#1A0A00", fontSize:10, fontWeight:800,
-                  padding:"2px 8px", borderRadius:20, letterSpacing:"0.05em", flexShrink:0,
-                }}>✨ VÉRIFIÉ</span>
-              )}
             </div>
             <div style={{ fontFamily:T.body, fontSize:13, color:C.goldL, marginBottom:8, fontWeight:500 }}>
               {profile.jobTitle || "Freelance — ajoute ton titre métier"}
@@ -12904,6 +13028,12 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           </div>
         )}
       </div>
+
+      {uploadError && (
+        <div className="fade-up" style={{ display:"flex", alignItems:"center", gap:10, background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#B91C1C" }}>
+          <span style={{ fontSize:15 }}>⚠️</span> {uploadError}
+        </div>
+      )}
 
       {/* Section nav tabs */}
       <div className="fade-up fade-up-1" style={{
@@ -12968,19 +13098,6 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 <input style={inputStyle} value={profile.lastName} placeholder="Dupont" onChange={e => updateProfile("lastName", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
               </div>
             </div>
-
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:C.creamD, borderRadius:10, padding:"14px 16px" }}>
-              <div>
-                <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy, marginBottom:2 }}>Compte Vérifié ✨</div>
-                <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>Affiche un badge de confiance sur ton profil</div>
-              </div>
-              <div
-                onClick={() => updateProfile("verified", !profile.verified)}
-                style={{ width:44, height:24, borderRadius:12, background: profile.verified ? C.navy : C.creamDD, cursor:"pointer", position:"relative", transition:"background 0.2s", flexShrink:0 }}
-              >
-                <div style={{ position:"absolute", top:3, left: profile.verified ? 22 : 3, width:18, height:18, borderRadius:"50%", background:C.white, transition:"left 0.2s", boxShadow:"0 1px 4px rgba(0,0,0,0.2)" }} />
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -13040,7 +13157,29 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           {/* Coordonnées bancaires */}
           <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>COORDONNÉES BANCAIRES</div>
-            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Ces informations apparaîtront sur tes factures pour que le client sache où te payer.</div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:14 }}>Ces informations apparaîtront sur tes factures pour que le client sache où te payer.</div>
+
+            {onProfileScan && (
+              <div style={{ marginBottom:18 }}>
+                <button
+                  onClick={onProfileScan}
+                  disabled={profileScanLoading}
+                  style={{ width:"100%", padding:"12px 16px", background: profileScanSuccess ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : C.creamD, border:`1.5px dashed ${profileScanSuccess ? "transparent" : C.border}`, borderRadius:10, cursor: profileScanLoading ? "default" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:600, color: profileScanSuccess ? "#fff" : C.navy, display:"flex", alignItems:"center", justifyContent:"center", gap:8, transition:"all 0.2s" }}
+                >
+                  {profileScanLoading ? (
+                    <><span style={{ width:14, height:14, border:"2px solid rgba(0,0,0,0.15)", borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.8s linear infinite", display:"inline-block" }} /> Lecture du document…</>
+                  ) : profileScanSuccess ? (
+                    <>✓ Informations détectées et remplies</>
+                  ) : (
+                    <>📷 Scanner un RIB ou justificatif SIRET (au lieu de tout retaper)</>
+                  )}
+                </button>
+                {profileScanError && (
+                  <div style={{ marginTop:8, fontFamily:T.body, fontSize:11, color:"#B91C1C", lineHeight:1.5 }}>⚠️ {profileScanError}</div>
+                )}
+              </div>
+            )}
+
             <div style={{ marginBottom:14 }}>
               <label style={labelStyle}>IBAN</label>
               <input style={inputStyle} value={profile.iban} placeholder="FR76 3000 1007 9412 3456 7890 185" onChange={e => updateProfile("iban", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
