@@ -6737,8 +6737,10 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
           .then(({ data, error }) => {
             setNdaSaving(false);
             if (error) { console.error("Erreur sauvegarde NDA Supabase:", error); setNdaSaveError(true); return; }
+            if (!data?.id) { console.error("Erreur sauvegarde NDA Supabase : aucune ligne retournée"); setNdaSaveError(true); return; }
             setNdaRowId(data.id);
-          });
+          })
+          .catch((e) => { console.error("Erreur réseau sauvegarde NDA:", e); setNdaSaving(false); setNdaSaveError(true); });
       }
       setNdaHistory(prev => {
         const next = [entry, ...prev].slice(0, 15);
