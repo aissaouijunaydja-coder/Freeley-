@@ -9502,45 +9502,41 @@ function ContractTimeline({ entry }) {
 }
 
 /* ══════════════════════════════════════════ DEPOSIT GUARD ══ */
-function DepositGuard({ entry }) {
-  const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 557;
+function DepositGuard({ entry, paid, onMarkPaid }) {
+  const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 0;
   const depositAmt = Math.round(rawPrice * 0.30) || 0;
+  const progress = paid ? 30 : 0;
 
-  const [paid, setPaid]           = useState(false);
-  const [progress, setProgress]   = useState(0);
   const [linkCopied, setLinkCopied] = useState(false);
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
   const [relanceSent, setRelanceSent] = useState(false);
-  const [simPulse, setSimPulse]   = useState(false);
-
-  const handleSimulate = () => {
-    setSimPulse(true);
-    setTimeout(() => {
-      setPaid(true);
-      setProgress(30);
-      setSimPulse(false);
-    }, 600);
-  };
-
   const [linkGenerating, setLinkGenerating] = useState(false);
+  const [relanceSending, setRelanceSending] = useState(false);
+
+  // Récupère un lien de paiement existant, ou en crée un nouveau (réutilisé par "Copier le lien" et "Relancer")
+  const ensurePaymentLink = async () => {
+    if (stripeLinkUrl) return stripeLinkUrl;
+    const res = await fetch("/api/create-payment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: depositAmt,
+        description: `Acompte — ${entry?.missionTitle || "Prestation Freeley"}`,
+        customerEmail: entry?.form?.clientEmail || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+    setStripeLinkUrl(data.url);
+    return data.url;
+  };
 
   const handleCopyLink = async () => {
     if (linkGenerating) return;
     setLinkGenerating(true);
     try {
-      const res = await fetch("/api/create-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: depositAmt,
-          description: `Acompte — ${entry?.missionTitle || "Prestation Freeley"}`,
-          customerEmail: entry?.form?.clientEmail || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
-      setStripeLinkUrl(data.url);
-      navigator.clipboard.writeText(data.url).catch(()=>{});
+      const url = await ensurePaymentLink();
+      navigator.clipboard.writeText(url).catch(()=>{});
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2800);
     } catch(e) {
@@ -9550,15 +9546,37 @@ function DepositGuard({ entry }) {
     }
   };
 
-  const handleRelance = () => {
+  // Envoie une vraie relance par email (ouvre le client mail avec le lien de paiement inclus)
+  const handleRelance = async () => {
+    const email = entry?.form?.clientEmail;
+    if (!email) { alert("Aucun email client renseigné sur ce contrat — impossible d'envoyer une relance."); return; }
+    setRelanceSending(true);
+    let link = stripeLinkUrl;
+    try { link = await ensurePaymentLink(); } catch(e) { /* on envoie quand même la relance, sans lien si Stripe échoue */ }
+    setRelanceSending(false);
+    const subject = `Rappel — Acompte en attente pour "${entry?.missionTitle || "votre mission"}"`;
+    const lines = [
+      `Bonjour${entry?.clientName ? " " + entry.clientName : ""},`,
+      ``,
+      `Petit rappel concernant l'acompte de ${depositAmt.toLocaleString("fr-FR")} € pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
+    ];
+    if (link) lines.push(``, `Vous pouvez régler directement via ce lien sécurisé : ${link}`);
+    lines.push(``, `Merci et à bientôt,`);
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`;
     setRelanceSent(true);
     setTimeout(() => setRelanceSent(false), 3500);
   };
 
-  return (
-    <div className="fade-up" style={{ marginBottom: 24 }}>
+  if (depositAmt <= 0) {
+    return (
+      <div className="fade-up" style={{ marginBottom:24, background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:C.textL, textAlign:"center" }}>
+        🛡️ Renseigne un montant sur ce contrat pour activer le suivi automatique de l'acompte.
+      </div>
+    );
+  }
 
-      {/* ── BANNIÈRE PRINCIPALE ── */}
+  return (
+    <div className="fade-up" style={{ marginBottom: 24 }}>      {/* ── BANNIÈRE PRINCIPALE ── */}
       <div style={{
         borderRadius: 16,
         overflow: "hidden",
@@ -9746,27 +9764,27 @@ function DepositGuard({ entry }) {
         )}
       </div>
 
-      {/* ── Bouton simulation discret ── */}
-      {!paid && (
+      {/* ── Marquer comme reçu — action réelle, synchronisée avec le Suivi du paiement ── */}
+      {!paid && onMarkPaid && (
         <div style={{ display:"flex", justifyContent:"flex-end", marginTop:8 }}>
           <button
-            onClick={handleSimulate}
+            onClick={onMarkPaid}
             style={{
               display:"flex", alignItems:"center", gap:6,
               padding:"7px 14px",
-              background: simPulse ? "#F0FDF4" : "#F8F7F5",
-              border:`1px solid ${simPulse ? "#86EFAC" : C.borderL}`,
+              background: "#F8F7F5",
+              border:`1px solid ${C.borderL}`,
               borderRadius:20, cursor:"pointer",
               fontFamily:T.body, fontSize:11, fontWeight:600,
-              color: simPulse ? "#15803D" : C.textL,
+              color: C.textL,
               transition:"all 0.3s",
               boxShadow:"none",
             }}
             onMouseOver={e=>{ e.currentTarget.style.background="#EDE9DF"; e.currentTarget.style.borderColor=C.border; e.currentTarget.style.color=C.textM; }}
-            onMouseOut={e=>{ e.currentTarget.style.background=simPulse?"#F0FDF4":"#F8F7F5"; e.currentTarget.style.borderColor=simPulse?"#86EFAC":C.borderL; e.currentTarget.style.color=simPulse?"#15803D":C.textL; }}
+            onMouseOut={e=>{ e.currentTarget.style.background="#F8F7F5"; e.currentTarget.style.borderColor=C.borderL; e.currentTarget.style.color=C.textL; }}
           >
-            <span style={{ fontSize:12, animation: simPulse ? "spin 0.6s linear" : "none" }}>⚙️</span>
-            Aperçu : marquer comme payé (démo)
+            <span style={{ fontSize:12 }}>✓</span>
+            Marquer l'acompte comme reçu
           </button>
         </div>
       )}
@@ -10254,7 +10272,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* 🛡️ Garant d'Acompte Automatique */}
-      <DepositGuard entry={historyView} />
+      <DepositGuard entry={historyView} paid={paymentStatuses[historyView.id] === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} />
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
