@@ -1352,6 +1352,11 @@ function AppInner() {
     const hist = await getHistory();
     setHistory(hist);
     if (user?.id) await loadProfileFromSupabase(user.id);
+    if (user?.id) {
+      const { data, error } = await supabase.from("ndas").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+      if (error) console.error("Erreur chargement NDA (alertes):", error);
+      else setMyNdas(data || []);
+    }
   };
 
   // Sync profil → form (step 0) quand le profil change
@@ -2447,7 +2452,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 
   const liveAlerts = (() => {
     const readIds = getReadAlertIds();
-    return buildAlertsFromHistory(history).map(a => ({ ...a, read: readIds.includes(a.id) }));
+    const all = [...buildAlertsFromHistory(history), ...buildNdaAlerts(myNdas)];
+    return all.map(a => ({ ...a, read: readIds.includes(a.id) }));
   })();
 
   const goToProfileFacturation = () => {
@@ -6153,7 +6159,25 @@ function buildAlertsFromHistory(history) {
   return alerts;
 }
 
-function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, initialAlerts = [], onAlertsChanged }) {
+// Alerte "NDA signé" : une fois qu'un client a signé, prévient le freelance
+function buildNdaAlerts(myNdas) {
+  if (!Array.isArray(myNdas) || !myNdas.length) return [];
+  return myNdas.filter(n => n.status === "signed").map(n => ({
+    id: "nda_signed_" + n.id,
+    read: false,
+    icon: "✅",
+    accentBg: "#F0FDF4",
+    accentIcon: "#DCFCE7",
+    accentBorder: "#BBF7D0",
+    badgeBg: "#16A34A",
+    badgeText: "NDA SIGNÉ",
+    title: "NDA signé !",
+    detail: `${n.partie_b || "Le destinataire"} a signé l'accord de confidentialité avec ${n.partie_a || "toi"}.`,
+    action: "nda-signed",
+  }));
+}
+
+function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNdas, onClose, initialAlerts = [], onAlertsChanged }) {
   const panelRef = useRef(null);
   const [alerts, setAlerts] = useState(initialAlerts);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 600);
@@ -6191,6 +6215,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onClose, in
     setTimeout(() => {
       onClose();
       if (alert.action === "nda") onOpenNda();
+      else if (alert.action === "nda-signed") { if (onOpenMyNdas) onOpenMyNdas(); }
       else onOpenMission(alert);
     }, 160);
   };
@@ -6527,6 +6552,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
               onOpenRecouvrement={() => { setAlertOpen(false); if(onOpenRecouvrement) onOpenRecouvrement(); }}
               onOpenNda={() => { setAlertOpen(false); if(onOpenNda) onOpenNda(); }}
               onOpenMission={(alert) => { setAlertOpen(false); if(onOpenMission) onOpenMission(alert); }}
+              onOpenMyNdas={() => { setAlertOpen(false); if(onMyNdas) onMyNdas(); }}
               onAlertsChanged={onAlertsChanged}
             />
           )}
