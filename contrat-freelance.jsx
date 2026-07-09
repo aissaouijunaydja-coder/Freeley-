@@ -1365,7 +1365,9 @@ function AppInner() {
     if (fullName) setForm(f => ({ ...f, freelanceName: fullName }));
     if (profile.jobTitle) setForm(f => ({ ...f, freelanceActivity: profile.jobTitle }));
     if (profile.siret) setForm(f => ({ ...f, freelanceSiret: profile.siret }));
-  }, [profile.firstName, profile.lastName, profile.jobTitle, profile.siret]);
+    // Pré-remplit le prix avec le TJM seulement si le champ est encore vide (ne jamais écraser un prix déjà saisi)
+    if (profile.tjm) setForm(f => f.price ? f : ({ ...f, price: profile.tjm }));
+  }, [profile.firstName, profile.lastName, profile.jobTitle, profile.siret, profile.tjm]);
 
   const update = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
@@ -2463,7 +2465,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 
   const startFreshContract = () => {
     try { localStorage.removeItem("freeley_current_draft"); } catch(e) {}
-    setStep(0); setContract(""); setForm(initialForm); setErrors({}); setApiError("");
+    setStep(0); setContract(""); setForm({ ...initialForm, price: profile.tjm || "" }); setErrors({}); setApiError("");
   };
 
   const handleSaveDraft = () => {
@@ -10940,7 +10942,13 @@ ${freelanceName}`;
               {form.freelanceActivity && <div style={{ fontFamily:T.body, fontSize:11, color:C.textM }}>{form.freelanceActivity}</div>}
               {hasSiret && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>SIRET : {form.freelanceSiret}</div>}
               {form.freelanceEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:2 }}>{form.freelanceEmail}</div>}
-              {profile?.linkedin && <div style={{ fontFamily:T.body, fontSize:10, color:"#0077B5", marginTop:3, wordBreak:"break-all" }}>🔗 LinkedIn</div>}
+              {(profile?.linkedin || profile?.portfolio || profile?.github) && (
+                <div style={{ display:"flex", gap:8, marginTop:5, flexWrap:"wrap" }}>
+                  {profile?.linkedin && <a href={profile.linkedin} target="_blank" rel="noopener noreferrer" style={{ fontFamily:T.body, fontSize:10, color:"#0077B5", textDecoration:"none" }}>🔗 LinkedIn</a>}
+                  {profile?.portfolio && <a href={profile.portfolio} target="_blank" rel="noopener noreferrer" style={{ fontFamily:T.body, fontSize:10, color:C.navy, textDecoration:"none" }}>🌐 Portfolio</a>}
+                  {profile?.github && <a href={profile.github} target="_blank" rel="noopener noreferrer" style={{ fontFamily:T.body, fontSize:10, color:"#333", textDecoration:"none" }}>⌨ GitHub</a>}
+                </div>
+              )}
             </div>
             <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>CLIENT</div>
@@ -13610,7 +13618,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             <div key={key} style={{ marginBottom:14 }}>
               <label style={labelStyle}>{icon} {label}</label>
               <div style={{ position:"relative" }}>
-                <input style={inputStyle} value={profile[key] || ""} placeholder={placeholder} onChange={e => updateProfile(key, e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+                <input style={inputStyle} value={profile[key] || ""} placeholder={placeholder} onChange={e => updateProfile(key, e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => { e.target.style.borderColor=C.border; const v = e.target.value.trim(); if (v && !/^https?:\/\//i.test(v)) updateProfile(key, `https://${v}`); }} />
                 {profile[key] && (
                   <a href={profile[key]} target="_blank" rel="noopener noreferrer" style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontFamily:T.body, fontSize:10, color:C.navy, fontWeight:600, textDecoration:"none", background:C.creamD, padding:"3px 8px", borderRadius:6, border:`1px solid ${C.border}` }}>Ouvrir ↗</a>
                 )}
