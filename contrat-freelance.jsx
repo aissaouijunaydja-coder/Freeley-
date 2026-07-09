@@ -12716,6 +12716,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const [activeSection, setActiveSection] = useState(initialSection || "identity");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const fileInputRef = useRef(null);
   const logoInputRef = useRef(null);
 
@@ -12754,9 +12755,35 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
 
   const handleDeleteAccount = async () => {
     setDeleteConfirming(true);
-    await new Promise(r => setTimeout(r, 1800));
-    if (onSignOut) await onSignOut();
-    if (onGoHome) onGoHome();
+    setDeleteError("");
+    try {
+      // 1. Supprime les contrats de l'utilisateur dans Supabase
+      if (authUser?.id) {
+        await supabase.from("contracts").delete().eq("user_id", authUser.id);
+      }
+      // 2. Supprime le compte d'authentification lui-même côté serveur
+      //    (nécessaire : la suppression d'un compte auth requiert la clé service_role,
+      //    qui ne peut jamais être exposée côté navigateur)
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/delete-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (!res.ok) throw new Error("delete-account request failed");
+
+      // 3. Nettoie toutes les données locales de l'app sur cet appareil
+      ["freeley_profile","freeley_current_draft","freeley_drafts_list","freeley_invoice_counters",
+       "freeley_nda_list","freeley_payment_status","freeley_read_alerts","freeley_scan_list",
+       "freeley_scan_results","freeley_screen"].forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
+
+      if (onSignOut) await onSignOut();
+      if (onGoHome) onGoHome();
+    } catch (e) {
+      console.error("Erreur suppression compte:", e);
+      setDeleteError("La suppression a échoué. Vérifie ta connexion et réessaie — si le problème persiste, contacte le support.");
+      setDeleteConfirming(false);
+    }
   };
 
   const sections = [
@@ -13239,7 +13266,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                   Suppression en cours…
                 </div>
                 <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.6 }}>
-                  Déconnexion… Votre compte a bien été supprimé.
+                  Suppression de vos contrats et de votre compte sur nos serveurs…
                 </div>
                 <div style={{ marginTop:20, display:"flex", justifyContent:"center" }}>
                   <div style={{ width:32, height:32, border:`3px solid ${C.border}`, borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
@@ -13255,6 +13282,11 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                   <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.7 }}>
                     Attention, cette action est <strong>irréversible</strong>. Toutes vos données, vos scans et vos contrats générés seront définitivement effacés de nos serveurs sécurisés conformément au RGPD.
                   </div>
+                  {deleteError && (
+                    <div style={{ marginTop:14, background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 14px", fontFamily:T.body, fontSize:12, color:"#B91C1C", lineHeight:1.5 }}>
+                      {deleteError}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display:"flex", gap:12, marginTop:8 }}>
                   <button
