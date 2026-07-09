@@ -2654,6 +2654,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", maxHeight:260, overflowY:"auto", marginBottom:12 }}>
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(n.content)}</pre>
               </div>
+              <NdaSignatureCertificate partieA={n.partie_a} partieB={n.partie_b} freelanceSignature={n.freelance_signature} clientSignature={n.client_signature} signedAt={n.signed_at} />
               <div style={{display:"flex", gap:8, marginBottom: (n.status === "signed" || ndaSignLinks[n.id]) ? 10 : 0}}>
                 <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
                 <button onClick={()=>deleteNda(n.id)} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:T.body}}>🗑 Supprimer</button>
@@ -6725,6 +6726,32 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
   doc.save(`NDA_${(partieBName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
 };
 
+// Affiche les signatures directement à l'écran (pas seulement dans le PDF téléchargé) — partagé entre la fenêtre de création et la page "Mes NDA"
+function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientSignature, signedAt }) {
+  if (!freelanceSignature && !clientSignature) return null;
+  return (
+    <div style={{ background:"#FFFDF9", border:"1.5px solid #E8D9B5", borderRadius:12, padding:"16px 18px", marginBottom:16 }}>
+      <div style={{ fontFamily:T.body, fontSize:11, fontWeight:800, letterSpacing:"0.08em", color:"#8A6D3B", marginBottom:12 }}>✍️ CERTIFICAT DE SIGNATURE</div>
+      <div style={{ display:"flex", gap:16, flexWrap:"wrap" }}>
+        {freelanceSignature && (
+          <div style={{ flex:"1 1 160px" }}>
+            <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:600, marginBottom:6 }}>{partieA || "Partie A"}</div>
+            <img src={freelanceSignature} alt="Signature Partie A" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
+            <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>Signée à la création du document</div>
+          </div>
+        )}
+        {clientSignature && (
+          <div style={{ flex:"1 1 160px" }}>
+            <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:600, marginBottom:6 }}>{partieB || "Partie B"}</div>
+            <img src={clientSignature} alt="Signature Partie B" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
+            <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>Signée à distance{signedAt ? ` le ${new Date(signedAt).toLocaleString("fr-FR")}` : ""}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NdaExpressModal({ onClose, profile, authUser }) {
   const [step, setStep]           = useState("form"); // "form" | "loading" | "result"
   const [partieA, setPartieA]     = useState(() => {
@@ -7081,6 +7108,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"20px 20px", maxHeight:320, overflowY:"auto", marginBottom:16 }}>
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(nda)}</pre>
               </div>
+              <NdaSignatureCertificate partieA={partieA} partieB={partieB} freelanceSignature={ndaFreelanceSignature} clientSignature={ndaClientSignature} signedAt={ndaSignedAt} />
               <div style={{ display:"flex", gap:10, marginBottom:10 }}>
                 <button onClick={() => { setStep("form"); setNda(""); }} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM, transition:"all 0.15s" }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
                 <button onClick={() => downloadNdaPDF(nda, ndaRef, partieA, partieB, ndaFreelanceSignature, ndaClientSignature, ndaSignedAt)} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
