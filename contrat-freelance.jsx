@@ -318,10 +318,7 @@ const getNdaForSigning = async (ndaId) => {
 
 // Le client signe le NDA : on enregistre sa signature et on passe le statut à "signed"
 const submitNdaSignature = async (ndaId, clientSignature) => {
-  const { error } = await supabase
-    .from("ndas")
-    .update({ client_signature: clientSignature, status: "signed", signed_at: new Date().toISOString() })
-    .eq("id", ndaId);
+  const { error } = await supabase.rpc("sign_nda", { nda_id: ndaId, signature: clientSignature });
   if (error) { console.error("submitNdaSignature error:", error); return false; }
   return true;
 };
@@ -6777,7 +6774,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
       return;
     }
     setSignLinkGenerating(true);
-    const { error } = await supabase.from("ndas").update({ status: "pending_signature" }).eq("id", ndaRowId);
+    const { error } = await supabase.rpc("request_nda_signature", { nda_id: ndaRowId });
     setSignLinkGenerating(false);
     if (error) { console.error("Erreur génération lien signature NDA:", error); alert("Erreur lors de la génération du lien. Réessaie."); return; }
     setSignLink(`${window.location.origin}${window.location.pathname}?sign-nda=${ndaRowId}`);
