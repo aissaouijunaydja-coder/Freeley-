@@ -291,10 +291,11 @@ const submitClientSignature = async (contractId, clientSignature) => {
     .single();
   if (e1) { console.error(e1); return false; }
   const newContent = { ...parseContent(existing.content), clientSignature, signedByClientAt: new Date().toISOString() };
-  const { error: e2 } = await supabase
-    .from("contracts")
-    .update({ content: newContent, status: "signed" })
-    .eq("id", contractId);
+  const { error: e2 } = await supabase.rpc("update_contract_content", {
+    p_contract_id: contractId,
+    p_new_content: JSON.stringify(newContent),
+    p_new_status: "signed",
+  });
   if (e2) { console.error(e2); return false; }
   return true;
 };
@@ -1115,7 +1116,6 @@ function AppInner() {
   const [signError, setSignError]       = useState("");
   const [signResult, setSignResult]     = useState(null);
   const [signLinkCopied, setSignLinkCopied] = useState("");
-  const [negotLinkCopied, setNegotLinkCopied] = useState(false);
   const [alertsTick, setAlertsTick] = useState(0); // force le recalcul des alertes (badge cloche) après lecture
   const [draftSavedToast, setDraftSavedToast] = useState(false);
   const [profileInitialTab, setProfileInitialTab] = useState(null);
@@ -3648,44 +3648,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 </div>
               )}
 
-              {/* ── Bouton lien de négociation ── */}
-              <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-start", gap:4, width:"100%" }}>
-                <button
-                  onClick={() => {
-                    const url = `${window.location.origin}${window.location.pathname}?client=1`;
-                    navigator.clipboard.writeText(url).then(() => {
-                      setNegotLinkCopied(true);
-                      setTimeout(() => setNegotLinkCopied(false), 3000);
-                    });
-                  }}
-                  style={{
-                    padding:"11px 22px",
-                    background: negotLinkCopied
-                      ? "linear-gradient(135deg, #065F46 0%, #059669 100%)"
-                      : "transparent",
-                    color: negotLinkCopied ? "#FFFFFF" : "#A5B4C8",
-                    border: `1.5px solid ${negotLinkCopied ? "#059669" : "#354F6E"}`,
-                    borderRadius:8, cursor:"pointer",
-                    fontSize:14, fontFamily:T.body, fontWeight:600,
-                    transition:"all .25s",
-                    display:"flex", alignItems:"center", gap:8,
-                    letterSpacing:"0.01em",
-                    whiteSpace:"nowrap",
-                  }}
-                  onMouseOver={e => { if (!negotLinkCopied) { e.currentTarget.style.background="#1E3A56"; e.currentTarget.style.borderColor="#5A7A9A"; e.currentTarget.style.color="#FFFFFF"; } }}
-                  onMouseOut={e => { if (!negotLinkCopied) { e.currentTarget.style.background="transparent"; e.currentTarget.style.borderColor="#354F6E"; e.currentTarget.style.color="#A5B4C8"; } }}
-                >
-                  {negotLinkCopied ? "✓ Lien copié !" : "🔗 Copier le lien de relecture / négociation"}
-                </button>
-                <div style={{
-                  fontFamily:T.body, fontSize:11, color:"#6A87A4",
-                  fontStyle:"italic", lineHeight:1.55, paddingLeft:4,
-                  maxWidth:460,
-                }}>
-                  Envoyez ce lien magique à votre client pour qu’il puisse relire le contrat et suggérer des modifications par article avant la signature finale.
-                </div>
-              </div>
-
               {/* ── Réviser le contrat avant signature ── */}
               <div style={{ width:"100%", background:"#122238", border:"1.5px solid #2A4167", borderRadius:12, padding:"16px 18px" }}>
                 {!reviseOpen ? (
@@ -4284,7 +4246,7 @@ CONSIGNES :
 }
 
 /* ══════════════════════════════════════════ MARKDOWN CONTRACT RENDERER ══ */
-function MarkdownContract({ text, form }) {
+function MarkdownContract({ text, form, signatureStatus, freelanceSignature, clientSignature, signedByClientAt }) {
   if (!text) return null;
 
   // ── Inline renderer: **bold** → <strong>
@@ -4548,38 +4510,58 @@ function MarkdownContract({ text, form }) {
 
             {/* Prestataire */}
             <div style={{
-              border: "1.5px solid #BBF7D0",
+              border: freelanceSignature ? "1.5px solid #BBF7D0" : "1.5px dashed #D1D5DB",
               borderRadius: 10,
               padding: "20px 22px",
-              background: "linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)",
+              background: freelanceSignature ? "linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)" : "#FAFAFA",
             }}>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, letterSpacing: "0.14em", color: "#6B7280", fontWeight: 700, textTransform: "uppercase", marginBottom: 10 }}>Le prestataire</div>
               <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 600, color: "#1a365d", marginBottom: 6 }}>{freelanceName}</div>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#4B5563", marginBottom: 14, lineHeight: 1.5 }}>
                 {form?.freelanceActivity || "Prestataire de services"}{form?.freelanceSiret ? <><br />SIRET : {form.freelanceSiret}</> : null}
               </div>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 20, padding: "5px 12px" }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#16A34A" }} />
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>✓ Signé numériquement</span>
-              </div>
+              {freelanceSignature ? (
+                <>
+                  <img src={freelanceSignature} alt="Signature Prestataire" style={{ maxWidth:160, height:44, objectFit:"contain", display:"block", marginBottom:8 }} />
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 20, padding: "5px 12px" }}>
+                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#16A34A" }} />
+                    <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>✓ Signé numériquement</span>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 20, padding: "5px 12px" }}>
+                  <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#F59E0B" }} />
+                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>Pas encore signé</span>
+                </div>
+              )}
             </div>
 
             {/* Client */}
             <div style={{
-              border: "1.5px dashed #D1D5DB",
+              border: clientSignature ? "1.5px solid #BBF7D0" : "1.5px dashed #D1D5DB",
               borderRadius: 10,
               padding: "20px 22px",
-              background: "#FAFAFA",
+              background: clientSignature ? "linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)" : "#FAFAFA",
             }}>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, letterSpacing: "0.14em", color: "#6B7280", fontWeight: 700, textTransform: "uppercase", marginBottom: 10 }}>Le client</div>
               <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{clientName}</div>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#6B7280", marginBottom: 14, lineHeight: 1.5 }}>
                 {form?.clientCompany || "Client"}{form?.clientEmail ? <><br />{form.clientEmail}</> : null}
               </div>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 20, padding: "5px 12px" }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#F59E0B", animation: "shimmer 1.5s ease-in-out infinite" }} />
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>En attente de signature…</span>
-              </div>
+              {clientSignature ? (
+                <>
+                  <img src={clientSignature} alt="Signature Client" style={{ maxWidth:160, height:44, objectFit:"contain", display:"block", marginBottom:8 }} />
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 20, padding: "5px 12px" }}>
+                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#16A34A" }} />
+                    <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>✓ Signé{signedByClientAt ? ` le ${new Date(signedByClientAt).toLocaleDateString("fr-FR")}` : ""}</span>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 20, padding: "5px 12px" }}>
+                  <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#F59E0B", animation: "shimmer 1.5s ease-in-out infinite" }} />
+                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>En attente de signature…</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -9579,7 +9561,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
-        <MarkdownContract text={historyView.contract} form={historyView.form} />
+        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} />
       </div>
 
       {/* ⚡ Détecteur d'Avenant Magique */}
@@ -11641,6 +11623,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const [freelanceSigned, setFreelanceSigned] = useState(false);
   const [clientSigned, setClientSigned] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [saveSignatureError, setSaveSignatureError] = useState(false);
 
   // Canvas refs
   const freelanceCanvasRef = useRef(null);
@@ -11729,10 +11712,15 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           const { data: existing, error: e1 } = await supabase.from("contracts").select("content").eq("id", contractId).single();
           if (e1) throw e1;
           const newContent = { ...parseContent(existing.content), freelanceSignature: freelanceSig, clientSignature: clientSig, signedByClientAt: new Date().toISOString() };
-          const { error: e2 } = await supabase.from("contracts").update({ content: newContent, status: "signed" }).eq("id", contractId);
+          const { error: e2 } = await supabase.rpc("update_contract_content", {
+            p_contract_id: contractId,
+            p_new_content: JSON.stringify(newContent),
+            p_new_status: "signed",
+          });
           if (e2) throw e2;
         } catch (e) {
           console.error("Erreur sauvegarde signatures tactiles:", e);
+          setSaveSignatureError(true);
         }
       }
     }, 1400);
@@ -12108,6 +12096,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           {/* ────────── ÉTAPE 2 : Contrat 100% scellé ────────── */}
           {step === 2 && (
             <div style={{ animation:"fadeUp 0.4s cubic-bezier(.22,.68,0,1.2) both", textAlign:"center" }}>
+              {saveSignatureError && (
+                <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#B91C1C", textAlign:"left" }}>
+                  ⚠️ Les signatures n'ont pas pu être sauvegardées sur le serveur (elles resteront visibles ici, mais pas dans le PDF téléchargé ni sur un autre appareil). Réessaie, ou contacte le support si ça persiste.
+                </div>
+              )}
               {/* Big success badge */}
               <div style={{
                 background:"linear-gradient(135deg, #052E16 0%, #14532D 100%)",
