@@ -1570,6 +1570,9 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       const acomptePct = Number(form.acomptePourcentage) || 0;
       const acompteAmount = Math.round(Number(form.price) * acomptePct / 100);
       const soldeAmount   = Math.round(Number(form.price) * (100 - acomptePct) / 100);
+      // Date et numéro générés par l'app (pas par l'IA) : garantit une info réelle, jamais hallucinée
+      const todayFull = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+      const contractRef = `CP-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
 
       const prompt = `Tu es un avocat d'affaires français spécialisé en droit des contrats de prestation intellectuelle et en propriété intellectuelle. Rédige un CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT complet, à la fois rigoureux sur le plan juridique et protecteur pour le Prestataire, en français, en utilisant EXACTEMENT les informations fournies ci-dessous.
 
@@ -1599,7 +1602,7 @@ Pénalités de retard: ${form.latePaymentPenalty ? "OUI (clause légale obligato
 STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
 ══════════════════════════════════════════════
 
-EN-TÊTE : Titre "CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", date du jour en toutes lettres, numéro de contrat format CP-[AAAA]-[XXXX] (génère un numéro aléatoire 4 chiffres), mention "ENTRE LES SOUSSIGNÉS".
+EN-TÊTE : Titre "CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", puis la date suivante en toutes lettres, à utiliser EXACTEMENT telle quelle sans la modifier ni la recalculer : "${todayFull}". Numéro de contrat à utiliser EXACTEMENT tel quel, ne jamais en inventer un autre : ${contractRef}. Mention "ENTRE LES SOUSSIGNÉS".
 
 ARTICLE 1 — INDÉPENDANCE DU PRESTATAIRE ET ABSENCE DE LIEN DE SUBORDINATION
 Rédige une clause affirmant EXPLICITEMENT que :
@@ -1674,14 +1677,15 @@ CONSIGNES DE RÉDACTION
 - Utilise un registre juridique français précis, sans jargon inutile mais avec la rigueur d'un acte d'avocat.
 - Cite systématiquement les fondements légaux (articles de loi) entre parenthèses.
 - Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
-- Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.`;
+- Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.
+- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € HT"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.`;
 
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-5",
-          max_tokens: 5000,
+          max_tokens: 20000,
           messages: [{ role: "user", content: prompt }],
         }),
       });
@@ -1696,6 +1700,14 @@ CONSIGNES DE RÉDACTION
 
       const text = (data.content || []).map(i => i.text || "").join("\n").trim();
       if (!text) throw new Error("Réponse vide — content: " + JSON.stringify(data.content));
+
+      // Filet de sécurité : si la réponse a été coupée avant la fin (limite de longueur atteinte),
+      // le contrat est légalement incomplet — on prévient plutôt que de le faire passer pour complet.
+      const looksComplete = /ARTICLE 1[23]|voie électronique/i.test(text);
+      if (data.stop_reason === "max_tokens" || !looksComplete) {
+        console.error("[Freeley] Contrat possiblement tronqué — stop_reason:", data.stop_reason);
+        setApiError("Le contrat généré semble incomplet (trop long pour être terminé). Réessaie — si le problème persiste, réduis la description de la mission.");
+      }
 
       // Sauvegarder dans l'historique
       await saveToHistory({ contract: text }, form);
@@ -8748,8 +8760,11 @@ function ContractTimeline({ entry }) {
 /* ══════════════════════════════════════════ DEPOSIT GUARD ══ */
 function DepositGuard({ entry, paid, onMarkPaid }) {
   const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 0;
-  const depositAmt = Math.round(rawPrice * 0.30) || 0;
-  const progress = paid ? 30 : 0;
+  // Utilise le vrai pourcentage d'acompte choisi sur ce contrat — jamais un taux fixe supposé
+  const acomptePct = entry?.form?.acomptePourcentage != null && entry.form.acomptePourcentage !== ""
+    ? Number(entry.form.acomptePourcentage) : null;
+  const depositAmt = acomptePct ? Math.round(rawPrice * (acomptePct / 100)) || 0 : 0;
+  const progress = paid ? Math.min(acomptePct || 30, 100) : 0;
 
   const [linkCopied, setLinkCopied] = useState(false);
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
@@ -8814,7 +8829,9 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
   if (depositAmt <= 0) {
     return (
       <div className="fade-up" style={{ marginBottom:24, background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:C.textL, textAlign:"center" }}>
-        🛡️ Renseigne un montant sur ce contrat pour activer le suivi automatique de l'acompte.
+        {rawPrice > 0 && acomptePct === 0
+          ? "🛡️ Ce contrat ne prévoit pas d'acompte — paiement intégral prévu à la livraison ou à la signature."
+          : "🛡️ Renseigne un montant sur ce contrat pour activer le suivi automatique de l'acompte."}
       </div>
     );
   }
