@@ -1130,6 +1130,10 @@ function AppInner() {
   const [showTactileSign, setShowTactileSign] = useState(false);
   const [remoteSignLoading, setRemoteSignLoading] = useState(false);
   const [remoteSignLink, setRemoteSignLink] = useState("");
+  const [showRemoteSignPad, setShowRemoteSignPad] = useState(false);
+  const [remoteSigHasStrokes, setRemoteSigHasStrokes] = useState(false);
+  const remoteSigCanvasRef = useRef(null);
+  const remoteSigDrawingRef = useRef(false);
   const [remoteSignCopied, setRemoteSignCopied] = useState(false);
 
   // ── Notation client (fin de mission) ──
@@ -1732,9 +1736,29 @@ CONSIGNES DE RÉDACTION
     }
   };
 
+  // Dessin de la signature du prestataire avant de générer le lien à distance
+  const getRemoteSigPos = (e) => {
+    const canvas = remoteSigCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return { x: (touch.clientX - rect.left) * (canvas.width / rect.width), y: (touch.clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const startRemoteSigDraw = (e) => { e.preventDefault(); remoteSigDrawingRef.current = true; const ctx = remoteSigCanvasRef.current.getContext("2d"); const p = getRemoteSigPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const drawRemoteSig = (e) => {
+    if (!remoteSigDrawingRef.current) return;
+    e.preventDefault();
+    const ctx = remoteSigCanvasRef.current.getContext("2d");
+    const p = getRemoteSigPos(e);
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    setRemoteSigHasStrokes(true);
+  };
+  const endRemoteSigDraw = () => { remoteSigDrawingRef.current = false; };
+  const clearRemoteSig = () => { const c = remoteSigCanvasRef.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); setRemoteSigHasStrokes(false); };
+
   const handleRemoteSign = async () => {
     setRemoteSignLoading(true);
     try {
+      const freelanceSig = remoteSigCanvasRef.current?.toDataURL("image/png") || null;
       const entry = {
         contract,
         missionTitle: form.missionTitle,
@@ -1744,7 +1768,7 @@ CONSIGNES DE RÉDACTION
         startDate: form.startDate,
         endDate: form.endDate,
       };
-      const saved = await createSignatureRequest(entry, form, null);
+      const saved = await createSignatureRequest(entry, form, freelanceSig);
       if (!saved || !saved.id) {
         alert("Impossible de créer le lien de signature. Vérifie ta connexion.");
         setRemoteSignLoading(false);
@@ -3611,21 +3635,50 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               >✍️ Signer et envoyer au client</button>
 
               {/* ── Signature à distance ── */}
-              {!remoteSignLink ? (
+              {!remoteSignLink && !showRemoteSignPad && (
                 <button
-                  onClick={handleRemoteSign}
-                  disabled={remoteSignLoading}
+                  onClick={() => setShowRemoteSignPad(true)}
                   style={{
                     padding:"11px 16px",
-                    background: remoteSignLoading ? "#2A4167" : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
-                    color: remoteSignLoading ? "#8BA3C0" : C.white, border:"none", borderRadius:8,
-                    cursor: remoteSignLoading ? "wait" : "pointer",
+                    background: "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
+                    color: C.white, border:"none", borderRadius:8,
+                    cursor: "pointer",
                     fontSize:13, fontFamily:T.body, fontWeight:700,
                     display:"flex", alignItems:"center", gap:8,
                     width:"100%", justifyContent:"center",
                   }}
-                >{remoteSignLoading ? "Création du lien…" : "📲 Envoyer au client pour signature à distance"}</button>
-              ) : (
+                >📲 Envoyer au client pour signature à distance</button>
+              )}
+
+              {showRemoteSignPad && !remoteSignLink && (
+                <div style={{ width:"100%", background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
+                  <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:4 }}>Signe d'abord ta part avant d'envoyer le lien au client</div>
+                  <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginBottom:10 }}>Le client signera ensuite de son côté, sur son propre appareil.</div>
+                  <canvas
+                    ref={remoteSigCanvasRef}
+                    width={420} height={120}
+                    onMouseDown={startRemoteSigDraw} onMouseMove={drawRemoteSig} onMouseUp={endRemoteSigDraw} onMouseLeave={endRemoteSigDraw}
+                    onTouchStart={startRemoteSigDraw} onTouchMove={drawRemoteSig} onTouchEnd={endRemoteSigDraw}
+                    style={{ width:"100%", height:110, border:"2px dashed #22C55E", borderRadius:8, background:"#FFFDF9", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
+                  />
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={clearRemoteSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"transparent", border:"1.5px solid #2A4167", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#8BA3C0" }}>Effacer</button>
+                    <button
+                      onClick={handleRemoteSign}
+                      disabled={!remoteSigHasStrokes || remoteSignLoading}
+                      style={{
+                        flex:1, padding:"10px",
+                        background: (remoteSigHasStrokes && !remoteSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#2A4167",
+                        color: (remoteSigHasStrokes && !remoteSignLoading) ? C.white : "#8BA3C0",
+                        border:"none", borderRadius:8, cursor: (remoteSigHasStrokes && !remoteSignLoading) ? "pointer" : "not-allowed",
+                        fontFamily:T.body, fontSize:13, fontWeight:700,
+                      }}
+                    >{remoteSignLoading ? "Création du lien…" : "✅ Valider ma signature et créer le lien"}</button>
+                  </div>
+                </div>
+              )}
+
+              {remoteSignLink && (
                 <div style={{ width:"100%", background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
                   <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:8 }}>✓ Lien de signature prêt !</div>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:12 }}>
@@ -11931,7 +11984,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 <div>
                   <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#15803D" }}>Votre signature a bien été enregistrée !</div>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginTop:1 }}>
-                    Un lien unique a été envoyé à <strong>{clientName}</strong>. Voici son écran :
+                    Passe maintenant l'appareil à <strong>{clientName}</strong> pour qu'il/elle signe ci-dessous :
                   </div>
                 </div>
               </div>
@@ -11949,7 +12002,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   background:"#3B82F6", color:C.white,
                   fontFamily:T.body, fontSize:9, fontWeight:700, letterSpacing:"0.1em",
                   padding:"3px 10px", borderRadius:20,
-                }}>APERÇU CLIENT</div>
+                }}>SIGNATURE DU CLIENT</div>
 
                 <div style={{
                   fontFamily:T.body, fontSize:12, color:"#1D4ED8", fontWeight:600, marginBottom:12,
@@ -12086,7 +12139,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   >
                     {isSimulating ? (
                       <><span style={{ width:12, height:12, border:"2px solid #93C5FD", borderTopColor:"transparent", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }}/> Validation…</>
-                    ) : "🖊 Simuler la signature du client"}
+                    ) : "✅ Valider la signature du client"}
                   </button>
                 </div>
               </div>
