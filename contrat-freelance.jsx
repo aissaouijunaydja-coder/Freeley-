@@ -206,6 +206,9 @@ const getHistory = async () => {
       contract: content.contract || contenu.contract || "",
       signatureStatus: row.status || row.statut || "none",
       signatureRequestId: null,
+      clientSignature: content.clientSignature || contenu.clientSignature || null,
+      freelanceSignature: content.freelanceSignature || contenu.freelanceSignature || null,
+      signedByClientAt: content.signedByClientAt || contenu.signedByClientAt || null,
       form: content.form || contenu.form || {},
     };
   });
@@ -1904,7 +1907,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     setSignLoading(false);
   };
 
-  const downloadPDF = (overrideForm, overrideContract) => {
+  const downloadPDF = (overrideForm, overrideContract, overrideFreelanceSig, overrideClientSig, overrideSignedAt) => {
     const rawForm = overrideForm || form;
     const pForm = {
       freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
@@ -1915,6 +1918,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       ...rawForm,
     };
     const pContract = overrideContract || contract;
+    const pFreelanceSig = overrideFreelanceSig || null;
+    const pClientSig = overrideClientSig || null;
+    const pSignedAt = overrideSignedAt || null;
     if (!jsPDFReady || !window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!overrideForm) setPdfLoad(true);
     try {
@@ -2298,14 +2304,20 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       const actLinesS = doc.splitTextToSize(pForm.freelanceActivity, bw - 8);
       actLinesS.forEach((l,i) => doc.text(l, ML + 4, y + 23 + i*5));
       if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.text(`SIRET : ${pForm.freelanceSiret}`, ML + 4, y + 30); }
-      // Ligne signature
-      doc.setDrawColor(...NAVY); doc.setLineWidth(0.6);
-      doc.line(ML + 4, y + 50, ML + bw - 4, y + 50);
-      doc.setFont("helvetica","normal"); doc.setFontSize(7);
-      doc.setTextColor(...NAVYL);
-      doc.text("Lu et approuvé — Signature et date :", ML + 4, y + 38);
-      doc.setTextColor(...GREY); doc.setFontSize(6.5);
-      doc.text("(Prénom, Nom, Date, Lieu)", ML + 4, y + 55.5);
+      // Signature réelle si disponible, sinon ligne à remplir à la main
+      if (pFreelanceSig) {
+        try { doc.addImage(pFreelanceSig, "PNG", ML + 4, y + 33, bw - 8, 16); } catch(e) {}
+        doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
+        doc.text("✓ Signé électroniquement", ML + 4, y + 55.5);
+      } else {
+        doc.setDrawColor(...NAVY); doc.setLineWidth(0.6);
+        doc.line(ML + 4, y + 50, ML + bw - 4, y + 50);
+        doc.setFont("helvetica","normal"); doc.setFontSize(7);
+        doc.setTextColor(...NAVYL);
+        doc.text("Lu et approuvé — Signature et date :", ML + 4, y + 38);
+        doc.setTextColor(...GREY); doc.setFontSize(6.5);
+        doc.text("(Prénom, Nom, Date, Lieu)", ML + 4, y + 55.5);
+      }
 
       // ── Bloc Client ──
       const cx3 = ML + bw + 10;
@@ -2315,6 +2327,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.setFillColor(...DARK); doc.rect(cx3, y, bw, 9, "F");
       doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
       doc.text("LE CLIENT", cx3 + 4, y + 6.5);
+      if (pClientSig) {
+        doc.setFillColor(...GREEN); doc.circle(cx3 + bw - 10, y + 4.5, 5.5, "F");
+        doc.setDrawColor(255,255,255); doc.setLineWidth(0.8); doc.circle(cx3 + bw - 10, y + 4.5, 5.5);
+        doc.setFont("helvetica","bold"); doc.setFontSize(6); doc.setTextColor(...WHITE);
+        doc.text("✓", cx3 + bw - 10, y + 5.8, { align:"center" });
+      }
       // Infos client
       doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...DARK);
       doc.text(pForm.clientName, cx3 + 4, y + 17);
@@ -2325,14 +2343,21 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
       const addrSig = doc.splitTextToSize(pForm.clientAddress, bw - 8);
       addrSig.forEach((l,i) => doc.text(l, cx3 + 4, y + (pForm.clientCompany ? 30 : 24) + i*4.5));
-      // Ligne signature
-      doc.setDrawColor(...DARK); doc.setLineWidth(0.6);
-      doc.line(cx3 + 4, y + 50, cx3 + bw - 4, y + 50);
-      doc.setFont("helvetica","normal"); doc.setFontSize(7);
-      doc.setTextColor(...DARK);
-      doc.text("Lu et approuvé — Bon pour accord :", cx3 + 4, y + 38);
-      doc.setTextColor(...GREY); doc.setFontSize(6.5);
-      doc.text("(Prénom, Nom, Date, Lieu, Qualité)", cx3 + 4, y + 55.5);
+      // Signature réelle si disponible, sinon ligne à remplir à la main
+      if (pClientSig) {
+        try { doc.addImage(pClientSig, "PNG", cx3 + 4, y + 33, bw - 8, 16); } catch(e) {}
+        doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
+        const signedLabel = pSignedAt ? new Date(pSignedAt).toLocaleDateString("fr-FR") : today;
+        doc.text(`✓ Signé électroniquement le ${signedLabel}`, cx3 + 4, y + 55.5);
+      } else {
+        doc.setDrawColor(...DARK); doc.setLineWidth(0.6);
+        doc.line(cx3 + 4, y + 50, cx3 + bw - 4, y + 50);
+        doc.setFont("helvetica","normal"); doc.setFontSize(7);
+        doc.setTextColor(...DARK);
+        doc.text("Lu et approuvé — Bon pour accord :", cx3 + 4, y + 38);
+        doc.setTextColor(...GREY); doc.setFontSize(6.5);
+        doc.text("(Prénom, Nom, Date, Lieu, Qualité)", cx3 + 4, y + 55.5);
+      }
 
       y += 68;
 
@@ -2771,7 +2796,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         historyView={historyView}
         setHistoryView={setHistoryView}
         onBack={() => goToScreen("app")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract)}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt)}
         onDelete={async (id) => { await deleteFromHistory(id); const hist = await getHistory(); setHistory(hist); if (historyView?.id === id) setHistoryView(null); }}
         onDuplicate={async (entry) => {
           const dupForm = { ...(entry.form || {}), missionTitle: (entry.missionTitle || entry.form?.missionTitle || "") + " (copie)" };
@@ -3714,7 +3739,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 )}
               </div>
 
-              <button onClick={downloadPDF} disabled={pdfLoading || !jsPDFReady} style={{
+              <button onClick={() => downloadPDF()} disabled={pdfLoading || !jsPDFReady} style={{
                 padding:"10px 16px", background: (pdfLoading||!jsPDFReady) ? "#2A4167" : C.gold,
                 color: (pdfLoading||!jsPDFReady) ? "#5A7A9A" : C.navyD,
                 border:"none", borderRadius:7, cursor:(pdfLoading||!jsPDFReady)?"not-allowed":"pointer",
