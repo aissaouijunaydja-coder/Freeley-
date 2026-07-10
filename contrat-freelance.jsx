@@ -2468,7 +2468,16 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 
   const startFreshContract = () => {
     try { localStorage.removeItem("freeley_current_draft"); } catch(e) {}
-    setStep(0); setContract(""); setForm({ ...initialForm, price: profile.tjm || "" }); setErrors({}); setApiError("");
+    const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ");
+    setStep(0); setContract("");
+    setForm({
+      ...initialForm,
+      freelanceName: fullName || "",
+      freelanceActivity: profile.jobTitle || "",
+      freelanceSiret: profile.siret || "",
+      price: profile.tjm || "",
+    });
+    setErrors({}); setApiError("");
   };
 
   const handleSaveDraft = () => {
@@ -2478,7 +2487,14 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   };
 
   const handleResumeDraft = (draft) => {
-    setForm({ ...initialForm, ...draft.form });
+    const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ");
+    setForm({
+      ...initialForm,
+      ...draft.form,
+      freelanceName: fullName || draft.form?.freelanceName || "",
+      freelanceActivity: profile.jobTitle || draft.form?.freelanceActivity || "",
+      freelanceSiret: profile.siret || draft.form?.freelanceSiret || "",
+    });
     setStep(draft.step || 0);
     goToScreen("app");
   };
