@@ -2926,6 +2926,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           profile={profile}
           setProfile={setProfile}
           depositPct={invoiceDepositPct}
+          contractId={history[0]?.id}
           onClose={() => setShowTactileSign(false)}
           onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
           onGoToProfileTva={goToProfileFacturation}
@@ -11634,7 +11635,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp }) {
+function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -11716,10 +11717,24 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const handleSimulateClient = () => {
     if (!clientHasStrokes) return;
     setIsSimulating(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       setClientSigned(true);
       setIsSimulating(false);
       setStep(2);
+      // Sauvegarde réelle des deux signatures dessinées, sinon elles disparaissent à la fermeture
+      if (contractId) {
+        try {
+          const freelanceSig = freelanceCanvasRef.current?.toDataURL("image/png") || null;
+          const clientSig = clientCanvasRef.current?.toDataURL("image/png") || null;
+          const { data: existing, error: e1 } = await supabase.from("contracts").select("content").eq("id", contractId).single();
+          if (e1) throw e1;
+          const newContent = { ...parseContent(existing.content), freelanceSignature: freelanceSig, clientSignature: clientSig, signedByClientAt: new Date().toISOString() };
+          const { error: e2 } = await supabase.from("contracts").update({ content: newContent, status: "signed" }).eq("id", contractId);
+          if (e2) throw e2;
+        } catch (e) {
+          console.error("Erreur sauvegarde signatures tactiles:", e);
+        }
+      }
     }, 1400);
   };
 
