@@ -1674,7 +1674,7 @@ ARTICLE 12 — DISPOSITIONS GÉNÉRALES
 Intégralité de l'accord, divisibilité des clauses, absence de renonciation, hiérarchie des documents contractuels.
 
 ARTICLE 13 — SIGNATURES
-Bloc de signature avec : "Lu et approuvé — Bon pour accord", Nom, Qualité, Date, Lieu, Signature — pour chacune des deux parties. Espace de signature physique (ligne de tirets). Mention : "Parapher chaque page." Termine impérativement par la mention : "Contrat établi et signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie."
+Bloc de signature avec : "Lu et approuvé — Bon pour accord", Nom, Qualité — pour chacune des deux parties. NE PAS inclure de lignes "Date :" ni "Lieu :" ni de ligne de signature à remplir à la main (la signature électronique réelle, datée, s'affiche séparément juste après cet article — ne pas la dupliquer ici). Termine impérativement par la mention : "Contrat établi et signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie."
 
 ══════════════════════════════════════════════
 CONSIGNES DE RÉDACTION
@@ -2110,14 +2110,16 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       cy += 3;
 
       const acomptePctPdf = Number(pForm.acomptePourcentage) || 0;
+      // jsPDF (police standard) n'affiche pas correctement l'espace fine utilisée par défaut par toLocaleString("fr-FR") — on la remplace par un espace normal
+      const frMoney = (n) => Number(n).toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g, " ");
       const tableRows = [
         ["Mission",          pForm.missionTitle],
         ["Période",          `Du ${d1} au ${d2}`],
-        ["Honoraires HT",    `${Number(pForm.price).toLocaleString("fr-FR")} €`],
+        ["Honoraires HT",    `${frMoney(pForm.price)} €`],
       ];
       if (acomptePctPdf > 0) {
-        tableRows.push([`Acompte (${acomptePctPdf} %)`, `${Math.round(Number(pForm.price)*acomptePctPdf/100).toLocaleString("fr-FR")} € — dû à la signature`]);
-        tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${Math.round(Number(pForm.price)*(100-acomptePctPdf)/100).toLocaleString("fr-FR")} € — dû à la livraison`]);
+        tableRows.push([`Acompte (${acomptePctPdf} %)`, `${frMoney(Math.round(Number(pForm.price)*acomptePctPdf/100))} € — dû à la signature`]);
+        tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${frMoney(Math.round(Number(pForm.price)*(100-acomptePctPdf)/100))} € — dû à la livraison`]);
       }
       tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant" ? "Comptant à la commande" : `${pForm.paymentTerms} jours nets`]);
       tableRows.push(["Révisions incluses", `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
@@ -2160,7 +2162,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.setFillColor(...NAVY); doc.rect(ML, cy, cw, 10, "F");
       doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...WHITE);
       doc.text("TOTAL HT", ML + 4, cy + 7);
-      doc.text(`${Number(pForm.price).toLocaleString("fr-FR")} €`, PW - MR, cy + 7, { align:"right" });
+      doc.text(`${frMoney(pForm.price)} €`, PW - MR, cy + 7, { align:"right" });
       cy += 14;
 
       // Note de bas de page de garde
@@ -9983,7 +9985,7 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
   const hasClient  = !!form.clientName?.trim();
   const hasPrice   = priceHT > 0;
 
-  const fmt = (n) => n.toLocaleString("fr-FR", { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const fmt = (n) => n.toLocaleString("fr-FR", { minimumFractionDigits:2, maximumFractionDigits:2 }).replace(/[\u202F\u00A0]/g, " ");
 
   // ── Textes de relance ──
   const clientFullName     = form.clientName?.trim()       || "client";
