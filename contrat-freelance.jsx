@@ -9130,6 +9130,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
 
   const total = history.length;
   let caTotal = 0, caPaid = 0, caPending = 0, nbPaid = 0, nbPending = 0, nbLate = 0;
+  let caFromAvenants = 0, caFromAvenantsPaid = 0;
   const now = new Date();
 
   history.forEach(c => {
@@ -9139,6 +9140,8 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
     const avenantsSignedTotal = avenants.filter(a => a.status === "signed" && a.ajustementMontant > 0).reduce((s,a) => s + a.ajustementMontant, 0);
     const avenantsPaidTotal = avenants.filter(a => a.status === "signed" && a.ajustementMontant > 0 && a.paymentReceived).reduce((s,a) => s + a.ajustementMontant, 0);
     const avenantsUnpaidTotal = avenantsSignedTotal - avenantsPaidTotal;
+    caFromAvenants += avenantsSignedTotal;
+    caFromAvenantsPaid += avenantsPaidTotal;
 
     caTotal += price + avenantsSignedTotal;
     const st = payStatus[c.id] || "pending";
@@ -9224,6 +9227,17 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
     return !isNaN(end) && end >= now;
   }).sort((a, b) => new Date(a.endDate) - new Date(b.endDate)).slice(0, 5);
 
+  // ── Avenants à suivre (en attente de signature, ou signés mais pas encore payés) ──
+  const avenantsASuivre = [];
+  history.forEach(c => {
+    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
+    avenants.forEach(a => {
+      if (a.status === "pending_signature" || (a.status === "signed" && a.ajustementMontant > 0 && !a.paymentReceived)) {
+        avenantsASuivre.push({ contract: c, avenant: a });
+      }
+    });
+  });
+
   // ── Activité récente (5 derniers) ──
   const recent = [...history].slice(0, 5);
 
@@ -9255,8 +9269,8 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
         <>
           {/* ── Stats principales ── */}
           <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
-            {stat("Chiffre d'affaires total", `${fmt(caTotal)} €`, `${total} contrat${total>1?"s":""}`, C.navy)}
-            {stat("Encaissé", `${fmt(caPaid)} €`, `${nbPaid} payé${nbPaid>1?"s":""}`, "#059669")}
+            {stat("Chiffre d'affaires total", `${fmt(caTotal)} €`, `${total} contrat${total>1?"s":""}${caFromAvenants > 0 ? ` · dont ${fmt(caFromAvenants)} € d'avenants` : ""}`, C.navy)}
+            {stat("Encaissé", `${fmt(caPaid)} €`, `${nbPaid} contrat${nbPaid>1?"s":""} payé${nbPaid>1?"s":""}${caFromAvenantsPaid > 0 ? ` · dont ${fmt(caFromAvenantsPaid)} € d'avenants` : ""}`, "#059669")}
             {stat("En attente", `${fmt(caPending)} €`, `${nbPending + nbLate} à encaisser`, "#D97706")}
           </div>
           <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
@@ -9333,6 +9347,26 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
               )}
             </div>
           </div>
+
+          {/* ── Avenants à suivre ── */}
+          {avenantsASuivre.length > 0 && (
+            <div style={{ ...cardStyle, marginBottom:16 }}>
+              <div style={cardTitle}>📎 Avenants à suivre</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                {avenantsASuivre.map(({ contract: c, avenant: a }, i) => (
+                  <div key={i} onClick={() => onOpenContract && onOpenContract(c)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor: onOpenContract ? "pointer" : "default", padding:"6px 0", borderBottom: i < avenantsASuivre.length-1 ? `1px solid ${C.borderL}` : "none" }}>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>Avenant n°{a.num} — {c.missionTitle || "Sans titre"}</div>
+                      <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName}{a.ajustementMontant > 0 ? ` · ${fmt(a.ajustementMontant)} €` : ""}</div>
+                    </div>
+                    <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color: a.status === "pending_signature" ? "#B45309" : "#D97706", background: a.status === "pending_signature" ? "#FEF3C7" : "#FFFBEB", borderRadius:20, padding:"3px 9px", flexShrink:0, marginLeft:8 }}>
+                      {a.status === "pending_signature" ? "⏳ À signer" : "💰 À encaisser"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* ── Activité récente ── */}
           <div style={{ ...cardStyle, marginBottom:28 }}>
