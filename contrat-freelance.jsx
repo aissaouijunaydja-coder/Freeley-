@@ -2783,6 +2783,16 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         onPaymentStatusChanged={() => setAlertsTick(t => t + 1)}
         profile={profile}
         authUser={authUser}
+        onRefreshHistory={async () => {
+          const hist = await getHistory();
+          setHistory(hist);
+          // Garde la fiche déjà ouverte synchronisée avec les données fraîches (signature, avenant, etc.)
+          setHistoryView(current => {
+            if (!current) return current;
+            const fresh = hist.find(h => String(h.id) === String(current.id));
+            return fresh || current;
+          });
+        }}
       />
       {ratingModal && (
         <ClientRatingModal
@@ -8509,7 +8519,11 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
   // Utilise le vrai pourcentage d'acompte choisi sur ce contrat — jamais un taux fixe supposé
   const acomptePct = entry?.form?.acomptePourcentage != null && entry.form.acomptePourcentage !== ""
     ? Number(entry.form.acomptePourcentage) : null;
-  const depositAmt = acomptePct ? Math.round(rawPrice * (acomptePct / 100)) || 0 : 0;
+  // "Comptant" (0% d'acompte) veut dire 100% dû à la signature — ce n'est PAS "rien à payer"
+  const isComptant = acomptePct === 0 && rawPrice > 0;
+  const depositAmt = isComptant ? rawPrice : (acomptePct ? Math.round(rawPrice * (acomptePct / 100)) || 0 : 0);
+  const paymentWord = isComptant ? "paiement" : "acompte";
+  const paymentWordCap = isComptant ? "Paiement" : "Acompte";
   const progress = paid ? Math.min(acomptePct || 30, 100) : 0;
 
   const [linkCopied, setLinkCopied] = useState(false);
@@ -8526,7 +8540,7 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         amount: depositAmt,
-        description: `Acompte — ${entry?.missionTitle || "Prestation Freeley"}`,
+        description: `${paymentWordCap} — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
       }),
     });
@@ -8559,11 +8573,11 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
     let link = stripeLinkUrl;
     try { link = await ensurePaymentLink(); } catch(e) { /* on envoie quand même la relance, sans lien si Stripe échoue */ }
     setRelanceSending(false);
-    const subject = `Rappel — Acompte en attente pour "${entry?.missionTitle || "votre mission"}"`;
+    const subject = `Rappel — ${paymentWordCap} en attente pour "${entry?.missionTitle || "votre mission"}"`;
     const lines = [
       `Bonjour${entry?.clientName ? " " + entry.clientName : ""},`,
       ``,
-      `Petit rappel concernant l'acompte de ${depositAmt.toLocaleString("fr-FR")} € pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
+      `Petit rappel concernant le ${paymentWord} de ${depositAmt.toLocaleString("fr-FR")} € pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
     ];
     if (link) lines.push(``, `Vous pouvez régler directement via ce lien sécurisé : ${link}`);
     lines.push(``, `Merci et à bientôt,`);
@@ -8575,9 +8589,7 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
   if (depositAmt <= 0) {
     return (
       <div className="fade-up" style={{ marginBottom:24, background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:C.textL, textAlign:"center" }}>
-        {rawPrice > 0 && acomptePct === 0
-          ? "🛡️ Ce contrat ne prévoit pas d'acompte — paiement intégral prévu à la livraison ou à la signature."
-          : "🛡️ Renseigne un montant sur ce contrat pour activer le suivi automatique de l'acompte."}
+        🛡️ Renseigne un montant sur ce contrat pour activer le suivi automatique du paiement.
       </div>
     );
   }
@@ -8630,8 +8642,8 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
                 transition: "color 0.4s",
               }}>
                 {paid
-                  ? "Acompte sécurisé sur Stripe ! Vous pouvez démarrer la production l'esprit tranquille."
-                  : `Mission suspendue : En attente du paiement de l'acompte (${depositAmt.toLocaleString("fr-FR")} €)`
+                  ? `${paymentWordCap} sécurisé sur Stripe ! Vous pouvez démarrer la production l'esprit tranquille.`
+                  : `Mission suspendue : En attente du ${paymentWord} (${depositAmt.toLocaleString("fr-FR")} €)`
                 }
               </div>
               <div style={{
@@ -8641,7 +8653,7 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
                 transition: "color 0.4s",
               }}>
                 {paid
-                  ? "L'acompte a été reçu et confirmé. Le contrat est actif — la mission peut démarrer immédiatement."
+                  ? `Le ${paymentWord} a été reçu et confirmé. Le contrat est actif — la mission peut démarrer immédiatement.`
                   : "Ne commencez pas la production. Le contrat stipule que le projet ne démarre qu'à réception des fonds."
                 }
               </div>
@@ -8680,7 +8692,7 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
                 }} />
               </div>
               <div style={{ fontFamily:T.body, fontSize:10, color:"#166534", marginTop:5, opacity:0.8 }}>
-                Acompte reçu · Production démarrée
+                {paymentWordCap} reçu · Production démarrée
               </div>
             </div>
           )}
@@ -8791,7 +8803,7 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
             onMouseOut={e=>{ e.currentTarget.style.background="#F8F7F5"; e.currentTarget.style.borderColor=C.borderL; e.currentTarget.style.color=C.textL; }}
           >
             <span style={{ fontSize:12 }}>✓</span>
-            Marquer l'acompte comme reçu
+            Marquer le {paymentWord} comme reçu
           </button>
         </div>
       )}
@@ -9205,10 +9217,17 @@ function CGUPage({ onBack }) {
   );
 }
 
-function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser }) {
+function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
+
+  // Recharge les données fraîches à chaque ouverture de "Mes contrats" — une signature ou un avenant
+  // fait ailleurs (tactile, à distance) ne met pas forcément à jour l'état déjà en mémoire.
+  useEffect(() => {
+    if (onRefreshHistory) onRefreshHistory();
+  }, []);
+
   const [paymentStatuses, setPaymentStatuses] = useState(() => {
     try { return JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) { return {}; }
   });
