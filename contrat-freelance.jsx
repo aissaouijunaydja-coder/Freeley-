@@ -4088,6 +4088,7 @@ function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCre
   const freelanceSigDrawing = useRef(false);
   const [freelanceSigHasStrokes, setFreelanceSigHasStrokes] = useState(false);
   const [freelanceSigDataUrl, setFreelanceSigDataUrl] = useState(null);
+  const [clientSigDataUrl, setClientSigDataUrl] = useState(null);
   const clientSigCanvasRef = useRef(null);
   const clientSigDrawing = useRef(false);
   const [clientSigHasStrokes, setClientSigHasStrokes] = useState(false);
@@ -4113,6 +4114,8 @@ function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCre
       const manualAjustementLabel = ajustementMontant.trim()
         ? `${Number(ajustementMontant) > 0 ? "+ " : ""}${ajustementMontant} € HT`
         : "Aucun ajustement financier";
+      // Date réelle calculée par l'app — jamais laissée à l'IA, qui pourrait en halluciner une fausse
+      const todayFull = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
 
       const prompt = mode === "magic" ? `Tu es un juriste français expert en contrats de prestation de services freelance.
 
@@ -4127,29 +4130,31 @@ Contexte du contrat :
 - Prestataire : ${form?.freelanceName || "Le prestataire"}
 - Client : ${form?.clientName || "Le client"}${form?.clientCompany ? " (" + form.clientCompany + ")" : ""}
 - Budget initial : ${basePrice ? `${basePrice} € HT` : "non renseigné sur ce contrat — ne jamais inventer de montant total"}
+- Date à utiliser EXACTEMENT telle quelle, ne jamais la recalculer ni en inventer une autre : ${todayFull}
 
 Ta tâche : Analyse le message et réponds UNIQUEMENT en JSON valide (sans backticks, sans markdown), avec ce format exact :
 {
   "ajustementBudget": null ou nombre (montant de l'ajustement SEULEMENT si le client mentionne un changement de prix, positif ou négatif, ex: 400 ou -100 ; null si aucun changement financier n'est mentionné),
-  "avenantTexte": "Rédige ici le texte complet de l'avenant. Commence DIRECTEMENT par : AVENANT N°${avenantNum}${contractNum ? ` AU CONTRAT ${contractNum}` : ""}. Indique la date du jour. Rappelle les parties et le contrat de référence en une phrase. Rédige ARTICLE 1 — OBJET DE L'AVENANT décrivant la modification (3-5 phrases juridiques). Si un ajustement financier est mentionné, rédige ARTICLE 2 — RÉVISION DES HONORAIRES avec le nouveau montant. Rédige ARTICLE 3 — ENTRÉE EN VIGUEUR : cet avenant prend effet à compter de sa signature par les deux parties. Rédige ARTICLE 4 — DISPOSITIONS GÉNÉRALES : les autres clauses du contrat principal restent inchangées. Termine par un bloc SIGNATURES standard (Prestataire + Client). Maximum 300 mots, style juridique français rigoureux, rédige INTÉGRALEMENT en français."
+  "avenantTexte": "Rédige ici le texte complet de l'avenant. Commence DIRECTEMENT par : AVENANT N°${avenantNum}${contractNum ? ` AU CONTRAT ${contractNum}` : ""}. Indique la date suivante EXACTEMENT telle quelle : ${todayFull}. Rappelle les parties et le contrat de référence en une phrase. Rédige ARTICLE 1 — OBJET DE L'AVENANT décrivant la modification (3-5 phrases juridiques). Si un ajustement financier est mentionné, rédige ARTICLE 2 — RÉVISION DES HONORAIRES avec le nouveau montant. Rédige ARTICLE 3 — ENTRÉE EN VIGUEUR : cet avenant prend effet à compter de sa signature par les deux parties. Rédige ARTICLE 4 — DISPOSITIONS GÉNÉRALES : les autres clauses du contrat principal restent inchangées. Termine par 'Lu et approuvé — Bon pour accord' suivi du nom et de la qualité de chaque partie (Prestataire + Client), SANS lignes Date/Lieu/Signature à remplir à la main — la signature électronique réelle s'affiche séparément après ce texte. Maximum 300 mots, style juridique français rigoureux, rédige INTÉGRALEMENT en français."
 }` : `Tu es un juriste français expert en droit des contrats de prestation de services. Rédige un AVENANT au contrat ci-dessous, court, précis et juridiquement valide.
 
 CONTRAT DE RÉFÉRENCE : ${contractNum || "non communiqué — ne pas en inventer un dans le texte"}
 PARTIES : Prestataire ${form.freelanceName || "Prestataire"} / Client ${form.clientName || "Client"}${form.clientCompany ? " (" + form.clientCompany + ")" : ""}
 MISSION : ${form.missionTitle || "Prestation de services"}
+DATE À UTILISER EXACTEMENT TELLE QUELLE, ne jamais la recalculer ni en inventer une autre : ${todayFull}
 
 OBJET DE L'AVENANT : ${objet}
 AJUSTEMENT FINANCIER : ${manualAjustementLabel}
 
 CONSIGNES :
 - Commence DIRECTEMENT par l'en-tête de l'avenant : "AVENANT N°${avenantNum}${contractNum ? ` AU CONTRAT ${contractNum}` : ""}"
-- Indique la date du jour
+- Indique la date ci-dessus EXACTEMENT telle quelle
 - Rappelle les parties et le contrat de référence en une phrase
 - Rédige une clause "ARTICLE 1 — OBJET DE L'AVENANT" décrivant la modification (3-5 phrases juridiques)
 - Si ajustement financier : rédige "ARTICLE 2 — RÉVISION DES HONORAIRES" avec le nouveau montant ou la modification
 - Rédige "ARTICLE 3 — ENTRÉE EN VIGUEUR" : cet avenant prend effet à compter de sa signature par les deux parties
 - Rédige "ARTICLE 4 — DISPOSITIONS GÉNÉRALES" : les autres clauses du contrat principal restent inchangées
-- Termine par un bloc SIGNATURES standard (Prestataire + Client)
+- Termine par "Lu et approuvé — Bon pour accord" suivi du nom et de la qualité de chaque partie (Prestataire + Client). NE PAS inclure de lignes "Date :", "Lieu :" ni de ligne de signature à remplir à la main — la signature électronique réelle s'affiche séparément juste après ce texte
 - Maximum 300 mots, style juridique français rigoureux
 - Ne laisse aucun champ vide`;
 
@@ -4297,6 +4302,7 @@ CONSIGNES :
     });
     setAvenantSignLoading(false);
     if (!ok) { setSaveError(true); return; }
+    setClientSigDataUrl(clientSig);
     setAvenantSigned(true);
     setPhase("signed");
   };
@@ -4329,7 +4335,7 @@ CONSIGNES :
   };
 
   const handleDownloadAvenantPDF = () => {
-    downloadAvenantPDF(avenantText, avenantNum, contractNum, form.freelanceName, form.clientName, freelanceSigDataUrl, null);
+    downloadAvenantPDF(avenantText, avenantNum, contractNum, form.freelanceName, form.clientName, freelanceSigDataUrl, clientSigDataUrl);
   };
 
   // Montant de l'ajustement, peu importe le mode utilisé pour générer l'avenant
