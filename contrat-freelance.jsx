@@ -51,6 +51,31 @@ const saveClientRating = (email, clientName, clientCompany, stars, badges) => {
   _clientRatings[key].ratings.push({ stars, badges, date: new Date().toISOString() });
   _clientRatings[key].clientName = clientName;
   _clientRatings[key].clientCompany = clientCompany;
+  // Sauvegarde réelle — sinon la note disparaît au prochain rafraîchissement
+  if (_clientRatingsUserId) {
+    supabase.from("client_ratings").insert({
+      user_id: _clientRatingsUserId,
+      client_email: key,
+      client_name: clientName,
+      client_company: clientCompany,
+      stars,
+      badges,
+    }).then(({ error }) => { if (error) console.error("Erreur sauvegarde note client:", error); });
+  }
+};
+
+// Recharge les notes clients déjà sauvegardées depuis Supabase (appelé à la connexion)
+let _clientRatingsUserId = null;
+const hydrateClientRatings = async (userId) => {
+  _clientRatingsUserId = userId;
+  if (!userId) return;
+  const { data, error } = await supabase.from("client_ratings").select("*").eq("user_id", userId);
+  if (error) { console.error("Erreur chargement notes clients:", error); return; }
+  (data || []).forEach(row => {
+    const key = row.client_email;
+    if (!_clientRatings[key]) _clientRatings[key] = { clientName: row.client_name, clientCompany: row.client_company, ratings: [] };
+    _clientRatings[key].ratings.push({ stars: row.stars, badges: row.badges || [], date: row.created_at });
+  });
 };
 
 
@@ -1175,11 +1200,20 @@ function AppInner() {
   const DEFAULT_RELANCE_MSG = "Bonjour, je vous informe que notre contrat pour la mission est prêt et en attente de votre validation sur Freeley. À très vite !";
   const [relanceModal, setRelanceModal] = useState(false);
   const [relanceMsg, setRelanceMsg] = useState(DEFAULT_RELANCE_MSG);
-  const openRelanceModal = () => {
+  const [relanceTarget, setRelanceTarget] = useState(null);
+  const openRelanceModal = (entry) => {
     setRelanceMsg(DEFAULT_RELANCE_MSG);
+    setRelanceTarget(entry || null);
     setRelanceModal(true);
   };
   const sendRelance = () => {
+    const email = relanceTarget?.form?.clientEmail;
+    if (!email) {
+      alert("Aucun email client renseigné sur ce contrat — impossible d'envoyer la relance.");
+      return;
+    }
+    const subject = `Rappel — ${relanceTarget?.missionTitle || "votre contrat"} en attente`;
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(relanceMsg)}`;
     setRelanceModal(false);
     setRelanceToast(true);
     setTimeout(() => setRelanceToast(false), 4000);
@@ -1355,6 +1389,7 @@ function AppInner() {
       if (error) console.error("Erreur chargement NDA (alertes):", error);
       else setMyNdas(data || []);
     }
+    if (user?.id) await hydrateClientRatings(user.id);
   };
 
   // Sync profil → form (step 0) quand le profil change
@@ -1685,7 +1720,8 @@ CONSIGNES DE RÉDACTION
 - Cite systématiquement les fondements légaux (articles de loi) entre parenthèses.
 - Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
 - Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.
-- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € HT"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.`;
+- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € HT"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
+- Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").`;
 
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -3840,6 +3876,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               form={form}
               contract={contract}
               avenantCount={avenantCount}
+              contractId={history[0]?.id}
               onClose={() => setShowAvenantModal(false)}
               onCreated={() => setAvenantCount(n => n + 1)}
             />
@@ -3877,7 +3914,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 }
 
 /* ══════════════════════════════════════════ AVENANT MODAL ══ */
-function AvenantModal({ form, contract, avenantCount, onClose, onCreated }) {
+function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated }) {
   const [objet, setObjet]             = useState("");
   const [ajustement, setAjustement]   = useState("");
   const [phase, setPhase]             = useState("form"); // "form" | "loading" | "result" | "signed"
@@ -3886,10 +3923,11 @@ function AvenantModal({ form, contract, avenantCount, onClose, onCreated }) {
   const [copied, setCopied]           = useState(false);
   const [avenantSigned, setAvenantSigned] = useState(false);
   const [signLoading, setSignLoading] = useState(false);
+  const [saveError, setSaveError]     = useState(false);
 
-  // Extract contract number from the contract text
+  // Extrait le numéro de contrat si présent dans le texte — ne jamais en inventer un
   const contractNumMatch = contract && contract.match(/CP-\d{4}-\d{3,5}/);
-  const contractNum = contractNumMatch ? contractNumMatch[0] : "CP-" + new Date().getFullYear() + "-XXXX";
+  const contractNum = contractNumMatch ? contractNumMatch[0] : null;
   const avenantNum = avenantCount + 1;
 
   const canGenerate = objet.trim().length >= 10;
@@ -3901,7 +3939,7 @@ function AvenantModal({ form, contract, avenantCount, onClose, onCreated }) {
     try {
       const prompt = `Tu es un juriste français expert en droit des contrats de prestation de services. Rédige un AVENANT au contrat ci-dessous, court, précis et juridiquement valide.
 
-CONTRAT DE RÉFÉRENCE : ${contractNum}
+CONTRAT DE RÉFÉRENCE : ${contractNum || "non communiqué — ne pas en inventer un dans le texte"}
 PARTIES : Prestataire ${form.freelanceName || "Prestataire"} / Client ${form.clientName || "Client"}${form.clientCompany ? " (" + form.clientCompany + ")" : ""}
 MISSION : ${form.missionTitle || "Prestation de services"}
 
@@ -3909,7 +3947,7 @@ OBJET DE L'AVENANT : ${objet}
 AJUSTEMENT FINANCIER : ${ajustement || "Aucun ajustement financier"}
 
 CONSIGNES :
-- Commence DIRECTEMENT par l'en-tête de l'avenant : "AVENANT N°${avenantNum} AU CONTRAT ${contractNum}"
+- Commence DIRECTEMENT par l'en-tête de l'avenant : "AVENANT N°${avenantNum}${contractNum ? ` AU CONTRAT ${contractNum}` : ""}"
 - Indique la date du jour
 - Rappelle les parties et le contrat de référence en une phrase
 - Rédige une clause "ARTICLE 1 — OBJET DE L'AVENANT" décrivant la modification (3-5 phrases juridiques)
@@ -3937,6 +3975,26 @@ CONSIGNES :
       setAvenantText(text);
       onCreated && onCreated();
       setPhase("result");
+      // Sauvegarde réelle de l'avenant sur le contrat — sinon il disparaît à la fermeture
+      if (contractId) {
+        try {
+          const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+          if (e1) throw e1;
+          const currentContent = parseContent(existing.content);
+          const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
+          avenants.push({ num: avenantNum, objet, ajustement, text, status: "draft", createdAt: new Date().toISOString() });
+          const newContent = { ...currentContent, avenants };
+          const { error: e2 } = await supabase.rpc("update_contract_content", {
+            p_contract_id: contractId,
+            p_new_content: JSON.stringify(newContent),
+            p_new_status: existing.status,
+          });
+          if (e2) throw e2;
+        } catch(e) {
+          console.error("Erreur sauvegarde avenant:", e);
+          setSaveError(true);
+        }
+      }
     } catch (err) {
       setError("Erreur lors de la génération. Vérifie ta connexion et réessaie.");
       setPhase("form");
@@ -3952,11 +4010,34 @@ CONSIGNES :
 
   const handleSign = () => {
     setSignLoading(true);
-    setTimeout(() => {
+    const email = form.clientEmail;
+    if (email) {
+      const subject = `Avenant n°${avenantNum}${contractNum ? ` au contrat ${contractNum}` : ""} — ${form.missionTitle || "mission"}`;
+      window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(avenantText)}`;
+    }
+    setTimeout(async () => {
       setSignLoading(false);
       setAvenantSigned(true);
       setPhase("signed");
-    }, 1600);
+      if (contractId) {
+        try {
+          const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+          if (e1) throw e1;
+          const currentContent = parseContent(existing.content);
+          const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
+          const idx = avenants.findIndex(a => a.num === avenantNum);
+          if (idx !== -1) avenants[idx] = { ...avenants[idx], status: "sent", sentAt: new Date().toISOString() };
+          const newContent = { ...currentContent, avenants };
+          await supabase.rpc("update_contract_content", {
+            p_contract_id: contractId,
+            p_new_content: JSON.stringify(newContent),
+            p_new_status: existing.status,
+          });
+        } catch(e) {
+          console.error("Erreur mise à jour statut avenant:", e);
+        }
+      }
+    }, 900);
   };
 
   return (
@@ -4218,8 +4299,13 @@ CONSIGNES :
                 </div>
               </div>
               <div style={{ fontFamily:T.body, fontSize:11, color:"#1D4ED8", lineHeight:1.6, marginBottom:12, background:"#DBEAFE", borderRadius:8, padding:"8px 12px" }}>
-                📋 Envoie cet avenant à <strong>{form.clientName || "ton client"}</strong> pour signature avant de commencer le travail supplémentaire. Sa signature vaut engagement contractuel.
+                📋 Envoie cet avenant par email à <strong>{form.clientName || "ton client"}</strong> pour qu'il/elle en prenne connaissance et confirme son accord avant de démarrer le travail supplémentaire.
               </div>
+              {saveError && (
+                <div style={{ fontFamily:T.body, fontSize:11, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 12px", marginBottom:12 }}>
+                  ⚠️ L'avenant n'a pas pu être sauvegardé sur ton contrat. Copie-le pour ne pas le perdre.
+                </div>
+              )}
               <button
                 onClick={handleSign}
                 disabled={signLoading}
@@ -4240,7 +4326,7 @@ CONSIGNES :
               >
                 {signLoading
                   ? <><span style={{ width:13, height:13, border:"2px solid #9CA3AF", borderTopColor:"transparent", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }}/> Envoi en cours…</>
-                  : <><span style={{ fontSize:16 }}>🖊</span> Envoyer pour signature au client</>
+                  : <><span style={{ fontSize:16 }}>✉️</span> Envoyer l'avenant par email au client</>
                 }
               </button>
             </div>
@@ -4265,11 +4351,11 @@ CONSIGNES :
               <div style={{ position:"absolute", top:-16, right:-16, width:80, height:80, borderRadius:"50%", background:"rgba(34,197,94,0.12)" }} />
               <div style={{ fontSize:44, marginBottom:12 }}>🔒</div>
               <div style={{ fontFamily:T.display, fontSize:20, color:"#4ADE80", fontWeight:700, marginBottom:6 }}>
-                Avenant n°{avenantNum} — Scellé !
+                Avenant n°{avenantNum} envoyé !
               </div>
               <div style={{ fontFamily:T.body, fontSize:12, color:"#86EFAC", lineHeight:1.65 }}>
-                Demande de signature envoyée à <strong style={{color:"#4ADE80"}}>{form.clientName || "votre client"}</strong>.<br/>
-                Tu peux maintenant démarrer les travaux supplémentaires en toute sécurité.
+                Email envoyé à <strong style={{color:"#4ADE80"}}>{form.clientName || "votre client"}</strong> avec l'avenant.<br/>
+                Sauvegardé sur ton contrat — retrouvable dans "Mes contrats".
               </div>
             </div>
 
@@ -9815,9 +9901,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                       onMouseOver={e=>{ e.stopPropagation(); e.currentTarget.style.background="#EFF6FF"; e.currentTarget.style.borderColor="#93C5FD"; }}
                       onMouseOut={e=>{ e.currentTarget.style.background=C.creamD; e.currentTarget.style.borderColor=C.border; }}
                     >📋</button>
-                    {(entry.signatureStatus === "pending" || entry.signatureStatus === "none" || !entry.signatureStatus) && (
+                    {(entry.signatureStatus === "pending_client" || entry.signatureStatus === "none" || !entry.signatureStatus) && (
                       <button
-                        onClick={e => { e.stopPropagation(); if(onRelance) onRelance(); }}
+                        onClick={e => { e.stopPropagation(); if(onRelance) onRelance(entry); }}
                         title="Relancer le client"
                         style={{
                           height:34, padding:"0 10px",
