@@ -3929,11 +3929,67 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 }
 
 /* ══════════════════════════════════════════ AVENANT MODAL ══ */
+// Génère le PDF d'un avenant — partagé entre la fenêtre de création et la liste des avenants déjà sauvegardés
+const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature) => {
+  if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+    const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
+    const today = new Date().toLocaleDateString("fr-FR");
+    doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
+    doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
+    doc.text(`AVENANT N°${avenantNum}`, ML, 15);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
+    doc.text(`${contractNum ? `Au contrat ${contractNum} · ` : ""}Établi le ${today} via Freeley`, ML, 23);
+    let y = 42;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(40,40,40);
+    const lines = doc.splitTextToSize((avenantText || "").replace(/\\n/g, "\n"), cw);
+    lines.forEach(l => {
+      if (y > 270) { doc.addPage(); y = 20; }
+      doc.text(l, ML, y); y += 6;
+    });
+    // Certificat de signature — affiche chaque signature réellement capturée
+    if (freelanceSignature || clientSignature) {
+      if (y > 200) { doc.addPage(); y = 20; }
+      y += 10;
+      doc.setDrawColor(...GOLD); doc.setLineWidth(0.5); doc.line(ML, y, PW - MR, y);
+      y += 10;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
+      doc.text("CERTIFICAT DE SIGNATURE ÉLECTRONIQUE", ML, y);
+      y += 10;
+      const halfW = (cw - 10) / 2;
+      let yA = y, yB = y;
+      if (freelanceSignature) {
+        doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
+        doc.text(`${freelanceName || "Prestataire"}`, ML, yA); yA += 5;
+        try { doc.addImage(freelanceSignature, "PNG", ML, yA, halfW, 26); yA += 30; } catch(e) {}
+      }
+      if (clientSignature) {
+        const xB = ML + halfW + 10;
+        doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
+        doc.text(`${clientName || "Client"}`, xB, yB); yB += 5;
+        try { doc.addImage(clientSignature, "PNG", xB, yB, halfW, 26); yB += 30; } catch(e) {}
+      }
+      y = Math.max(yA, yB) + 6;
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(120,120,120);
+      doc.text("Signatures capturées électroniquement et horodatées par Freeley.", ML, y);
+    }
+    doc.save(`Avenant_${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+  } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
+};
+
 function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated }) {
   const [mode, setMode]               = useState("magic"); // "magic" | "manuel"
   const [clientMessage, setClientMessage] = useState("");
   const [objet, setObjet]             = useState("");
-  const [ajustement, setAjustement]   = useState("");
+  const [ajustementMontant, setAjustementMontant] = useState(""); // nombre (positif ou négatif), vide = aucun changement de prix
+  const [avenantPaymentLink, setAvenantPaymentLink] = useState("");
+  const [avenantPaymentLoading, setAvenantPaymentLoading] = useState(false);
+  const [avenantPaymentCopied, setAvenantPaymentCopied] = useState(false);
+  const [ajustementBudgetMagic, setAjustementBudgetMagic] = useState(null); // extrait par l'IA en mode magique
   const [phase, setPhase]             = useState("form"); // "form" | "loading" | "result" | "signed"
   const [avenantText, setAvenantText] = useState("");
   const [error, setError]             = useState("");
@@ -3966,7 +4022,12 @@ function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCre
     if (!canGenerate) return;
     setPhase("loading");
     setError("");
+    setAjustementBudgetMagic(null);
     try {
+      const manualAjustementLabel = ajustementMontant.trim()
+        ? `${Number(ajustementMontant) > 0 ? "+ " : ""}${ajustementMontant} € HT`
+        : "Aucun ajustement financier";
+
       const prompt = mode === "magic" ? `Tu es un juriste français expert en contrats de prestation de services freelance.
 
 Un client a envoyé le message suivant à son prestataire :
@@ -3981,23 +4042,18 @@ Contexte du contrat :
 - Client : ${form?.clientName || "Le client"}${form?.clientCompany ? " (" + form.clientCompany + ")" : ""}
 - Budget initial : ${basePrice ? `${basePrice} € HT` : "non renseigné sur ce contrat — ne jamais inventer de montant total"}
 
-Ta tâche : Analyse le message et rédige directement le texte complet de l'avenant (texte brut uniquement, pas de JSON).
-- Commence DIRECTEMENT par : "AVENANT N°${avenantNum}${contractNum ? ` AU CONTRAT ${contractNum}` : ""}"
-- Indique la date du jour
-- Rappelle les parties et le contrat de référence en une phrase
-- "ARTICLE 1 — OBJET DE L'AVENANT" : décris la modification demandée par le client (3-5 phrases juridiques)
-- Si un ajustement financier est mentionné : "ARTICLE 2 — RÉVISION DES HONORAIRES" avec le nouveau montant ou la modification (uniquement si le budget initial est connu, sinon reste vague sur le montant)
-- "ARTICLE 3 — ENTRÉE EN VIGUEUR" : cet avenant prend effet à compter de sa signature par les deux parties
-- "ARTICLE 4 — DISPOSITIONS GÉNÉRALES" : les autres clauses du contrat principal restent inchangées
-- Termine par un bloc SIGNATURES standard (Prestataire + Client)
-- Maximum 300 mots, style juridique français rigoureux, rédige INTÉGRALEMENT en français` : `Tu es un juriste français expert en droit des contrats de prestation de services. Rédige un AVENANT au contrat ci-dessous, court, précis et juridiquement valide.
+Ta tâche : Analyse le message et réponds UNIQUEMENT en JSON valide (sans backticks, sans markdown), avec ce format exact :
+{
+  "ajustementBudget": null ou nombre (montant de l'ajustement SEULEMENT si le client mentionne un changement de prix, positif ou négatif, ex: 400 ou -100 ; null si aucun changement financier n'est mentionné),
+  "avenantTexte": "Rédige ici le texte complet de l'avenant. Commence DIRECTEMENT par : AVENANT N°${avenantNum}${contractNum ? ` AU CONTRAT ${contractNum}` : ""}. Indique la date du jour. Rappelle les parties et le contrat de référence en une phrase. Rédige ARTICLE 1 — OBJET DE L'AVENANT décrivant la modification (3-5 phrases juridiques). Si un ajustement financier est mentionné, rédige ARTICLE 2 — RÉVISION DES HONORAIRES avec le nouveau montant. Rédige ARTICLE 3 — ENTRÉE EN VIGUEUR : cet avenant prend effet à compter de sa signature par les deux parties. Rédige ARTICLE 4 — DISPOSITIONS GÉNÉRALES : les autres clauses du contrat principal restent inchangées. Termine par un bloc SIGNATURES standard (Prestataire + Client). Maximum 300 mots, style juridique français rigoureux, rédige INTÉGRALEMENT en français."
+}` : `Tu es un juriste français expert en droit des contrats de prestation de services. Rédige un AVENANT au contrat ci-dessous, court, précis et juridiquement valide.
 
 CONTRAT DE RÉFÉRENCE : ${contractNum || "non communiqué — ne pas en inventer un dans le texte"}
 PARTIES : Prestataire ${form.freelanceName || "Prestataire"} / Client ${form.clientName || "Client"}${form.clientCompany ? " (" + form.clientCompany + ")" : ""}
 MISSION : ${form.missionTitle || "Prestation de services"}
 
 OBJET DE L'AVENANT : ${objet}
-AJUSTEMENT FINANCIER : ${ajustement || "Aucun ajustement financier"}
+AJUSTEMENT FINANCIER : ${manualAjustementLabel}
 
 CONSIGNES :
 - Commence DIRECTEMENT par l'en-tête de l'avenant : "AVENANT N°${avenantNum}${contractNum ? ` AU CONTRAT ${contractNum}` : ""}"
@@ -4023,7 +4079,19 @@ CONSIGNES :
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error.message);
-      const text = (data.content || []).map(i => i.text || "").join("").trim();
+      const raw = (data.content || []).map(i => i.text || "").join("").trim();
+
+      let text, ajustementNum;
+      if (mode === "magic") {
+        const clean = raw.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(clean);
+        text = (parsed.avenantTexte || "").replace(/\\n/g, "\n");
+        ajustementNum = (typeof parsed.ajustementBudget === "number") ? parsed.ajustementBudget : null;
+        setAjustementBudgetMagic(ajustementNum);
+      } else {
+        text = raw;
+        ajustementNum = ajustementMontant.trim() ? Number(ajustementMontant) : null;
+      }
       if (!text) throw new Error("Réponse vide");
       setAvenantText(text);
       onCreated && onCreated();
@@ -4035,7 +4103,7 @@ CONSIGNES :
           if (e1) throw e1;
           const currentContent = parseContent(existing.content);
           const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
-          avenants.push({ num: avenantNum, objet: mode === "magic" ? clientMessage.slice(0, 200) : objet, ajustement: mode === "magic" ? "" : ajustement, text, status: "draft", createdAt: new Date().toISOString() });
+          avenants.push({ num: avenantNum, objet: mode === "magic" ? clientMessage.slice(0, 200) : objet, ajustementMontant: ajustementNum, text, status: "draft", createdAt: new Date().toISOString() });
           const newContent = { ...currentContent, avenants };
           const { error: e2 } = await supabase.rpc("update_contract_content", {
             p_contract_id: contractId,
@@ -4175,46 +4243,53 @@ CONSIGNES :
   };
 
   const handleDownloadAvenantPDF = () => {
-    if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+    downloadAvenantPDF(avenantText, avenantNum, contractNum, form.freelanceName, form.clientName, freelanceSigDataUrl, null);
+  };
+
+  // Montant de l'ajustement, peu importe le mode utilisé pour générer l'avenant
+  const effectiveAjustement = mode === "magic" ? ajustementBudgetMagic : (ajustementMontant.trim() ? Number(ajustementMontant) : null);
+
+  const handleGenerateAvenantPaymentLink = async () => {
+    if (!effectiveAjustement || effectiveAjustement <= 0 || avenantPaymentLoading) return;
+    setAvenantPaymentLoading(true);
     try {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: "mm", format: "a4" });
-      const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-      const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREEN = [21, 128, 61];
-      const today = new Date().toLocaleDateString("fr-FR");
-      doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
-      doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
-      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
-      doc.text(`AVENANT N°${avenantNum}`, ML, 15);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-      doc.text(`${contractNum ? `Au contrat ${contractNum} · ` : ""}Établi le ${today} via Freeley`, ML, 23);
-      let y = 42;
-      doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(40,40,40);
-      const lines = doc.splitTextToSize(avenantText, cw);
-      lines.forEach(l => {
-        if (y > 270) { doc.addPage(); y = 20; }
-        doc.text(l, ML, y); y += 6;
+      const res = await fetch("/api/create-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: effectiveAjustement,
+          description: `Avenant n°${avenantNum} — ${form.missionTitle || "mission"}`,
+          customerEmail: form.clientEmail || undefined,
+        }),
       });
-      // Certificat de signature — seulement si au moins une signature existe
-      if (freelanceSigDataUrl || avenantSigned) {
-        if (y > 210) { doc.addPage(); y = 20; }
-        y += 10;
-        doc.setDrawColor(...GOLD); doc.setLineWidth(0.5); doc.line(ML, y, PW - MR, y);
-        y += 10;
-        doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
-        doc.text("CERTIFICAT DE SIGNATURE ÉLECTRONIQUE", ML, y);
-        y += 10;
-        if (freelanceSigDataUrl) {
-          doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
-          doc.text(`${form.freelanceName || "Prestataire"}`, ML, y);
-          try { doc.addImage(freelanceSigDataUrl, "PNG", ML, y + 4, 70, 26); } catch(e) {}
-        }
-        y += 40;
-        doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(120,120,120);
-        doc.text("Signature capturée électroniquement et horodatée par Freeley.", ML, y);
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      setAvenantPaymentLink(data.url);
+      navigator.clipboard.writeText(data.url).catch(()=>{});
+      setAvenantPaymentCopied(true);
+      setTimeout(() => setAvenantPaymentCopied(false), 2800);
+      // Sauvegarde du lien sur l'avenant, pour le retrouver plus tard dans "Mes contrats"
+      if (contractId) {
+        try {
+          const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+          if (existing) {
+            const currentContent = parseContent(existing.content);
+            const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
+            const idx = avenants.findIndex(a => a.num === avenantNum);
+            if (idx !== -1) avenants[idx] = { ...avenants[idx], paymentLink: data.url };
+            await supabase.rpc("update_contract_content", {
+              p_contract_id: contractId,
+              p_new_content: JSON.stringify({ ...currentContent, avenants }),
+              p_new_status: existing.status,
+            });
+          }
+        } catch(e) { console.error("Erreur sauvegarde lien paiement avenant:", e); }
       }
-      doc.save(`Avenant_${avenantNum}_${(form.clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
-    } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
+    } catch(e) {
+      alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
+    } finally {
+      setAvenantPaymentLoading(false);
+    }
   };
 
   return (
@@ -4364,12 +4439,12 @@ CONSIGNES :
                     display:"block", fontFamily:T.body, fontSize:10,
                     letterSpacing:"0.14em", color:C.textL, fontWeight:700,
                     marginBottom:8, textTransform:"uppercase",
-                  }}>AJUSTEMENT DU PRIX</label>
+                  }}>AJUSTEMENT DU PRIX (€ HT)</label>
                   <input
-                    type="text"
-                    value={ajustement}
-                    onChange={e => setAjustement(e.target.value)}
-                    placeholder="Ex : + 500 € HT  ou  0 €  ou  Prolongation sans surcoût"
+                    type="number"
+                    value={ajustementMontant}
+                    onChange={e => setAjustementMontant(e.target.value)}
+                    placeholder="Ex : 500  ou  -100"
                     style={{
                       width:"100%", padding:"12px 14px",
                       fontFamily:T.body, fontSize:13, color:C.text,
@@ -4382,7 +4457,7 @@ CONSIGNES :
                     onBlur={e => e.target.style.borderColor = C.border}
                   />
                   <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>
-                    Laisse vide si aucun changement de prix
+                    Nombre uniquement (positif = supplément, négatif = remise) • laisse vide si aucun changement de prix
                   </div>
                 </div>
               </>
@@ -4528,6 +4603,27 @@ CONSIGNES :
                 }}
               ><span>⬇</span> PDF</button>
             </div>
+
+            {/* Lien de paiement Stripe pour l'ajustement de prix, si applicable */}
+            {effectiveAjustement > 0 && (
+              <div style={{ background:"#FFFBEB", border:"1.5px solid #FDE68A", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+                <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:8 }}>
+                  💰 Cet avenant ajoute {effectiveAjustement} € HT au budget
+                </div>
+                {!avenantPaymentLink ? (
+                  <button
+                    onClick={handleGenerateAvenantPaymentLink}
+                    disabled={avenantPaymentLoading}
+                    style={{ width:"100%", padding:"10px", background: avenantPaymentLoading ? C.creamDD : C.gold, color: avenantPaymentLoading ? C.textL : C.navyD, border:"none", borderRadius:8, cursor: avenantPaymentLoading ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700 }}
+                  >{avenantPaymentLoading ? "Génération…" : "💳 Générer le lien de paiement"}</button>
+                ) : (
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input readOnly value={avenantPaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"8px 10px", border:"1px solid #FDE68A", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#92400E", background:"#fff" }} />
+                    <button onClick={() => { navigator.clipboard.writeText(avenantPaymentLink); setAvenantPaymentCopied(true); setTimeout(()=>setAvenantPaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"8px 14px", background:"#92400E", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{avenantPaymentCopied ? "Copié !" : "Copier"}</button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {saveError && (
               <div style={{ fontFamily:T.body, fontSize:11, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 12px", marginBottom:12 }}>
@@ -9571,6 +9667,62 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       <div className="fade-up fade-up-2">
         <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} />
       </div>
+
+      {/* Liste des avenants déjà créés sur ce contrat */}
+      {historyView.avenants && historyView.avenants.length > 0 && (
+        <div style={{ marginTop:28 }}>
+          <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.12em", color:C.textL, fontWeight:700, marginBottom:10, textTransform:"uppercase" }}>
+            Avenants de ce contrat ({historyView.avenants.length})
+          </div>
+          {historyView.avenants.map((av) => {
+            const statusLabel = av.status === "signed" ? "✓ Signé" : av.status === "pending_signature" ? "⏳ En attente de signature" : "📝 Brouillon";
+            const statusColor = av.status === "signed" ? "#15803D" : av.status === "pending_signature" ? "#B45309" : C.textL;
+            const cNumMatch = historyView.contract && historyView.contract.match(/CP-\d{4}-\d{3,5}/);
+            const cNum = cNumMatch ? cNumMatch[0] : null;
+            return (
+              <details key={av.num} style={{ marginBottom:10, border:`1.5px solid ${C.border}`, borderRadius:10, overflow:"hidden" }}>
+                <summary style={{ padding:"12px 14px", cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy, background:C.creamD, listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:6 }}>
+                  <span>Avenant n°{av.num} — {av.objet ? av.objet.slice(0,40) : "Modification"}{av.objet && av.objet.length > 40 ? "…" : ""}</span>
+                  <span style={{ fontSize:11, fontWeight:700, color: statusColor }}>{statusLabel}</span>
+                </summary>
+                <div style={{ padding:"14px 16px" }}>
+                  <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 14px", maxHeight:220, overflowY:"auto", marginBottom:10, whiteSpace:"pre-wrap", fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7 }}>
+                    {(av.text || "").replace(/\\n/g, "\n")}
+                  </div>
+                  {(av.freelanceSignature || av.clientSignature) && (
+                    <div style={{ display:"flex", gap:14, marginBottom:10, flexWrap:"wrap" }}>
+                      {av.freelanceSignature && (
+                        <div>
+                          <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginBottom:4 }}>Prestataire</div>
+                          <img src={av.freelanceSignature} alt="Signature prestataire" style={{ maxWidth:140, height:40, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:6 }} />
+                        </div>
+                      )}
+                      {av.clientSignature && (
+                        <div>
+                          <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginBottom:4 }}>Client</div>
+                          <img src={av.clientSignature} alt="Signature client" style={{ maxWidth:140, height:40, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:6 }} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {av.ajustementMontant > 0 && (
+                    <div style={{ background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
+                      <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E", marginBottom: av.paymentLink ? 6 : 0 }}>💰 + {av.ajustementMontant} € HT</div>
+                      {av.paymentLink && (
+                        <div style={{ display:"flex", gap:6 }}>
+                          <input readOnly value={av.paymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"6px 8px", border:"1px solid #FDE68A", borderRadius:6, fontFamily:T.body, fontSize:10.5, color:"#92400E", background:"#fff" }} />
+                          <button onClick={() => navigator.clipboard.writeText(av.paymentLink)} style={{ flexShrink:0, padding:"6px 10px", background:"#92400E", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700 }}>Copier</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, historyView.form?.freelanceName, historyView.form?.clientName, av.freelanceSignature, av.clientSignature)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger PDF</button>
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      )}
 
       {/* ⚡ Détecteur d'Avenant Magique */}
       <div style={{ marginTop:28 }}>
