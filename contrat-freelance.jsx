@@ -5781,8 +5781,16 @@ function getRecouvrementCases(history) {
 
   const cases = [];
   history.forEach(c => {
-    const isPaid = payStatus[c.id] === "paid";
-    if (!c.endDate || isPaid) return;
+    const basePrice = parseFloat(c.price) || 0;
+    const baseIsPaid = payStatus[c.id] === "paid";
+    // Les avenants signés mais pas encore marqués payés restent dus, même si le contrat de base est réglé
+    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
+    const unpaidAvenantsTotal = avenants
+      .filter(a => a.status === "signed" && a.ajustementMontant > 0 && !a.paymentReceived)
+      .reduce((s, a) => s + a.ajustementMontant, 0);
+    const amountDue = (baseIsPaid ? 0 : basePrice) + unpaidAvenantsTotal;
+
+    if (!c.endDate || amountDue <= 0) return;
     const end = new Date(c.endDate);
     if (isNaN(end)) return;
     const diffDays = Math.floor((end - now) / (1000 * 60 * 60 * 24));
@@ -5791,7 +5799,7 @@ function getRecouvrementCases(history) {
     cases.push({
       id: c.id,
       clientName: c.clientName || "Client sans nom",
-      amount: c.price || "",
+      amount: amountDue,
       dueDate: c.endDate,
       mission: c.missionTitle || "Sans titre",
       clientEmail: c.clientEmail || c.form?.clientEmail || "",
