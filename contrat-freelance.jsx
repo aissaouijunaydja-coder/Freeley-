@@ -2559,7 +2559,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 
   const liveAlerts = (() => {
     const readIds = getReadAlertIds();
-    const all = [...buildAlertsFromHistory(history), ...buildNdaAlerts(myNdas)];
+    const all = [...buildAlertsFromHistory(history), ...buildNdaAlerts(myNdas), ...buildAvenantAlerts(history)];
     return all.map(a => ({ ...a, read: readIds.includes(a.id) }));
   })();
 
@@ -2621,7 +2621,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onOpenNda: () => setShowNdaModal(true),
     onAlertsChanged: () => setAlertsTick(t => t + 1),
     onOpenMission: (alert) => {
-      const contractId = alert?.id ? alert.id.replace(/^(recouvre_|sign_|soon_)/, "") : null;
+      const contractId = alert?.contractId || (alert?.id ? alert.id.replace(/^(recouvre_|sign_|soon_)/, "") : null);
       const entry = contractId ? history.find(c => String(c.id) === String(contractId)) : null;
       if (alert?.action === "recouvrement" && entry) {
         setRecouvrementInitialCase({
@@ -2887,6 +2887,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         onRelance={openRelanceModal}
         onRateClient={openRatingModal}
         onPaymentStatusChanged={() => setAlertsTick(t => t + 1)}
+        profile={profile}
+        authUser={authUser}
       />
       {ratingModal && (
         <ClientRatingModal
@@ -2974,7 +2976,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         />
       )}
       {showInvoiceModal && (
-        <InvoiceModal form={form} setForm={setForm} profile={profile} setProfile={setProfile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} />
+        <InvoiceModal form={form} setForm={setForm} profile={profile} setProfile={setProfile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} authUser={authUser} />
       )}
       {magicFillTarget && (
         <CameraCapture
@@ -3007,6 +3009,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onClose={() => setShowTactileSign(false)}
           onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
           onGoToProfileTva={goToProfileFacturation}
+          authUser={authUser}
         />
       )}
       {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} profile={profile} authUser={authUser} />}
@@ -3978,6 +3981,89 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
       doc.text("Signatures capturées électroniquement et horodatées par Freeley.", ML, y);
     }
     doc.save(`Avenant_${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+  } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
+};
+
+// Génère une vraie facture pour l'ajustement de prix d'un avenant — même style que la facture d'acompte du contrat principal
+const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser) => {
+  if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+    const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREY = [107, 114, 128];
+    const today = new Date().toLocaleDateString("fr-FR");
+    // Numéro réel, séquentiel, partagé avec les factures du contrat principal — jamais un horodatage
+    const year = new Date().getFullYear();
+    let invoiceNum = `FA-${year}-····`;
+    if (authUser?.id) {
+      const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
+      if (error) console.error("Erreur réservation numéro de facture (avenant):", error);
+      else invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
+    }
+
+    doc.setFont("helvetica", "bold"); doc.setFontSize(24); doc.setTextColor(...NAVY);
+    doc.text("FACTURE", PW - MR, 22, { align: "right" });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
+    doc.text(`N° ${invoiceNum}`, PW - MR, 30, { align: "right" });
+    doc.text(`Date d'émission : ${today}`, PW - MR, 35, { align: "right" });
+    doc.text(`Échéance : ${today} (à réception)`, PW - MR, 40, { align: "right" });
+    doc.setDrawColor(...GOLD); doc.setLineWidth(0.8); doc.line(ML, 48, PW - MR, 48);
+
+    let y = 60;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+    doc.text("ÉMETTEUR", ML, y);
+    doc.text("CLIENT", ML + cw/2, y);
+    y += 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
+    doc.text(freelanceName || "Prestataire", ML, y);
+    doc.text(clientName || "Client", ML + cw/2, y);
+    y += 5;
+    if (freelanceSiret) { doc.setFontSize(9); doc.setTextColor(...GREY); doc.text(`SIRET : ${freelanceSiret}`, ML, y); }
+    doc.setFontSize(9); doc.setTextColor(...GREY);
+    if (clientEmail) doc.text(clientEmail, ML + cw/2, y);
+    y += 5;
+    if (freelanceEmail) doc.text(freelanceEmail, ML, y);
+    y += 15;
+
+    // Tableau
+    doc.setFillColor(...NAVY); doc.rect(ML, y, cw, 9, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255,255,255);
+    doc.text("DÉSIGNATION", ML + 4, y + 6);
+    doc.text("MONTANT", PW - MR - 4, y + 6, { align: "right" });
+    y += 9;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
+    doc.setDrawColor(230,230,230); doc.setLineWidth(0.3); doc.line(ML, y+10, PW-MR, y+10);
+    doc.text(`Avenant n°${avenantNum} — ${missionTitle || "mission"}`, ML + 4, y + 7);
+    doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y + 7, { align: "right" });
+    y += 18;
+
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+    doc.text("Total HT", ML + cw - 60, y); doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y, { align:"right" });
+    y += 6;
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(...GREY);
+    doc.text("TVA non applicable, art. 293 B du CGI", ML + cw - 60, y);
+    y += 7;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...NAVY);
+    doc.text("Total à payer", ML + cw - 60, y); doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y, { align:"right" });
+    y += 18;
+
+    if (profile?.iban) {
+      doc.setFillColor(248, 247, 244); doc.rect(ML, y, cw, 30, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+      doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 8);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(40,40,40);
+      doc.text(`IBAN : ${profile.iban}`, ML + 4, y + 15);
+      if (profile.bic) doc.text(`BIC : ${profile.bic}`, ML + 4, y + 20);
+      if (profile.bankName) doc.text(`Banque : ${profile.bankName}`, ML + 4, y + 25);
+      y += 38;
+    }
+
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
+    const legalLines = doc.splitTextToSize("Pénalités de retard : taux BCE + 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.\nPas d'escompte pour paiement anticipé.", cw);
+    legalLines.forEach(l => { doc.text(l, ML, y); y += 4; });
+
+    doc.save(`Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`);
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
@@ -5994,6 +6080,34 @@ function buildNdaAlerts(myNdas) {
     detail: `${n.partie_b || "Le destinataire"} a signé l'accord de confidentialité avec ${n.partie_a || "toi"}.`,
     action: "nda-signed",
   }));
+}
+
+// Alerte "Avenant signé" : parcourt tous les contrats et leurs avenants
+function buildAvenantAlerts(history) {
+  if (!Array.isArray(history) || !history.length) return [];
+  const alerts = [];
+  history.forEach(entry => {
+    if (!Array.isArray(entry.avenants)) return;
+    entry.avenants.forEach(av => {
+      if (av.status === "signed") {
+        alerts.push({
+          id: `avenant_signed_${entry.id}_${av.num}`,
+          read: false,
+          icon: "✅",
+          accentBg: "#F0FDF4",
+          accentIcon: "#DCFCE7",
+          accentBorder: "#BBF7D0",
+          badgeBg: "#16A34A",
+          badgeText: "AVENANT SIGNÉ",
+          title: `Avenant n°${av.num} signé !`,
+          detail: `${entry.clientName || "Le client"} a signé l'avenant sur « ${entry.missionTitle || "votre mission"} ».`,
+          action: "avenant-signed",
+          contractId: entry.id,
+        });
+      }
+    });
+  });
+  return alerts;
 }
 
 function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNdas, onClose, initialAlerts = [], onAlertsChanged }) {
@@ -9520,7 +9634,7 @@ function CGUPage({ onBack }) {
   );
 }
 
-function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged }) {
+function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
@@ -9537,6 +9651,41 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
   };
   const [deletingId, setDeletingId] = useState(null);
   const [filter, setFilter] = useState("tous"); // "tous" | "pending" | "signed"
+  const [avenantLinkCopiedNum, setAvenantLinkCopiedNum] = useState(null);
+
+  // Relance : reconstruit le lien de signature de l'avenant (pas besoin de le stocker, il est déterministe)
+  const copyAvenantSignLink = (av) => {
+    const link = `${window.location.origin}${window.location.pathname}?sign-avenant=${historyView.id}:${av.num}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setAvenantLinkCopiedNum(av.num);
+      setTimeout(() => setAvenantLinkCopiedNum(null), 2500);
+    });
+  };
+  const sendAvenantSignEmail = (av) => {
+    const link = `${window.location.origin}${window.location.pathname}?sign-avenant=${historyView.id}:${av.num}`;
+    const email = historyView.form?.clientEmail || "";
+    const subject = `Rappel — Avenant n°${av.num} en attente de signature`;
+    const body = `Bonjour,\n\nPetit rappel : l'avenant n°${av.num} est toujours en attente de votre signature.\n\nLien de signature : ${link}\n\nMerci,\n${historyView.form?.freelanceName || ""}`;
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
+  // Marque manuellement le paiement de l'avenant comme reçu (pas de webhook Stripe : pas de détection automatique)
+  const markAvenantPaid = async (av) => {
+    try {
+      const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", historyView.id).single();
+      if (!existing) return;
+      const currentContent = parseContent(existing.content);
+      const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
+      const idx = avenants.findIndex(a => a.num === av.num);
+      if (idx !== -1) avenants[idx] = { ...avenants[idx], paymentReceived: true };
+      await supabase.rpc("update_contract_content", {
+        p_contract_id: historyView.id,
+        p_new_content: JSON.stringify({ ...currentContent, avenants }),
+        p_new_status: existing.status,
+      });
+      setHistoryView({ ...historyView, avenants });
+    } catch(e) { console.error("Erreur marquage paiement avenant:", e); }
+  };
 
   const handleDeleteWithAnim = (id) => {
     setConfirmDelete(null);
@@ -9705,18 +9854,41 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                       )}
                     </div>
                   )}
+
+                  {/* Relance si en attente de signature */}
+                  {av.status === "pending_signature" && (
+                    <div style={{ background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
+                      <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#9A3412", marginBottom:8 }}>⏳ Toujours en attente de signature</div>
+                      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                        <button onClick={() => copyAvenantSignLink(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #FED7AA", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#9A3412" }}>{avenantLinkCopiedNum === av.num ? "✓ Copié !" : "🔗 Copier le lien"}</button>
+                        <button onClick={() => sendAvenantSignEmail(av)} style={{ padding:"7px 12px", background:"#9A3412", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700 }}>⚡ Relancer par email</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Ajustement de prix : facture + paiement */}
                   {av.ajustementMontant > 0 && (
-                    <div style={{ background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
-                      <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E", marginBottom: av.paymentLink ? 6 : 0 }}>💰 + {av.ajustementMontant} € HT</div>
-                      {av.paymentLink && (
-                        <div style={{ display:"flex", gap:6 }}>
+                    <div style={{ background: av.paymentReceived ? "#F0FDF4" : "#FFFBEB", border:`1px solid ${av.paymentReceived ? "#86EFAC" : "#FDE68A"}`, borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: (av.paymentLink || !av.paymentReceived) ? 8 : 0 }}>
+                        <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color: av.paymentReceived ? "#166534" : "#92400E" }}>💰 + {av.ajustementMontant} € HT</div>
+                        {av.paymentReceived && <span style={{ fontFamily:T.body, fontSize:11, fontWeight:700, color:"#166534" }}>✓ Payé</span>}
+                      </div>
+                      {av.paymentLink && !av.paymentReceived && (
+                        <div style={{ display:"flex", gap:6, marginBottom:8 }}>
                           <input readOnly value={av.paymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"6px 8px", border:"1px solid #FDE68A", borderRadius:6, fontFamily:T.body, fontSize:10.5, color:"#92400E", background:"#fff" }} />
                           <button onClick={() => navigator.clipboard.writeText(av.paymentLink)} style={{ flexShrink:0, padding:"6px 10px", background:"#92400E", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700 }}>Copier</button>
                         </div>
                       )}
+                      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientEmail, profile, authUser)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
+                        {!av.paymentReceived && (
+                          <button onClick={() => markAvenantPaid(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #86EFAC", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534" }}>✓ Marquer comme reçu</button>
+                        )}
+                      </div>
                     </div>
                   )}
-                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, historyView.form?.freelanceName, historyView.form?.clientName, av.freelanceSignature, av.clientSignature)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger PDF</button>
+
+                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, historyView.form?.freelanceName, historyView.form?.clientName, av.freelanceSignature, av.clientSignature)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
                 </div>
               </details>
             );
@@ -10045,7 +10217,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 }
 
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
-function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva }) {
+function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser }) {
   const [downloaded, setDownloaded] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
@@ -10059,22 +10231,26 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
 
   const today = new Date().toLocaleDateString("fr-FR");
-  // Numéro affiché en aperçu (prochain numéro disponible, sans le réserver)
-  const invoiceNum = useMemo(() => {
+  // Numéro affiché en aperçu (prochain numéro disponible, sans le réserver) — lu depuis Supabase, pas le navigateur
+  const [invoiceNum, setInvoiceNum] = useState(`FA-${new Date().getFullYear()}-····`);
+  useEffect(() => {
+    if (!authUser?.id) return;
     const year = new Date().getFullYear();
-    let counters = {};
-    try { counters = JSON.parse(localStorage.getItem("freeley_invoice_counters") || "{}"); } catch(e) {}
-    const next = (counters[year] || 0) + 1;
-    return `FA-${year}-${String(next).padStart(4, "0")}`;
-  }, []);
+    supabase.rpc("peek_next_invoice_number", { p_user_id: authUser.id, p_year: year }).then(({ data, error }) => {
+      if (error) { console.error("Erreur lecture numéro de facture:", error); return; }
+      setInvoiceNum(`FA-${year}-${String(data).padStart(4, "0")}`);
+    });
+  }, [authUser?.id]);
 
-  // Réserve définitivement le numéro (appelé au téléchargement) — garantit une suite continue sans trou
-  const reserveInvoiceNumber = () => {
+  // Réserve définitivement le numéro (appelé au téléchargement) — atomique, garantit une suite continue sans trou ni doublon
+  const reserveInvoiceNumber = async () => {
     const year = new Date().getFullYear();
-    let counters = {};
-    try { counters = JSON.parse(localStorage.getItem("freeley_invoice_counters") || "{}"); } catch(e) {}
-    counters[year] = (counters[year] || 0) + 1;
-    try { localStorage.setItem("freeley_invoice_counters", JSON.stringify(counters)); } catch(e) {}
+    if (!authUser?.id) return `FA-${year}-${String(Date.now()).slice(-4)}`; // repli très improbable si jamais non connecté
+    const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
+    if (error) { console.error("Erreur réservation numéro de facture:", error); return invoiceNum; }
+    const finalNum = `FA-${year}-${String(data).padStart(4, "0")}`;
+    setInvoiceNum(finalNum);
+    return finalNum;
   };
 
   const handleGenerateStripeLink = async () => {
@@ -10174,6 +10350,9 @@ ${freelanceName}`;
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie dans un instant."); return; }
     setPdfGenerating(true);
     try {
+      // 0. Réserve le vrai numéro de facture (séquentiel, sans trou) juste avant de générer — remplace l'aperçu
+      const invoiceNum = await reserveInvoiceNumber();
+
       // 1. Récupérer (ou réutiliser) le lien de paiement Stripe pour l'intégrer au PDF
       let payUrl = stripeLinkUrl;
       const amountForStripe = priceHT * (depositPct / 100);
@@ -10338,7 +10517,6 @@ ${freelanceName}`;
       doc.text("Pas d'escompte pour paiement anticipé.", ML, y);
 
       doc.save(`Facture_${invoiceNum}.pdf`);
-      reserveInvoiceNumber();
       setDownloaded(true);
       setTimeout(() => setDownloaded(false), 3000);
     } catch(err) {
@@ -11804,7 +11982,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId }) {
+function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, authUser }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -12450,6 +12628,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           depositPctProp={acomptePct}
           onClose={() => setShowDepositInvoiceModal(false)}
           onGoToProfileTva={onGoToProfileTva}
+          authUser={authUser}
         />
       )}
     </div>
