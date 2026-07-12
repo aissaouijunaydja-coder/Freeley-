@@ -234,6 +234,7 @@ const getHistory = async () => {
       clientSignature: content.clientSignature || contenu.clientSignature || null,
       freelanceSignature: content.freelanceSignature || contenu.freelanceSignature || null,
       signedByClientAt: content.signedByClientAt || contenu.signedByClientAt || null,
+      avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
     };
   });
@@ -340,6 +341,20 @@ const getNdaForSigning = async (ndaId) => {
 const submitNdaSignature = async (ndaId, clientSignature) => {
   const { error } = await supabase.rpc("sign_nda", { nda_id: ndaId, signature: clientSignature });
   if (error) { console.error("submitNdaSignature error:", error); return false; }
+  return true;
+};
+
+// Le client (sans compte) charge l'avenant précis à signer
+const getAvenantForSigning = async (contractId, avenantNum) => {
+  const { data, error } = await supabase.rpc("get_avenant_for_signing", { p_contract_id: contractId, p_avenant_num: avenantNum });
+  if (error) { console.error("getAvenantForSigning error:", error); return null; }
+  return data;
+};
+
+// Le client signe l'avenant : seul cet avenant précis est mis à jour
+const submitAvenantSignature = async (contractId, avenantNum, clientSignature) => {
+  const { error } = await supabase.rpc("sign_avenant", { p_contract_id: contractId, p_avenant_num: avenantNum, p_client_signature: clientSignature });
+  if (error) { console.error("submitAvenantSignature error:", error); return false; }
   return true;
 };
 
@@ -3915,6 +3930,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 
 /* ══════════════════════════════════════════ AVENANT MODAL ══ */
 function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated }) {
+  const [mode, setMode]               = useState("magic"); // "magic" | "manuel"
+  const [clientMessage, setClientMessage] = useState("");
   const [objet, setObjet]             = useState("");
   const [ajustement, setAjustement]   = useState("");
   const [phase, setPhase]             = useState("form"); // "form" | "loading" | "result" | "signed"
@@ -3922,22 +3939,58 @@ function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCre
   const [error, setError]             = useState("");
   const [copied, setCopied]           = useState(false);
   const [avenantSigned, setAvenantSigned] = useState(false);
-  const [signLoading, setSignLoading] = useState(false);
   const [saveError, setSaveError]     = useState(false);
+  // ── Signature de l'avenant ──
+  const [signStep, setSignStep] = useState("sign-freelance"); // sign-freelance | choose | tactile | remote-ready
+  const freelanceSigCanvasRef = useRef(null);
+  const freelanceSigDrawing = useRef(false);
+  const [freelanceSigHasStrokes, setFreelanceSigHasStrokes] = useState(false);
+  const [freelanceSigDataUrl, setFreelanceSigDataUrl] = useState(null);
+  const clientSigCanvasRef = useRef(null);
+  const clientSigDrawing = useRef(false);
+  const [clientSigHasStrokes, setClientSigHasStrokes] = useState(false);
+  const [avenantSignLink, setAvenantSignLink] = useState("");
+  const [avenantSignLoading, setAvenantSignLoading] = useState(false);
+  const [avenantLinkCopied, setAvenantLinkCopied] = useState(false);
 
   // Extrait le numéro de contrat si présent dans le texte — ne jamais en inventer un
   const contractNumMatch = contract && contract.match(/CP-\d{4}-\d{3,5}/);
   const contractNum = contractNumMatch ? contractNumMatch[0] : null;
   const avenantNum = avenantCount + 1;
+  const hasRealPrice = form?.price && !isNaN(parseFloat(form.price)) && parseFloat(form.price) > 0;
+  const basePrice = hasRealPrice ? Number(form.price) : null;
 
-  const canGenerate = objet.trim().length >= 10;
+  const canGenerate = mode === "magic" ? clientMessage.trim().length >= 15 : objet.trim().length >= 10;
 
   const handleGenerate = async () => {
     if (!canGenerate) return;
     setPhase("loading");
     setError("");
     try {
-      const prompt = `Tu es un juriste français expert en droit des contrats de prestation de services. Rédige un AVENANT au contrat ci-dessous, court, précis et juridiquement valide.
+      const prompt = mode === "magic" ? `Tu es un juriste français expert en contrats de prestation de services freelance.
+
+Un client a envoyé le message suivant à son prestataire :
+---
+"${clientMessage}"
+---
+
+Contexte du contrat :
+- Numéro : ${contractNum || "non renseigné — ne pas en inventer un dans le texte"}
+- Mission : ${form?.missionTitle || "Prestation de services"}
+- Prestataire : ${form?.freelanceName || "Le prestataire"}
+- Client : ${form?.clientName || "Le client"}${form?.clientCompany ? " (" + form.clientCompany + ")" : ""}
+- Budget initial : ${basePrice ? `${basePrice} € HT` : "non renseigné sur ce contrat — ne jamais inventer de montant total"}
+
+Ta tâche : Analyse le message et rédige directement le texte complet de l'avenant (texte brut uniquement, pas de JSON).
+- Commence DIRECTEMENT par : "AVENANT N°${avenantNum}${contractNum ? ` AU CONTRAT ${contractNum}` : ""}"
+- Indique la date du jour
+- Rappelle les parties et le contrat de référence en une phrase
+- "ARTICLE 1 — OBJET DE L'AVENANT" : décris la modification demandée par le client (3-5 phrases juridiques)
+- Si un ajustement financier est mentionné : "ARTICLE 2 — RÉVISION DES HONORAIRES" avec le nouveau montant ou la modification (uniquement si le budget initial est connu, sinon reste vague sur le montant)
+- "ARTICLE 3 — ENTRÉE EN VIGUEUR" : cet avenant prend effet à compter de sa signature par les deux parties
+- "ARTICLE 4 — DISPOSITIONS GÉNÉRALES" : les autres clauses du contrat principal restent inchangées
+- Termine par un bloc SIGNATURES standard (Prestataire + Client)
+- Maximum 300 mots, style juridique français rigoureux, rédige INTÉGRALEMENT en français` : `Tu es un juriste français expert en droit des contrats de prestation de services. Rédige un AVENANT au contrat ci-dessous, court, précis et juridiquement valide.
 
 CONTRAT DE RÉFÉRENCE : ${contractNum || "non communiqué — ne pas en inventer un dans le texte"}
 PARTIES : Prestataire ${form.freelanceName || "Prestataire"} / Client ${form.clientName || "Client"}${form.clientCompany ? " (" + form.clientCompany + ")" : ""}
@@ -3982,7 +4035,7 @@ CONSIGNES :
           if (e1) throw e1;
           const currentContent = parseContent(existing.content);
           const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
-          avenants.push({ num: avenantNum, objet, ajustement, text, status: "draft", createdAt: new Date().toISOString() });
+          avenants.push({ num: avenantNum, objet: mode === "magic" ? clientMessage.slice(0, 200) : objet, ajustement: mode === "magic" ? "" : ajustement, text, status: "draft", createdAt: new Date().toISOString() });
           const newContent = { ...currentContent, avenants };
           const { error: e2 } = await supabase.rpc("update_contract_content", {
             p_contract_id: contractId,
@@ -4008,36 +4061,160 @@ CONSIGNES :
     });
   };
 
-  const handleSign = () => {
-    setSignLoading(true);
-    const email = form.clientEmail;
-    if (email) {
-      const subject = `Avenant n°${avenantNum}${contractNum ? ` au contrat ${contractNum}` : ""} — ${form.missionTitle || "mission"}`;
-      window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(avenantText)}`;
+  // ── Dessin : signature du prestataire ──
+  const getFreelanceSigPos = (e) => {
+    const canvas = freelanceSigCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return { x: (touch.clientX - rect.left) * (canvas.width / rect.width), y: (touch.clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const startFreelanceSigDraw = (e) => { e.preventDefault(); freelanceSigDrawing.current = true; const ctx = freelanceSigCanvasRef.current.getContext("2d"); const p = getFreelanceSigPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const drawFreelanceSig = (e) => {
+    if (!freelanceSigDrawing.current) return;
+    e.preventDefault();
+    const ctx = freelanceSigCanvasRef.current.getContext("2d");
+    const p = getFreelanceSigPos(e);
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    setFreelanceSigHasStrokes(true);
+  };
+  const endFreelanceSigDraw = () => { freelanceSigDrawing.current = false; };
+  const clearFreelanceSig = () => { const c = freelanceSigCanvasRef.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); setFreelanceSigHasStrokes(false); };
+
+  const handleValidateFreelanceSig = () => {
+    if (!freelanceSigHasStrokes) return;
+    const sig = freelanceSigCanvasRef.current.toDataURL("image/png");
+    setFreelanceSigDataUrl(sig);
+    setSignStep("choose");
+  };
+
+  // ── Dessin : signature du client (mode "ensemble, sur place") ──
+  const getClientSigPos = (e) => {
+    const canvas = clientSigCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return { x: (touch.clientX - rect.left) * (canvas.width / rect.width), y: (touch.clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const startClientSigDraw = (e) => { e.preventDefault(); clientSigDrawing.current = true; const ctx = clientSigCanvasRef.current.getContext("2d"); const p = getClientSigPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const drawClientSig = (e) => {
+    if (!clientSigDrawing.current) return;
+    e.preventDefault();
+    const ctx = clientSigCanvasRef.current.getContext("2d");
+    const p = getClientSigPos(e);
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    setClientSigHasStrokes(true);
+  };
+  const endClientSigDraw = () => { clientSigDrawing.current = false; };
+  const clearClientSig = () => { const c = clientSigCanvasRef.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); setClientSigHasStrokes(false); };
+
+  // Sauvegarde générique de l'avenant (signature(s) + statut), sans toucher aux autres avenants du contrat
+  const saveAvenantSignatures = async (patch) => {
+    if (!contractId) return false;
+    try {
+      const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+      if (e1) throw e1;
+      const currentContent = parseContent(existing.content);
+      const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
+      const idx = avenants.findIndex(a => a.num === avenantNum);
+      if (idx !== -1) avenants[idx] = { ...avenants[idx], ...patch };
+      const newContent = { ...currentContent, avenants };
+      const { error: e2 } = await supabase.rpc("update_contract_content", {
+        p_contract_id: contractId,
+        p_new_content: JSON.stringify(newContent),
+        p_new_status: existing.status,
+      });
+      if (e2) throw e2;
+      return true;
+    } catch(e) {
+      console.error("Erreur sauvegarde signature avenant:", e);
+      return false;
     }
-    setTimeout(async () => {
-      setSignLoading(false);
-      setAvenantSigned(true);
-      setPhase("signed");
-      if (contractId) {
-        try {
-          const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
-          if (e1) throw e1;
-          const currentContent = parseContent(existing.content);
-          const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
-          const idx = avenants.findIndex(a => a.num === avenantNum);
-          if (idx !== -1) avenants[idx] = { ...avenants[idx], status: "sent", sentAt: new Date().toISOString() };
-          const newContent = { ...currentContent, avenants };
-          await supabase.rpc("update_contract_content", {
-            p_contract_id: contractId,
-            p_new_content: JSON.stringify(newContent),
-            p_new_status: existing.status,
-          });
-        } catch(e) {
-          console.error("Erreur mise à jour statut avenant:", e);
+  };
+
+  // Choix : signer ensemble maintenant (même appareil)
+  const handleValidateClientTactile = async () => {
+    if (!clientSigHasStrokes) return;
+    setAvenantSignLoading(true);
+    const clientSig = clientSigCanvasRef.current.toDataURL("image/png");
+    const ok = await saveAvenantSignatures({
+      freelanceSignature: freelanceSigDataUrl,
+      clientSignature: clientSig,
+      signedByClientAt: new Date().toISOString(),
+      status: "signed",
+    });
+    setAvenantSignLoading(false);
+    if (!ok) { setSaveError(true); return; }
+    setAvenantSigned(true);
+    setPhase("signed");
+  };
+
+  // Choix : envoyer un lien de signature à distance au client
+  const handleGenerateAvenantLink = async () => {
+    setAvenantSignLoading(true);
+    const ok = await saveAvenantSignatures({
+      freelanceSignature: freelanceSigDataUrl,
+      status: "pending_signature",
+    });
+    setAvenantSignLoading(false);
+    if (!ok) { setSaveError(true); return; }
+    setAvenantSignLink(`${window.location.origin}${window.location.pathname}?sign-avenant=${contractId}:${avenantNum}`);
+    setSignStep("remote-ready");
+  };
+
+  const copyAvenantLink = () => {
+    navigator.clipboard.writeText(avenantSignLink).then(() => {
+      setAvenantLinkCopied(true);
+      setTimeout(() => setAvenantLinkCopied(false), 2500);
+    });
+  };
+
+  const handleSendAvenantEmail = () => {
+    const email = form.clientEmail;
+    const subject = `Avenant n°${avenantNum}${contractNum ? ` au contrat ${contractNum}` : ""} — ${form.missionTitle || "mission"}`;
+    const body = `Bonjour,\n\nVoici l'avenant n°${avenantNum} à signer.\n\nLien de signature : ${avenantSignLink}\n\nMerci,\n${form.freelanceName || ""}`;
+    window.location.href = `mailto:${email || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
+  const handleDownloadAvenantPDF = () => {
+    if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+      const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREEN = [21, 128, 61];
+      const today = new Date().toLocaleDateString("fr-FR");
+      doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
+      doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
+      doc.text(`AVENANT N°${avenantNum}`, ML, 15);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
+      doc.text(`${contractNum ? `Au contrat ${contractNum} · ` : ""}Établi le ${today} via Freeley`, ML, 23);
+      let y = 42;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(40,40,40);
+      const lines = doc.splitTextToSize(avenantText, cw);
+      lines.forEach(l => {
+        if (y > 270) { doc.addPage(); y = 20; }
+        doc.text(l, ML, y); y += 6;
+      });
+      // Certificat de signature — seulement si au moins une signature existe
+      if (freelanceSigDataUrl || avenantSigned) {
+        if (y > 210) { doc.addPage(); y = 20; }
+        y += 10;
+        doc.setDrawColor(...GOLD); doc.setLineWidth(0.5); doc.line(ML, y, PW - MR, y);
+        y += 10;
+        doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
+        doc.text("CERTIFICAT DE SIGNATURE ÉLECTRONIQUE", ML, y);
+        y += 10;
+        if (freelanceSigDataUrl) {
+          doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
+          doc.text(`${form.freelanceName || "Prestataire"}`, ML, y);
+          try { doc.addImage(freelanceSigDataUrl, "PNG", ML, y + 4, 70, 26); } catch(e) {}
         }
+        y += 40;
+        doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(120,120,120);
+        doc.text("Signature capturée électroniquement et horodatée par Freeley.", ML, y);
       }
-    }, 900);
+      doc.save(`Avenant_${avenantNum}_${(form.clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+    } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
   };
 
   return (
@@ -4100,59 +4277,116 @@ CONSIGNES :
         {/* ── PHASE FORM ── */}
         {phase === "form" && (
           <div style={{ padding:"24px" }}>
-            <div style={{ marginBottom:20 }}>
-              <label style={{
-                display:"block", fontFamily:T.body, fontSize:10,
-                letterSpacing:"0.14em", color:C.textL, fontWeight:700,
-                marginBottom:8, textTransform:"uppercase",
-              }}>OBJET DE LA MODIFICATION *</label>
-              <textarea
-                value={objet}
-                onChange={e => setObjet(e.target.value)}
-                rows={3}
-                placeholder="Ex : Ajout de 2 pages web supplémentaires à la mission initiale, incluant leur intégration et mise en ligne..."
+
+            {/* Bascule Magique / Manuel */}
+            <div style={{ display:"flex", gap:8, marginBottom:20, background:C.creamD, borderRadius:10, padding:4 }}>
+              <button
+                onClick={() => setMode("magic")}
                 style={{
-                  width:"100%", padding:"12px 14px",
-                  fontFamily:T.body, fontSize:13, color:C.text, lineHeight:1.65,
-                  background:C.cream, border:`1.5px solid ${C.border}`,
-                  borderRadius:10, resize:"vertical", outline:"none",
-                  transition:"border-color 0.15s",
-                  boxSizing:"border-box",
+                  flex:1, padding:"9px", borderRadius:8, border:"none", cursor:"pointer",
+                  background: mode === "magic" ? "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)" : "transparent",
+                  color: mode === "magic" ? "#fff" : C.textM,
+                  fontFamily:T.body, fontSize:12.5, fontWeight:700, transition:"all 0.15s",
                 }}
-                onFocus={e => e.target.style.borderColor = C.navy}
-                onBlur={e => e.target.style.borderColor = C.border}
-              />
-              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>
-                Minimum 10 caractères • {objet.length} / min. 10
-              </div>
+              >🪄 Magique</button>
+              <button
+                onClick={() => setMode("manuel")}
+                style={{
+                  flex:1, padding:"9px", borderRadius:8, border:"none", cursor:"pointer",
+                  background: mode === "manuel" ? C.navy : "transparent",
+                  color: mode === "manuel" ? "#fff" : C.textM,
+                  fontFamily:T.body, fontSize:12.5, fontWeight:700, transition:"all 0.15s",
+                }}
+              >✍️ Manuel</button>
             </div>
 
-            <div style={{ marginBottom:24 }}>
-              <label style={{
-                display:"block", fontFamily:T.body, fontSize:10,
-                letterSpacing:"0.14em", color:C.textL, fontWeight:700,
-                marginBottom:8, textTransform:"uppercase",
-              }}>AJUSTEMENT DU PRIX</label>
-              <input
-                type="text"
-                value={ajustement}
-                onChange={e => setAjustement(e.target.value)}
-                placeholder="Ex : + 500 € HT  ou  0 €  ou  Prolongation sans surcoût"
-                style={{
-                  width:"100%", padding:"12px 14px",
-                  fontFamily:T.body, fontSize:13, color:C.text,
-                  background:C.cream, border:`1.5px solid ${C.border}`,
-                  borderRadius:10, outline:"none",
-                  transition:"border-color 0.15s",
-                  boxSizing:"border-box",
-                }}
-                onFocus={e => e.target.style.borderColor = C.navy}
-                onBlur={e => e.target.style.borderColor = C.border}
-              />
-              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>
-                Laisse vide si aucun changement de prix
+            {mode === "magic" ? (
+              <div style={{ marginBottom:20 }}>
+                <label style={{
+                  display:"block", fontFamily:T.body, fontSize:10,
+                  letterSpacing:"0.14em", color:C.textL, fontWeight:700,
+                  marginBottom:8, textTransform:"uppercase",
+                }}>MESSAGE DU CLIENT *</label>
+                <div style={{ fontFamily:T.body, fontSize:11.5, color:"#7C3AED", marginBottom:8, lineHeight:1.5 }}>
+                  Colle ici le message que ton client t'a envoyé (SMS, email...) — l'IA comprend toute seule ce qui change.
+                </div>
+                <textarea
+                  value={clientMessage}
+                  onChange={e => setClientMessage(e.target.value)}
+                  rows={4}
+                  placeholder={`Exemple : "Salut ! Est-ce qu'on pourrait rajouter une option multilingue sur le site ? Je te rajoute 300€ sur le budget final et on décale la livraison au 30 septembre."`}
+                  style={{
+                    width:"100%", padding:"12px 14px",
+                    fontFamily:T.body, fontSize:13, color:C.text, lineHeight:1.65,
+                    background:C.cream, border:"1.5px solid #C4B5FD",
+                    borderRadius:10, resize:"vertical", outline:"none",
+                    transition:"border-color 0.15s",
+                    boxSizing:"border-box",
+                  }}
+                  onFocus={e => e.target.style.borderColor = "#7C3AED"}
+                  onBlur={e => e.target.style.borderColor = "#C4B5FD"}
+                />
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>
+                  Minimum 15 caractères • {clientMessage.length} / min. 15
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                <div style={{ marginBottom:20 }}>
+                  <label style={{
+                    display:"block", fontFamily:T.body, fontSize:10,
+                    letterSpacing:"0.14em", color:C.textL, fontWeight:700,
+                    marginBottom:8, textTransform:"uppercase",
+                  }}>OBJET DE LA MODIFICATION *</label>
+                  <textarea
+                    value={objet}
+                    onChange={e => setObjet(e.target.value)}
+                    rows={3}
+                    placeholder="Ex : Ajout de 2 pages web supplémentaires à la mission initiale, incluant leur intégration et mise en ligne..."
+                    style={{
+                      width:"100%", padding:"12px 14px",
+                      fontFamily:T.body, fontSize:13, color:C.text, lineHeight:1.65,
+                      background:C.cream, border:`1.5px solid ${C.border}`,
+                      borderRadius:10, resize:"vertical", outline:"none",
+                      transition:"border-color 0.15s",
+                      boxSizing:"border-box",
+                    }}
+                    onFocus={e => e.target.style.borderColor = C.navy}
+                    onBlur={e => e.target.style.borderColor = C.border}
+                  />
+                  <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>
+                    Minimum 10 caractères • {objet.length} / min. 10
+                  </div>
+                </div>
+
+                <div style={{ marginBottom:24 }}>
+                  <label style={{
+                    display:"block", fontFamily:T.body, fontSize:10,
+                    letterSpacing:"0.14em", color:C.textL, fontWeight:700,
+                    marginBottom:8, textTransform:"uppercase",
+                  }}>AJUSTEMENT DU PRIX</label>
+                  <input
+                    type="text"
+                    value={ajustement}
+                    onChange={e => setAjustement(e.target.value)}
+                    placeholder="Ex : + 500 € HT  ou  0 €  ou  Prolongation sans surcoût"
+                    style={{
+                      width:"100%", padding:"12px 14px",
+                      fontFamily:T.body, fontSize:13, color:C.text,
+                      background:C.cream, border:`1.5px solid ${C.border}`,
+                      borderRadius:10, outline:"none",
+                      transition:"border-color 0.15s",
+                      boxSizing:"border-box",
+                    }}
+                    onFocus={e => e.target.style.borderColor = C.navy}
+                    onBlur={e => e.target.style.borderColor = C.border}
+                  />
+                  <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>
+                    Laisse vide si aucun changement de prix
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Rappel contractuel */}
             <div style={{
@@ -4189,7 +4423,7 @@ CONSIGNES :
                 style={{
                   flex:2, padding:"12px",
                   background: canGenerate
-                    ? "linear-gradient(135deg, #92400E 0%, #B45309 100%)"
+                    ? (mode === "magic" ? "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)" : "linear-gradient(135deg, #92400E 0%, #B45309 100%)")
                     : C.creamDD,
                   border:"none", borderRadius:10,
                   cursor: canGenerate ? "pointer" : "not-allowed",
@@ -4266,7 +4500,7 @@ CONSIGNES :
               {avenantText}
             </div>
 
-            {/* Actions : copier */}
+            {/* Actions : copier + PDF */}
             <div style={{ display:"flex", gap:8, marginBottom:14 }}>
               <button
                 onClick={handleCopy}
@@ -4283,53 +4517,102 @@ CONSIGNES :
               >
                 {copied ? <><span>✓</span> Copié !</> : <><span>📋</span> Copier le texte</>}
               </button>
+              <button
+                onClick={handleDownloadAvenantPDF}
+                style={{
+                  flex:1, padding:"10px",
+                  background:C.white, border:`1.5px solid ${C.border}`,
+                  borderRadius:8, cursor:"pointer",
+                  fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM,
+                  display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                }}
+              ><span>⬇</span> PDF</button>
             </div>
 
-            {/* Signature Flash */}
-            <div style={{
-              background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)",
-              border:"1.5px solid #BFDBFE",
-              borderRadius:12, padding:"16px 18px", marginBottom:14,
-            }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                <span style={{ fontSize:18 }}>✍️</span>
-                <div>
-                  <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#1D4ED8" }}>Zone de Signature Flash</div>
-                  <div style={{ fontFamily:T.body, fontSize:11, color:"#3B7DD8" }}>Protège-toi avant de démarrer les travaux supplémentaires</div>
+            {saveError && (
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 12px", marginBottom:12 }}>
+                ⚠️ La signature n'a pas pu être sauvegardée. Réessaie.
+              </div>
+            )}
+
+            {/* ── Étape 1 : signature du prestataire (toi) ── */}
+            {signStep === "sign-freelance" && (
+              <div style={{ background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)", border:"1.5px solid #BFDBFE", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                  <span style={{ fontSize:18 }}>✍️</span>
+                  <div>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#1D4ED8" }}>Signe d'abord ta part</div>
+                    <div style={{ fontFamily:T.body, fontSize:11, color:"#3B7DD8" }}>Avant d'envoyer l'avenant au client</div>
+                  </div>
+                </div>
+                <canvas
+                  ref={freelanceSigCanvasRef}
+                  width={420} height={120}
+                  onMouseDown={startFreelanceSigDraw} onMouseMove={drawFreelanceSig} onMouseUp={endFreelanceSigDraw} onMouseLeave={endFreelanceSigDraw}
+                  onTouchStart={startFreelanceSigDraw} onTouchMove={drawFreelanceSig} onTouchEnd={endFreelanceSigDraw}
+                  style={{ width:"100%", height:110, border:"2px dashed #93C5FD", borderRadius:8, background:"#FFFFFF", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
+                />
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={clearFreelanceSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"#fff", border:"1.5px solid #BFDBFE", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#3B7DD8" }}>Effacer</button>
+                  <button
+                    onClick={handleValidateFreelanceSig}
+                    disabled={!freelanceSigHasStrokes}
+                    style={{ flex:1, padding:"10px", background: freelanceSigHasStrokes ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : C.creamDD, color: freelanceSigHasStrokes ? "#fff" : C.textL, border:"none", borderRadius:8, cursor: freelanceSigHasStrokes ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700 }}
+                  >✓ Valider ma signature</button>
                 </div>
               </div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#1D4ED8", lineHeight:1.6, marginBottom:12, background:"#DBEAFE", borderRadius:8, padding:"8px 12px" }}>
-                📋 Envoie cet avenant par email à <strong>{form.clientName || "ton client"}</strong> pour qu'il/elle en prenne connaissance et confirme son accord avant de démarrer le travail supplémentaire.
-              </div>
-              {saveError && (
-                <div style={{ fontFamily:T.body, fontSize:11, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 12px", marginBottom:12 }}>
-                  ⚠️ L'avenant n'a pas pu être sauvegardé sur ton contrat. Copie-le pour ne pas le perdre.
+            )}
+
+            {/* ── Étape 2 : choisir la méthode ── */}
+            {signStep === "choose" && (
+              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
+                <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534", marginBottom:2 }}>✓ Ta signature est prête</div>
+                <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginBottom:12 }}>Comment le client doit-il signer ?</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  <button onClick={() => setSignStep("tactile")} style={{ padding:"11px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534", textAlign:"left" }}>👥 Ensemble maintenant, sur le même appareil</button>
+                  <button
+                    onClick={handleGenerateAvenantLink}
+                    disabled={avenantSignLoading}
+                    style={{ padding:"11px", background:avenantSignLoading ? C.creamDD : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)", border:"none", borderRadius:8, cursor:avenantSignLoading?"wait":"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:avenantSignLoading?C.textL:"#fff", textAlign:"left" }}
+                  >{avenantSignLoading ? "Génération…" : "📲 Envoyer un lien au client (à distance)"}</button>
                 </div>
-              )}
-              <button
-                onClick={handleSign}
-                disabled={signLoading}
-                style={{
-                  width:"100%", padding:"12px",
-                  background: signLoading
-                    ? C.creamDD
-                    : "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
-                  border:"none", borderRadius:8, cursor: signLoading ? "not-allowed" : "pointer",
-                  fontFamily:T.body, fontSize:13, fontWeight:700,
-                  color: signLoading ? C.textL : C.white,
-                  display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                  boxShadow: signLoading ? "none" : "0 4px 14px #2563EB30",
-                  transition:"all 0.2s",
-                }}
-                onMouseOver={e => { if(!signLoading){ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 24px #2563EB40"; }}}
-                onMouseOut={e => { e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow=signLoading?"none":"0 4px 14px #2563EB30"; }}
-              >
-                {signLoading
-                  ? <><span style={{ width:13, height:13, border:"2px solid #9CA3AF", borderTopColor:"transparent", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }}/> Envoi en cours…</>
-                  : <><span style={{ fontSize:16 }}>✉️</span> Envoyer l'avenant par email au client</>
-                }
-              </button>
-            </div>
+              </div>
+            )}
+
+            {/* ── Étape 3a : signature tactile du client ── */}
+            {signStep === "tactile" && (
+              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
+                <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534", marginBottom:2 }}>Passe l'appareil à {form.clientName || "ton client"}</div>
+                <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginBottom:10 }}>Pour qu'il/elle signe ci-dessous</div>
+                <canvas
+                  ref={clientSigCanvasRef}
+                  width={420} height={120}
+                  onMouseDown={startClientSigDraw} onMouseMove={drawClientSig} onMouseUp={endClientSigDraw} onMouseLeave={endClientSigDraw}
+                  onTouchStart={startClientSigDraw} onTouchMove={drawClientSig} onTouchEnd={endClientSigDraw}
+                  style={{ width:"100%", height:110, border:"2px dashed #86EFAC", borderRadius:8, background:"#fff", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
+                />
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={clearClientSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#166534" }}>Effacer</button>
+                  <button
+                    onClick={handleValidateClientTactile}
+                    disabled={!clientSigHasStrokes || avenantSignLoading}
+                    style={{ flex:1, padding:"10px", background: (clientSigHasStrokes && !avenantSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.creamDD, color: (clientSigHasStrokes && !avenantSignLoading) ? "#fff" : C.textL, border:"none", borderRadius:8, cursor: (clientSigHasStrokes && !avenantSignLoading) ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700 }}
+                  >{avenantSignLoading ? "Enregistrement…" : "✓ Valider la signature du client"}</button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Étape 3b : lien à distance prêt ── */}
+            {signStep === "remote-ready" && (
+              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
+                <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534", marginBottom:8 }}>✓ Lien de signature prêt</div>
+                <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                  <input readOnly value={avenantSignLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"9px 10px", border:"1px solid #86EFAC", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#166534", background:"#fff" }} />
+                  <button onClick={copyAvenantLink} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{avenantLinkCopied ? "Copié !" : "Copier"}</button>
+                </div>
+                <button onClick={handleSendAvenantEmail} style={{ width:"100%", padding:"10px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534" }}>✉️ Envoyer le lien par email au client</button>
+              </div>
+            )}
 
             <button onClick={onClose} style={{
               width:"100%", padding:"11px",
@@ -4351,10 +4634,10 @@ CONSIGNES :
               <div style={{ position:"absolute", top:-16, right:-16, width:80, height:80, borderRadius:"50%", background:"rgba(34,197,94,0.12)" }} />
               <div style={{ fontSize:44, marginBottom:12 }}>🔒</div>
               <div style={{ fontFamily:T.display, fontSize:20, color:"#4ADE80", fontWeight:700, marginBottom:6 }}>
-                Avenant n°{avenantNum} envoyé !
+                Avenant n°{avenantNum} — Scellé !
               </div>
               <div style={{ fontFamily:T.body, fontSize:12, color:"#86EFAC", lineHeight:1.65 }}>
-                Email envoyé à <strong style={{color:"#4ADE80"}}>{form.clientName || "votre client"}</strong> avec l'avenant.<br/>
+                Signé par toi et <strong style={{color:"#4ADE80"}}>{form.clientName || "votre client"}</strong>.<br/>
                 Sauvegardé sur ton contrat — retrouvable dans "Mes contrats".
               </div>
             </div>
@@ -8187,423 +8470,6 @@ function PricingCard({ icon, title, price, sub, features, color, cta, recommende
   );
 }
 
-/* ══════════════════════════════════════════ MAGIC AVENANT DETECTOR ══ */
-function MagicAvenantDetector({ entry }) {
-  const [clientMessage, setClientMessage] = useState("");
-  const [phase, setPhase] = useState("idle"); // idle | loading | result | sent
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
-  const [sentToast, setSentToast] = useState(false);
-
-  const contractNumMatch = entry?.contract && entry.contract.match(/CP-\d{4}-\d{3,5}/);
-  const contractNum = contractNumMatch ? contractNumMatch[0] : null;
-  const hasRealPrice = entry?.price && !isNaN(parseFloat(entry.price)) && parseFloat(entry.price) > 0;
-  const basePrice = hasRealPrice ? Number(entry.price) : null;
-
-  const canAnalyze = clientMessage.trim().length >= 15;
-
-  const handleAnalyze = async () => {
-    if (!canAnalyze) return;
-    setPhase("loading");
-    setError("");
-    try {
-      const prompt = `Tu es un juriste français expert en contrats de prestation de services freelance.
-
-Un client a envoyé le message suivant à son prestataire :
----
-"${clientMessage}"
----
-
-Contexte du contrat :
-- Numéro : ${contractNum || "non renseigné — ne pas en inventer un dans le texte"}
-- Mission : ${entry?.missionTitle || "Prestation de services"}
-- Prestataire : ${entry?.form?.freelanceName || "Le prestataire"}
-- Client : ${entry?.clientName || "Le client"}${entry?.clientCompany ? " (" + entry.clientCompany + ")" : ""}
-- Budget initial : ${basePrice ? `${basePrice} € HT` : "non renseigné sur ce contrat — ne jamais inventer de montant total"}
-
-Ta tâche : Analyse le message et réponds UNIQUEMENT en JSON valide (sans backticks, sans markdown), avec ce format exact :
-{
-  "modifications": [
-    { "type": "ajout" | "budget" | "delai" | "retrait" | "autre", "emoji": "➕" | "💰" | "📅" | "➖" | "🔄", "label": "description courte de la modification" }
-  ],
-  "nouveauBudget": ${basePrice ? `null ou nombre (si le client mentionne un ajustement financier, calcule le nouveau total en ajoutant au budget initial de ${basePrice}€)` : `toujours null — le budget initial n'est pas connu, ne calcule jamais de nouveau total`},
-  "ajustementBudget": null ou nombre (montant de l'ajustement seulement, positif ou négatif, si mentionné),
-  "nouvelleEcheance": null ou "date en toutes lettres" (si mentionnée),
-  "avenantNum": 1,
-  "avenantTexte": "Rédige ici l'avenant juridique complet en français, style officiel, commençant par : AVENANT N°1${contractNum ? ` AU CONTRAT ${contractNum}` : ""}\\n\\nEntre les soussignés :\\n${entry?.form?.freelanceName || 'Le prestataire'}, prestataire\\net ${entry?.clientName || 'Le client'}${entry?.clientCompany ? " (" + entry.clientCompany + ")" : ""}, client\\n\\nIl est convenu d'un commun accord que... (puis rédige 2-3 clauses juridiques claires basées sur le message du client, maximum 200 mots)"
-}
-
-Sois précis et réaliste. Si le message ne contient pas de changement clair, retourne un tableau modifications vide.`;
-
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
-      const raw = (data.content || []).map(i => i.text || "").join("").trim();
-      const clean = raw.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      setResult(parsed);
-      setPhase("result");
-    } catch (err) {
-      setError("Erreur lors de l'analyse. Vérifie ta connexion et réessaie.");
-      setPhase("idle");
-    }
-  };
-
-  const handleSend = () => {
-    const clientEmail = entry?.form?.clientEmail?.trim() || "";
-    const subject = `Avenant au contrat — ${entry?.missionTitle || "notre mission"}`;
-    const body = (result?.avenantTexte || "").replace(/\\n/g, "\n");
-    window.location.href = `mailto:${clientEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    setPhase("sent");
-    setSentToast(true);
-    setTimeout(() => setSentToast(false), 3500);
-  };
-
-  const handleDownloadAvenant = () => {
-    if (!window.jspdf || !result?.avenantTexte) { alert("PDF en cours de chargement, réessaie."); return; }
-    try {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: "mm", format: "a4" });
-      const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-      const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
-      const today = new Date().toLocaleDateString("fr-FR");
-      doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
-      doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
-      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
-      doc.text("AVENANT AU CONTRAT", ML, 15);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-      doc.text(`Établi le ${today} via Freeley`, ML, 23);
-      let y = 42;
-      doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(40,40,40);
-      const txt = (result.avenantTexte || "").replace(/\\n/g, "\n");
-      const lines = doc.splitTextToSize(txt, cw);
-      lines.forEach(l => {
-        if (y > 275) { doc.addPage(); y = 20; }
-        doc.text(l, ML, y); y += 6;
-      });
-      doc.save(`Avenant_Freeley_${Date.now()}.pdf`);
-    } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
-  };
-
-  const handleReset = () => {
-    setPhase("idle");
-    setResult(null);
-    setClientMessage("");
-    setError("");
-  };
-
-  return (
-    <div className="fade-up fade-up-4" style={{
-      background: "linear-gradient(135deg, #FAF5FF 0%, #F3E8FF 100%)",
-      border: "1.5px solid #C4B5FD",
-      borderRadius: 18,
-      padding: "0",
-      marginTop: 28,
-      overflow: "hidden",
-      boxShadow: "0 4px 24px #7C3AED12",
-    }}>
-
-      {/* Toast envoi */}
-      {sentToast && (
-        <div style={{ position:"fixed", top:80, left:"50%", transform:"translateX(-50%)", zIndex:9999, pointerEvents:"none", animation:"toastSlideIn 0.35s cubic-bezier(.22,.68,0,1.2) both" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10, background:"linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)", color:"#fff", borderRadius:50, padding:"13px 26px", fontFamily:T.body, fontSize:13, fontWeight:600, boxShadow:"0 8px 32px #7C3AED40", whiteSpace:"nowrap" }}>
-            <span style={{ fontSize:16 }}>✉️</span> Avenant envoyé pour signature !
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div style={{
-        background: "linear-gradient(135deg, #5B21B6 0%, #7C3AED 60%, #8B5CF6 100%)",
-        padding: "20px 24px 18px",
-        position: "relative",
-        overflow: "hidden",
-      }}>
-        <div style={{ position:"absolute", top:-24, right:-24, width:96, height:96, borderRadius:"50%", background:"rgba(255,255,255,0.08)", pointerEvents:"none" }} />
-        <div style={{ position:"absolute", bottom:-16, left:60, width:64, height:64, borderRadius:"50%", background:"rgba(255,255,255,0.05)", pointerEvents:"none" }} />
-        <div style={{ display:"flex", alignItems:"center", gap:12, position:"relative" }}>
-          <div style={{
-            width:42, height:42, borderRadius:11, flexShrink:0,
-            background:"rgba(255,255,255,0.18)",
-            display:"flex", alignItems:"center", justifyContent:"center",
-            fontSize:20, boxShadow:"0 2px 8px rgba(0,0,0,0.15)",
-          }}>⚡</div>
-          <div>
-            <div style={{ fontFamily:T.display, fontSize:17, color:"#fff", fontWeight:700, lineHeight:1.2 }}>
-              Détecteur d'Avenant Magique
-            </div>
-            <div style={{ fontFamily:T.body, fontSize:11, color:"#DDD6FE", marginTop:3, lineHeight:1.5 }}>
-              Votre client demande un changement par mail ou SMS ?<br />
-              Collez son message ici pour que l'IA mette à jour votre protection contractuelle.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div style={{ padding:"22px 24px 24px" }}>
-
-        {/* ── PHASE IDLE / INPUT ── */}
-        {(phase === "idle" || phase === "loading") && (
-          <>
-            <textarea
-              value={clientMessage}
-              onChange={e => setClientMessage(e.target.value)}
-              rows={4}
-              placeholder={`Exemple : "Salut ! Est-ce qu'on pourrait rajouter une option multilingue sur le site ? Je te rajoute 300€ sur le budget final et on décale la livraison au 30 septembre."`}
-              disabled={phase === "loading"}
-              style={{
-                width:"100%", padding:"13px 15px",
-                fontFamily:T.body, fontSize:13, color:C.text, lineHeight:1.65,
-                background: phase === "loading" ? C.creamD : C.white,
-                border:"1.5px solid #C4B5FD",
-                borderRadius:11, resize:"vertical", outline:"none",
-                transition:"border-color 0.15s, box-shadow 0.15s",
-                boxSizing:"border-box",
-                minHeight:110,
-              }}
-              onFocus={e => { e.target.style.borderColor="#7C3AED"; e.target.style.boxShadow="0 0 0 3px #7C3AED18"; }}
-              onBlur={e => { e.target.style.borderColor="#C4B5FD"; e.target.style.boxShadow="none"; }}
-            />
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:4, marginBottom:14 }}>
-              <div style={{ fontFamily:T.body, fontSize:10, color:"#8B5CF6" }}>
-                {clientMessage.length > 0 ? `${clientMessage.length} caractères` : "Minimum 15 caractères"}
-              </div>
-            </div>
-
-            {error && (
-              <div style={{ padding:"10px 14px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, fontFamily:T.body, fontSize:12, color:C.error, marginBottom:14 }}>
-                ⚠ {error}
-              </div>
-            )}
-
-            <button
-              onClick={handleAnalyze}
-              disabled={!canAnalyze || phase === "loading"}
-              style={{
-                width:"100%", padding:"14px",
-                background: canAnalyze && phase !== "loading"
-                  ? "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)"
-                  : C.creamDD,
-                border:"none", borderRadius:11,
-                cursor: canAnalyze && phase !== "loading" ? "pointer" : "not-allowed",
-                fontFamily:T.body, fontSize:14, fontWeight:700,
-                color: canAnalyze && phase !== "loading" ? "#fff" : C.textL,
-                display:"flex", alignItems:"center", justifyContent:"center", gap:9,
-                boxShadow: canAnalyze && phase !== "loading" ? "0 5px 18px #7C3AED35" : "none",
-                transition:"all 0.2s",
-              }}
-              onMouseOver={e => { if(canAnalyze && phase !== "loading"){ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 24px #7C3AED45"; }}}
-              onMouseOut={e => { e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow=canAnalyze&&phase!=="loading"?"0 5px 18px #7C3AED35":"none"; }}
-            >
-              {phase === "loading" ? (
-                <>
-                  <span style={{ width:15, height:15, border:"2px solid #C4B5FD", borderTopColor:"#fff", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }}/>
-                  Analyse en cours…
-                </>
-              ) : (
-                <>🪄 Analyser et générer l'avenant</>
-              )}
-            </button>
-          </>
-        )}
-
-        {/* ── PHASE RESULT ── */}
-        {phase === "result" && result && (
-          <div style={{ animation:"fadeUp 0.4s cubic-bezier(.22,.68,0,1.2) both" }}>
-
-            {/* Modifications détectées */}
-            <div style={{
-              background:"#fff",
-              border:"1.5px solid #DDD6FE",
-              borderRadius:12, padding:"16px 18px",
-              marginBottom:16,
-            }}>
-              <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.16em", fontWeight:700, color:"#7C3AED", marginBottom:12 }}>🔍 MODIFICATIONS DÉTECTÉES</div>
-
-              {result.modifications && result.modifications.length > 0 ? (
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {result.modifications.map((mod, i) => (
-                    <div key={i} style={{
-                      display:"flex", alignItems:"center", gap:10,
-                      padding:"9px 12px",
-                      background: "#FAFAFA",
-                      border:"1px solid #EDE9DF",
-                      borderRadius:8,
-                      fontFamily:T.body, fontSize:13, color:C.navy,
-                    }}>
-                      <span style={{ fontSize:16, flexShrink:0 }}>{mod.emoji}</span>
-                      <span style={{ fontWeight:500 }}>{mod.label}</span>
-                    </div>
-                  ))}
-
-                  {/* Budget ajusté */}
-                  {result.nouveauBudget && (
-                    <div style={{
-                      display:"flex", alignItems:"center", gap:10,
-                      padding:"9px 12px",
-                      background:"#F0FDF4", border:"1px solid #86EFAC",
-                      borderRadius:8,
-                      fontFamily:T.body, fontSize:13, color:"#15803D", fontWeight:600,
-                    }}>
-                      <span style={{ fontSize:16, flexShrink:0 }}>💰</span>
-                      <span>Budget ajusté : {result.ajustementBudget > 0 ? "+" : ""}{result.ajustementBudget?.toLocaleString("fr-FR")} € HT
-                        <span style={{ fontWeight:400, color:"#16A34A" }}> (Nouveau total : {result.nouveauBudget.toLocaleString("fr-FR")} € HT)</span>
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Nouvelle échéance */}
-                  {result.nouvelleEcheance && (
-                    <div style={{
-                      display:"flex", alignItems:"center", gap:10,
-                      padding:"9px 12px",
-                      background:"#EFF6FF", border:"1px solid #93C5FD",
-                      borderRadius:8,
-                      fontFamily:T.body, fontSize:13, color:"#1D4ED8", fontWeight:500,
-                    }}>
-                      <span style={{ fontSize:16, flexShrink:0 }}>📅</span>
-                      <span>Nouvelle échéance : <strong>{result.nouvelleEcheance}</strong></span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, padding:"10px 0", fontStyle:"italic" }}>
-                  Aucun changement structurant détecté. Reformule le message du client pour plus de précision.
-                </div>
-              )}
-            </div>
-
-            {/* Aperçu avenant commercial */}
-            {result.avenantTexte && (
-              <div style={{
-                background:"#FFFDF7",
-                border:"1.5px solid #D4AF7A",
-                borderRadius:12, padding:"18px 20px",
-                marginBottom:16,
-                position:"relative",
-                boxShadow:"0 2px 12px #B8965A10",
-              }}>
-                {/* Filigrane document officiel */}
-                <div style={{
-                  position:"absolute", top:12, right:14,
-                  fontFamily:T.body, fontSize:8, fontWeight:700,
-                  color:"#D4AF7A", letterSpacing:"0.18em",
-                  opacity:0.7, textTransform:"uppercase",
-                }}>DOCUMENT OFFICIEL</div>
-
-                <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.16em", fontWeight:700, color:C.gold, marginBottom:12 }}>📄 APERÇU DE L'AVENANT GÉNÉRÉ</div>
-
-                <div style={{
-                  fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.8,
-                  whiteSpace:"pre-wrap",
-                  maxHeight:220,
-                  overflowY:"auto",
-                  paddingRight:4,
-                }}>
-                  {result.avenantTexte}
-                </div>
-
-                {/* Barre de défilement info */}
-                <div style={{
-                  marginTop:10, paddingTop:10, borderTop:"1px solid #F0E8D8",
-                  fontFamily:T.body, fontSize:10, color:C.textL,
-                  display:"flex", alignItems:"center", gap:6,
-                }}>
-                  <span>⚖️</span>
-                  <span>Document conforme aux usages des prestations de services en France</span>
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-              <button
-                onClick={handleReset}
-                style={{
-                  flex:"0 0 auto", padding:"12px 18px",
-                  background:C.white, border:"1.5px solid #C4B5FD",
-                  borderRadius:10, cursor:"pointer",
-                  fontFamily:T.body, fontSize:13, fontWeight:500, color:"#7C3AED",
-                  transition:"all 0.15s",
-                }}
-                onMouseOver={e=>{ e.currentTarget.style.background="#F5F3FF"; }}
-                onMouseOut={e=>{ e.currentTarget.style.background=C.white; }}
-              >← Recommencer</button>
-
-              <button
-                onClick={handleDownloadAvenant}
-                style={{
-                  flex:"0 0 auto", padding:"12px 18px",
-                  background:C.white, border:"1.5px solid #C4B5FD",
-                  borderRadius:10, cursor:"pointer",
-                  fontFamily:T.body, fontSize:13, fontWeight:600, color:"#7C3AED",
-                  transition:"all 0.15s",
-                }}
-                onMouseOver={e=>{ e.currentTarget.style.background="#F5F3FF"; }}
-                onMouseOut={e=>{ e.currentTarget.style.background=C.white; }}
-              >⬇ PDF</button>
-
-              <button
-                onClick={handleSend}
-                style={{
-                  flex:1, padding:"13px 18px",
-                  background: "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
-                  border:"none", borderRadius:10,
-                  cursor:"pointer",
-                  fontFamily:T.body, fontSize:14, fontWeight:700, color:"#fff",
-                  display:"flex", alignItems:"center", justifyContent:"center", gap:9,
-                  boxShadow:"0 5px 18px #15803D35",
-                  transition:"all 0.2s",
-                }}
-                onMouseOver={e=>{ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 24px #15803D45"; }}
-                onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 5px 18px #15803D35"; }}
-              >
-                ✉️ Envoyer l'avenant au client
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── PHASE SENT ── */}
-        {phase === "sent" && (
-          <div style={{ textAlign:"center", padding:"28px 16px", animation:"fadeUp 0.4s cubic-bezier(.22,.68,0,1.2) both" }}>
-            <div style={{ fontSize:52, marginBottom:14 }}>🎉</div>
-            <div style={{ fontFamily:T.display, fontSize:20, color:"#5B21B6", fontWeight:700, marginBottom:8 }}>
-              Avenant envoyé avec succès !
-            </div>
-            <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.65, marginBottom:22 }}>
-              Ton application email s'est ouverte avec l'avenant prêt à envoyer à {entry?.clientName || "ton client"}. Il ne te reste qu'à l'envoyer. Tu peux aussi télécharger le PDF pour le joindre.
-            </div>
-            <button
-              onClick={handleReset}
-              style={{
-                padding:"11px 26px",
-                background:"linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)",
-                border:"none", borderRadius:10,
-                cursor:"pointer",
-                fontFamily:T.body, fontSize:13, fontWeight:700, color:"#fff",
-                boxShadow:"0 4px 14px #7C3AED35",
-              }}
-            >
-              🪄 Analyser un autre message
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /* ══════════════════════════════════════════ CONTRACT TIMELINE ══ */
 function ContractTimeline({ entry }) {
   const clientName = entry?.clientName || "le client";
@@ -9561,6 +9427,7 @@ function CGUPage({ onBack }) {
 function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showAvenantModal, setShowAvenantModal] = useState(false);
   const [paymentStatuses, setPaymentStatuses] = useState(() => {
     try { return JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) { return {}; }
   });
@@ -9706,7 +9573,34 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       </div>
 
       {/* ⚡ Détecteur d'Avenant Magique */}
-      <MagicAvenantDetector entry={historyView} />
+      <div style={{ marginTop:28 }}>
+        <button
+          onClick={() => setShowAvenantModal(true)}
+          style={{
+            width:"100%", padding:"16px 20px",
+            background: "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)",
+            border:"none", borderRadius:14, cursor:"pointer",
+            display:"flex", alignItems:"center", gap:12,
+            boxShadow:"0 4px 24px #7C3AED30",
+          }}
+        >
+          <span style={{ fontSize:22 }}>⚡</span>
+          <div style={{ textAlign:"left" }}>
+            <div style={{ fontFamily:T.display, fontSize:15, color:"#fff", fontWeight:700 }}>Créer un avenant</div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:"#DDD6FE" }}>Colle le message de ton client, ou remplis le formulaire toi-même</div>
+          </div>
+        </button>
+      </div>
+      {showAvenantModal && (
+        <AvenantModal
+          form={historyView.form}
+          contract={historyView.contract}
+          avenantCount={historyView.avenants?.length || 0}
+          contractId={historyView.id}
+          onClose={() => setShowAvenantModal(false)}
+          onCreated={() => {}}
+        />
+      )}
 
       {/* 🕒 Historique du contrat — Timeline des modifications */}
       <ContractTimeline entry={historyView} />
@@ -13538,6 +13432,129 @@ function NdaSignaturePage({ ndaId }) {
   );
 }
 
+function AvenantSignaturePage({ contractId, avenantNum }) {
+  const [loading, setLoading] = useState(true);
+  const [avenantData, setAvenantData] = useState(null);
+  const [error, setError] = useState("");
+  const [signing, setSigning] = useState(false);
+  const [done, setDone] = useState(false);
+  const canvasRef = useRef(null);
+  const [hasStrokes, setHasStrokes] = useState(false);
+  const drawing = useRef(false);
+
+  useEffect(() => {
+    getAvenantForSigning(contractId, avenantNum)
+      .then(data => {
+        if (!data) { setError("Avenant introuvable ou lien expiré."); }
+        else if (data.status === "signed") { setError("Cet avenant a déjà été signé. Merci !"); }
+        else { setAvenantData(data); }
+        setLoading(false);
+      })
+      .catch(() => { setError("Erreur de chargement."); setLoading(false); });
+  }, [contractId, avenantNum]);
+
+  const getPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return { x: (touch.clientX - rect.left) * (canvas.width / rect.width), y: (touch.clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const startDraw = (e) => { e.preventDefault(); drawing.current = true; const ctx = canvasRef.current.getContext("2d"); const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const draw = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const p = getPos(e);
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    setHasStrokes(true);
+  };
+  const endDraw = () => { drawing.current = false; };
+  const clearCanvas = () => { const c = canvasRef.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); setHasStrokes(false); };
+
+  const handleSign = async () => {
+    if (!hasStrokes) return;
+    setSigning(true);
+    const sig = canvasRef.current.toDataURL("image/png");
+    const ok = await submitAvenantSignature(contractId, avenantNum, sig);
+    setSigning(false);
+    if (ok) setDone(true);
+    else setError("Erreur lors de l'enregistrement. Réessaie.");
+  };
+
+  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+
+  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1B2E4B", fontSize:15 }}>Chargement de l'avenant…</div></div>;
+
+  if (error) return (
+    <div style={{ ...wrap, justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:32, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
+        <div style={{ fontSize:38, marginBottom:12 }}>{error.includes("déjà") ? "✅" : "⚠️"}</div>
+        <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>{error}</div>
+      </div>
+    </div>
+  );
+
+  if (done) return (
+    <div style={{ ...wrap, justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
+        <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Avenant signé !</div>
+        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Ta signature a bien été enregistrée. L'autre partie en est informée.</div>
+      </div>
+    </div>
+  );
+
+  const avenantText = (avenantData?.text || "").replace(/\\n/g, "\n");
+
+  return (
+    <div style={wrap}>
+      <div style={{ width:"100%", maxWidth:560 }}>
+        <div style={{ textAlign:"center", marginBottom:20 }}>
+          <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
+          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique — Avenant n°{avenantNum}</div>
+        </div>
+
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>AVENANT À SIGNER</div>
+          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
+            {avenantText || "Contenu de l'avenant indisponible."}
+          </div>
+        </div>
+
+        {avenantData?.freelanceSignature && (
+          <div style={{ background:"#fff", borderRadius:14, padding:"18px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+            <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:10 }}>SIGNATURE DU PRESTATAIRE</div>
+            <img src={avenantData.freelanceSignature} alt="Signature prestataire" style={{ maxWidth:200, height:56, objectFit:"contain" }} />
+          </div>
+        )}
+
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Ta signature</div>
+          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signe ci-dessous avec ton doigt (ou ta souris) pour accepter les termes de cet avenant.</div>
+          <canvas
+            ref={canvasRef}
+            width={520} height={180}
+            onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+            onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+            style={{ width:"100%", height:180, border:"2px dashed #C9A961", borderRadius:10, background:"#FFFDF9", touchAction:"none", cursor:"crosshair" }}
+          />
+          <div style={{ display:"flex", gap:10, marginTop:14 }}>
+            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:13, color:"#5A6B80", fontWeight:500 }}>Effacer</button>
+            <button
+              onClick={handleSign}
+              disabled={!hasStrokes || signing}
+              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+            >{signing ? "Enregistrement…" : "✓ Signer l'avenant"}</button>
+          </div>
+          <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
+            En signant, tu acceptes les termes de cet avenant. Signature horodatée et conservée conformément au droit français.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // Lien de signature client : ?sign=<contractId>
   const signParam = new URLSearchParams(window.location.search).get("sign");
@@ -13554,6 +13571,16 @@ export default function App() {
     return (
       <ErrorBoundary>
         <NdaSignaturePage ndaId={signNdaParam} />
+      </ErrorBoundary>
+    );
+  }
+  // Lien de signature Avenant : ?sign-avenant=<contractId>:<avenantNum>
+  const signAvenantParam = new URLSearchParams(window.location.search).get("sign-avenant");
+  if (signAvenantParam) {
+    const [aContractId, aNumStr] = signAvenantParam.split(":");
+    return (
+      <ErrorBoundary>
+        <AvenantSignaturePage contractId={aContractId} avenantNum={Number(aNumStr)} />
       </ErrorBoundary>
     );
   }
