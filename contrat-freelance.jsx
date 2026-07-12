@@ -1150,12 +1150,6 @@ function AppInner() {
     }
   };
 
-  // Yousign state
-  const [signModal, setSignModal]       = useState(false);
-  const [signLoading, setSignLoading]   = useState(false);
-  const [signError, setSignError]       = useState("");
-  const [signResult, setSignResult]     = useState(null);
-  const [signLinkCopied, setSignLinkCopied] = useState("");
   const [alertsTick, setAlertsTick] = useState(0); // force le recalcul des alertes (badge cloche) après lecture
   const [draftSavedToast, setDraftSavedToast] = useState(false);
   const [profileInitialTab, setProfileInitialTab] = useState(null);
@@ -1195,10 +1189,6 @@ function AppInner() {
 
   // ── Centre d'aide ──
   const [showHelp, setShowHelp] = useState(false);
-
-  // ── Avenant (amendment) modal state ──
-  const [showAvenantModal, setShowAvenantModal] = useState(false);
-  const [avenantCount, setAvenantCount] = useState(0);
 
   // ── Actions Instantanées IA ──
   const [showNdaModal, setShowNdaModal] = useState(false);
@@ -1886,102 +1876,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   };
 
   // ── Yousign : envoyer pour signature ──
-  const sendForSignature = async () => {
-    setSignLoading(true); setSignError("");
-    try {
-      const YOUSIGN_API_KEY = (typeof window !== "undefined" && window.__YOUSIGN_API_KEY__) || "";
-      const YOUSIGN_BASE = "https://api-sandbox.yousign.app/v3"; // sandbox; prod: https://api.yousign.app/v3
-
-      if (!YOUSIGN_API_KEY) throw new Error("Clé API Yousign manquante. Ajoute VITE_YOUSIGN_API_KEY dans ton .env");
-
-      // 1. Créer la signature request
-      const reqBody = {
-        name: `Contrat — ${form.missionTitle}`,
-        delivery_mode: "email",
-        signers: [
-          {
-            info: { first_name: form.freelanceName.split(" ")[0], last_name: form.freelanceName.split(" ").slice(1).join(" ") || form.freelanceName, email: form.freelanceEmail },
-            signature_level: "electronic_signature",
-            signature_authentication_mode: "no_otp",
-          },
-          {
-            info: { first_name: form.clientName.split(" ")[0], last_name: form.clientName.split(" ").slice(1).join(" ") || form.clientName, email: form.clientEmail },
-            signature_level: "electronic_signature",
-            signature_authentication_mode: "no_otp",
-          },
-        ],
-        timezone: "Europe/Paris",
-        email_notification: { sender: { name: "Freeley" } },
-      };
-
-      const reqRes = await fetch(`${YOUSIGN_BASE}/signature_requests`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${YOUSIGN_API_KEY}` },
-        body: JSON.stringify(reqBody),
-      });
-      if (!reqRes.ok) { const e = await reqRes.json(); throw new Error(e.detail || `Erreur ${reqRes.status}`); }
-      const reqData = await reqRes.json();
-      const requestId = reqData.id;
-
-      // 2. Upload le document (contrat en texte brut encodé en base64)
-      const encoder = new TextEncoder();
-      const contractBytes = encoder.encode(contract);
-      const base64 = btoa(String.fromCharCode(...contractBytes));
-
-      const docRes = await fetch(`${YOUSIGN_BASE}/signature_requests/${requestId}/documents`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${YOUSIGN_API_KEY}` },
-        body: JSON.stringify({
-          nature: "signable_document",
-          name: `Contrat_${form.missionTitle.replace(/[^a-zA-Z0-9]/g,"_").substring(0,30)}.txt`,
-          content: base64,
-          signature_fields: reqData.signers?.map((s, i) => ({
-            signer_id: s.id,
-            type: "signature",
-            page: 1,
-            x: 50 + i * 200,
-            y: 700,
-            width: 150,
-            height: 50,
-          })) || [],
-        }),
-      });
-      if (!docRes.ok) { const e = await docRes.json(); throw new Error(e.detail || `Erreur upload doc ${docRes.status}`); }
-
-      // 3. Activer la demande
-      const activateRes = await fetch(`${YOUSIGN_BASE}/signature_requests/${requestId}/activate`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${YOUSIGN_API_KEY}` },
-      });
-      if (!activateRes.ok) { const e = await activateRes.json(); throw new Error(e.detail || `Erreur activation ${activateRes.status}`); }
-      const activated = await activateRes.json();
-
-      // 4. Récupérer les liens de signature
-      const signersLinks = activated.signers?.map(s => ({
-        email: s.info?.email,
-        name: `${s.info?.first_name || ""} ${s.info?.last_name || ""}`.trim(),
-        link: s.signature_link,
-      })) || [];
-
-      setSignResult({ requestId, signerLinks: signersLinks });
-
-      // Mettre à jour le statut dans Supabase (dernier contrat de l'historique)
-      if (history[0]?.id && authUser?.id) {
-        await supabase
-          .from("contracts")
-          .update({ signature_status: "pending", signature_request_id: requestId })
-          .eq("id", history[0].id)
-          .eq("user_id", authUser.id); // Sécurité : interdit la modification d'un contrat appartenant à un autre user
-        const hist = await getHistory();
-        setHistory(hist);
-      }
-
-    } catch(err) {
-      setSignError(err.message || "Erreur lors de l'envoi. Vérifie ta clé API Yousign.");
-    }
-    setSignLoading(false);
-  };
-
   const downloadPDF = (overrideForm, overrideContract, overrideFreelanceSig, overrideClientSig, overrideSignedAt) => {
     const rawForm = overrideForm || form;
     const pForm = {
@@ -3531,138 +3425,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         /* ── CONTRACT RESULT ── */
         <div style={{ maxWidth:820, margin:"0 auto", padding:"24px 16px 80px" }}>
 
-          {/* Yousign Modal */}
-          {signModal && (
-            <div style={{ position:"fixed", inset:0, background:"#00000060", zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:"12px" }}>
-              <div className="fade-up" style={{ background:C.white, borderRadius:16, padding:"24px 16px", maxWidth:480, width:"100%", boxShadow:"0 24px 64px #00000030" }}>
-                {!signResult ? (
-                  <>
-                    <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
-                      <div style={{ width:44, height:44, background:"#EFF6FF", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>✍️</div>
-                      <div>
-                        <div style={{ fontFamily:T.display, fontSize:20, color:C.navy, fontWeight:600 }}>Signature électronique</div>
-                        <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginTop:2 }}>Via Yousign · RGPD · Valeur contractuelle</div>
-                      </div>
-                    </div>
-
-                    {/* Recap signataires */}
-                    <div style={{ background:C.creamD, borderRadius:10, padding:"14px 16px", marginBottom:20 }}>
-                      <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.12em", color:C.textL, fontWeight:600, marginBottom:10 }}>SIGNATAIRES</div>
-                      {[
-                        { role:"Prestataire", name: form.freelanceName, email: form.freelanceEmail },
-                        { role:"Client", name: form.clientName, email: form.clientEmail },
-                      ].map(s => (
-                        <div key={s.role} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
-                          <div style={{ width:28, height:28, background:C.navy, borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, color:C.white, fontWeight:700, flexShrink:0 }}>
-                            {s.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy }}>{s.name}</div>
-                            <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{s.email} · {s.role}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:8, padding:"10px 14px", marginBottom:20, fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6 }}>
-                      ℹ️ Chaque signataire recevra un email avec son lien de signature personnel. Tu peux aussi leur partager le lien directement.
-                    </div>
-
-                    {signError && (
-                      <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"10px 14px", marginBottom:16, fontFamily:T.body, fontSize:12, color:C.error }}>
-                        ⚠ {signError}
-                      </div>
-                    )}
-
-                    <div style={{ display:"flex", gap:10 }}>
-                      <button onClick={() => { setSignModal(false); setSignError(""); }} style={{
-                        flex:1, padding:"12px", background:C.creamD, border:`1px solid ${C.border}`,
-                        borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
-                      }}>Annuler</button>
-                      <button onClick={sendForSignature} disabled={signLoading} style={{
-                        flex:2, padding:"12px", background: signLoading ? C.creamDD : C.navy,
-                        border:"none", borderRadius:8, cursor: signLoading ? "not-allowed" : "pointer",
-                        fontSize:13, fontFamily:T.body, fontWeight:600, color: signLoading ? C.textL : C.white,
-                        display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                      }}>
-                        {signLoading ? (
-                          <><span style={{ width:13, height:13, border:`2px solid ${C.textL}`, borderTopColor:"transparent", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }}/> Envoi en cours…</>
-                        ) : "✍ Envoyer pour signature"}
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  /* ── Succès Yousign ── */
-                  <>
-                    <div style={{ textAlign:"center", marginBottom:24 }}>
-                      <div style={{ width:56, height:56, background:"#F0FDF4", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 16px", fontSize:26 }}>✅</div>
-                      <div style={{ fontFamily:T.display, fontSize:22, color:C.navy, fontWeight:600, marginBottom:6 }}>Demande envoyée !</div>
-                      <p style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.6 }}>
-                        Les deux parties ont reçu un email. Tu peux aussi partager les liens ci-dessous.
-                      </p>
-                    </div>
-
-                    {signResult.signerLinks.map((s, i) => (
-                      <div key={i} style={{ background:C.creamD, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", marginBottom:10 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-                          <div>
-                            <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy }}>{s.name}</div>
-                            <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{s.email}</div>
-                          </div>
-                          <span style={{ fontFamily:T.body, fontSize:10, background:"#DBEAFE", color:"#1D4ED8", padding:"3px 10px", borderRadius:20, fontWeight:600 }}>EN ATTENTE</span>
-                        </div>
-                        {s.link && (
-                          <>
-                            <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:8 }}>
-                              <div style={{ flex:1, background:C.white, border:`1px solid ${C.border}`, borderRadius:6, padding:"7px 10px", fontFamily:T.body, fontSize:11, color:C.textM, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                                {s.link}
-                              </div>
-                              <button onClick={() => {
-                                navigator.clipboard.writeText(s.link);
-                                setSignLinkCopied(s.email);
-                                setTimeout(() => setSignLinkCopied(""), 2500);
-                              }} style={{
-                                padding:"7px 14px", background: signLinkCopied === s.email ? "#16A34A" : C.navy,
-                                color:C.white, border:"none", borderRadius:6, cursor:"pointer",
-                                fontSize:11, fontFamily:T.body, fontWeight:600, flexShrink:0, transition:"background 0.2s",
-                              }}>{signLinkCopied === s.email ? "✓ Copié" : "Copier"}</button>
-                            </div>
-                            <button
-                              onClick={() => {
-                                const msg = `Bonjour ${s.name} ! Voici ton lien pour signer le contrat en ligne : ${s.link}`;
-                                if (navigator.share) {
-                                  navigator.share({ title:"Lien de signature", text: msg, url: s.link }).catch(() => {});
-                                } else {
-                                  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
-                                }
-                              }}
-                              style={{
-                                width:"100%", padding:"9px 14px",
-                                background:"linear-gradient(135deg, #25D366 0%, #128C7E 100%)",
-                                color:"#fff", border:"none", borderRadius:7, cursor:"pointer",
-                                fontFamily:T.body, fontSize:12, fontWeight:700,
-                                display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                                boxShadow:"0 3px 10px #25D36630", transition:"all 0.18s",
-                              }}
-                              onMouseOver={e=>{ e.currentTarget.style.opacity="0.88"; e.currentTarget.style.transform="translateY(-1px)"; }}
-                              onMouseOut={e=>{ e.currentTarget.style.opacity="1"; e.currentTarget.style.transform="translateY(0)"; }}
-                            >🔗 Envoyer le lien (WhatsApp / SMS)</button>
-                          </>
-                        )}
-                      </div>
-                    ))}
-
-                    <button onClick={() => { setSignModal(false); }} style={{
-                      width:"100%", marginTop:16, padding:"12px", background:C.creamD,
-                      border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer",
-                      fontSize:13, fontFamily:T.body, color:C.textM,
-                    }}>Fermer</button>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* Top bar */}
           <div className="fade-up" style={{
             background:C.navy, borderRadius:12, padding:"18px 16px",
@@ -3833,72 +3595,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               }}>↩</button>
             </div>
           </div>
-
-          {/* ── AVENANT BUTTON ── */}
-          <div className="fade-up fade-up-1" style={{ marginBottom:24 }}>
-            <button
-              onClick={() => setShowAvenantModal(true)}
-              style={{
-                width:"100%", padding:"16px 24px",
-                background:"linear-gradient(135deg, #FFFBEB 0%, #FEF9EE 100%)",
-                border:"1.5px solid #FCD34D",
-                borderRadius:12, cursor:"pointer",
-                display:"flex", alignItems:"center", gap:14,
-                transition:"all 0.2s",
-                boxShadow:"0 2px 8px #B8965A10",
-              }}
-              onMouseOver={e=>{ e.currentTarget.style.background="linear-gradient(135deg, #FEF9EE 0%, #FEF3C7 100%)"; e.currentTarget.style.boxShadow="0 6px 20px #B8965A20"; e.currentTarget.style.transform="translateY(-1px)"; }}
-              onMouseOut={e=>{ e.currentTarget.style.background="linear-gradient(135deg, #FFFBEB 0%, #FEF9EE 100%)"; e.currentTarget.style.boxShadow="0 2px 8px #B8965A10"; e.currentTarget.style.transform="translateY(0)"; }}
-            >
-              <div style={{
-                width:42, height:42, borderRadius:10, flexShrink:0,
-                background:"linear-gradient(135deg, #F59E0B 0%, #FBBF24 100%)",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                fontSize:20, boxShadow:"0 4px 12px #F59E0B30",
-              }}>➕</div>
-              <div style={{ flex:1, textAlign:"left" }}>
-                <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#92400E", marginBottom:2 }}>
-                  Créer un avenant
-                  <span style={{
-                    marginLeft:10, fontFamily:T.body, fontSize:10, fontWeight:700,
-                    background:"#F59E0B", color:C.white,
-                    padding:"2px 8px", borderRadius:20, letterSpacing:"0.05em",
-                    verticalAlign:"middle",
-                  }}>Ajout / Modification</span>
-                </div>
-                <div style={{ fontFamily:T.body, fontSize:12, color:"#B45309" }}>
-                  Modifier le périmètre ou le prix sans refaire tout le contrat
-                </div>
-              </div>
-              <span style={{ fontSize:18, color:"#F59E0B", fontWeight:700, flexShrink:0 }}>→</span>
-            </button>
-
-            {/* Info tooltip sous le bouton */}
-            <div style={{
-              display:"flex", alignItems:"flex-start", gap:8,
-              marginTop:8, padding:"8px 14px",
-              fontFamily:T.body, fontSize:11,
-              color:C.textL, fontStyle:"italic",
-              lineHeight:1.6,
-            }}>
-              <span style={{ fontSize:13, flexShrink:0, marginTop:1 }}>ℹ️</span>
-              <span>
-                Un avenant permet de modifier le prix ou d'ajouter des prestations en cours de mission sans refaire tout le contrat, tout en restant couvert contractuellement.
-              </span>
-            </div>
-          </div>
-
-          {/* Avenant Modal */}
-          {showAvenantModal && (
-            <AvenantModal
-              form={form}
-              contract={contract}
-              avenantCount={avenantCount}
-              contractId={history[0]?.id}
-              onClose={() => setShowAvenantModal(false)}
-              onCreated={() => setAvenantCount(n => n + 1)}
-            />
-          )}
 
           {/* Contract body — rendered Markdown */}
           <div className="fade-up fade-up-2">
@@ -9771,24 +9467,34 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         </div>
       )}
 
-      {/* ⚡ Détecteur d'Avenant Magique */}
+      {/* ⚡ Créer un avenant — uniquement possible une fois le contrat signé */}
       <div style={{ marginTop:28 }}>
-        <button
-          onClick={() => setShowAvenantModal(true)}
-          style={{
-            width:"100%", padding:"16px 20px",
-            background: "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)",
-            border:"none", borderRadius:14, cursor:"pointer",
-            display:"flex", alignItems:"center", gap:12,
-            boxShadow:"0 4px 24px #7C3AED30",
-          }}
-        >
-          <span style={{ fontSize:22 }}>⚡</span>
-          <div style={{ textAlign:"left" }}>
-            <div style={{ fontFamily:T.display, fontSize:15, color:"#fff", fontWeight:700 }}>Créer un avenant</div>
-            <div style={{ fontFamily:T.body, fontSize:11.5, color:"#DDD6FE" }}>Colle le message de ton client, ou remplis le formulaire toi-même</div>
+        {historyView.signatureStatus === "signed" ? (
+          <button
+            onClick={() => setShowAvenantModal(true)}
+            style={{
+              width:"100%", padding:"16px 20px",
+              background: "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)",
+              border:"none", borderRadius:14, cursor:"pointer",
+              display:"flex", alignItems:"center", gap:12,
+              boxShadow:"0 4px 24px #7C3AED30",
+            }}
+          >
+            <span style={{ fontSize:22 }}>⚡</span>
+            <div style={{ textAlign:"left" }}>
+              <div style={{ fontFamily:T.display, fontSize:15, color:"#fff", fontWeight:700 }}>Créer un avenant</div>
+              <div style={{ fontFamily:T.body, fontSize:11.5, color:"#DDD6FE" }}>Colle le message de ton client, ou remplis le formulaire toi-même</div>
+            </div>
+          </button>
+        ) : (
+          <div style={{ background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"16px 20px", display:"flex", alignItems:"center", gap:12 }}>
+            <span style={{ fontSize:22, opacity:0.5 }}>⚡</span>
+            <div>
+              <div style={{ fontFamily:T.display, fontSize:14, color:C.textM, fontWeight:700 }}>Créer un avenant</div>
+              <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>Disponible une fois ce contrat signé par les deux parties — avant ça, utilise plutôt "Réviser le contrat".</div>
+            </div>
           </div>
-        </button>
+        )}
       </div>
       {showAvenantModal && (
         <AvenantModal
