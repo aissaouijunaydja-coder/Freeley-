@@ -9120,13 +9120,22 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
 
   history.forEach(c => {
     const price = parseFloat(c.price) || 0;
-    caTotal += price;
+    // Les avenants signés font partie du chiffre d'affaires réel de la mission, qu'ils soient déjà payés ou non
+    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
+    const avenantsSignedTotal = avenants.filter(a => a.status === "signed" && a.ajustementMontant > 0).reduce((s,a) => s + a.ajustementMontant, 0);
+    const avenantsPaidTotal = avenants.filter(a => a.status === "signed" && a.ajustementMontant > 0 && a.paymentReceived).reduce((s,a) => s + a.ajustementMontant, 0);
+    const avenantsUnpaidTotal = avenantsSignedTotal - avenantsPaidTotal;
+
+    caTotal += price + avenantsSignedTotal;
     const st = payStatus[c.id] || "pending";
     if (st === "paid") { caPaid += price; nbPaid++; }
     else {
       caPending += price;
       if (st === "late") nbLate++; else nbPending++;
     }
+    // Les avenants payés/impayés s'ajoutent indépendamment du statut du contrat principal
+    caPaid += avenantsPaidTotal;
+    caPending += avenantsUnpaidTotal;
   });
 
   const fmt = (n) => n.toLocaleString("fr-FR");
@@ -9134,7 +9143,15 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
   const caThisYear = history.reduce((sum, c) => {
     const d = c.date ? c.date.split("/") : null;
     const y = d && d[2] ? Number(d[2]) : null;
-    return y === currentYear ? sum + (parseFloat(c.price) || 0) : sum;
+    let contractTotal = y === currentYear ? (parseFloat(c.price) || 0) : 0;
+    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
+    avenants.forEach(a => {
+      if (a.status === "signed" && a.ajustementMontant > 0) {
+        const aDate = a.signedByClientAt || a.createdAt;
+        if (aDate && new Date(aDate).getFullYear() === currentYear) contractTotal += a.ajustementMontant;
+      }
+    });
+    return sum + contractTotal;
   }, 0);
   const panierMoyen = total > 0 ? caTotal / total : 0;
 
@@ -9158,6 +9175,19 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
     const m = months.find(mo => mo.year === d.getFullYear() && mo.month === d.getMonth());
     if (m) m.total += parseFloat(c.price) || 0;
   });
+  // Ajoute les avenants signés au mois où ils ont réellement été signés
+  history.forEach(c => {
+    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
+    avenants.forEach(a => {
+      if (a.status !== "signed" || !(a.ajustementMontant > 0)) return;
+      const aDateStr = a.signedByClientAt || a.createdAt;
+      if (!aDateStr) return;
+      const aDate = new Date(aDateStr);
+      if (isNaN(aDate)) return;
+      const m = months.find(mo => mo.year === aDate.getFullYear() && mo.month === aDate.getMonth());
+      if (m) m.total += a.ajustementMontant;
+    });
+  });
   const maxMonth = Math.max(1, ...months.map(m => m.total));
 
   // ── Meilleurs clients ──
@@ -9165,7 +9195,9 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
   history.forEach(c => {
     const key = c.clientName || "Client sans nom";
     if (!clientsMap[key]) clientsMap[key] = { name: key, company: c.clientCompany || "", total: 0, count: 0 };
-    clientsMap[key].total += parseFloat(c.price) || 0;
+    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
+    const avenantsSignedTotal = avenants.filter(a => a.status === "signed" && a.ajustementMontant > 0).reduce((s,a) => s + a.ajustementMontant, 0);
+    clientsMap[key].total += (parseFloat(c.price) || 0) + avenantsSignedTotal;
     clientsMap[key].count += 1;
   });
   const topClients = Object.values(clientsMap).sort((a, b) => b.total - a.total).slice(0, 5);
