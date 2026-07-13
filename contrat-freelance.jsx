@@ -2914,6 +2914,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
           onGoToProfileTva={goToProfileFacturation}
           authUser={authUser}
+          onGoToHistory={() => { if (history[0]) setHistoryView(history[0]); goToScreen("history"); }}
         />
       )}
       {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} profile={profile} authUser={authUser} />}
@@ -11582,7 +11583,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, authUser }) {
+function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, authUser, onGoToHistory }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -11598,9 +11599,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const [freelanceHasStrokes, setFreelanceHasStrokes] = useState(false);
   const [clientHasStrokes, setClientHasStrokes] = useState(false);
 
-  const acomptePct = depositPctProp ?? 30;
-  const isComptant = acomptePct === 100;
-  const acompte = form.price ? Math.round(Number(form.price) * (acomptePct / 100)) : 0;
+  // Utilise le vrai pourcentage configuré sur CE contrat — jamais un réglage générique d'un autre outil
+  const acomptePct = form.acomptePourcentage != null && form.acomptePourcentage !== "" ? Number(form.acomptePourcentage) : 0;
+  const isComptant = acomptePct === 0;
+  const acompte = form.price ? (isComptant ? Number(form.price) : Math.round(Number(form.price) * (acomptePct / 100))) : 0;
   const clientName = form.clientName || "Jean Dupont";
   const [showDepositInvoiceModal, setShowDepositInvoiceModal] = useState(false);
 
@@ -11656,8 +11658,41 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     setHasStrokes(false);
   };
 
+  const [freelanceSigCapture, setFreelanceSigCapture] = useState(null);
+  const [tactilePaymentLink, setTactilePaymentLink] = useState("");
+  const [tactilePaymentLoading, setTactilePaymentLoading] = useState(false);
+  const [tactilePaymentCopied, setTactilePaymentCopied] = useState(false);
+
+  const handleGetTactilePaymentLink = async () => {
+    if (tactilePaymentLoading) return;
+    setTactilePaymentLoading(true);
+    try {
+      const res = await fetch("/api/create-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: acompte,
+          description: `${isComptant ? "Paiement" : "Acompte"} — ${form?.missionTitle || "Prestation Freeley"}`,
+          customerEmail: form?.clientEmail || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      setTactilePaymentLink(data.url);
+      navigator.clipboard.writeText(data.url).catch(()=>{});
+      setTactilePaymentCopied(true);
+      setTimeout(() => setTactilePaymentCopied(false), 2800);
+    } catch(e) {
+      alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
+    } finally {
+      setTactilePaymentLoading(false);
+    }
+  };
+
   const handleValidateFreelance = () => {
     if (!freelanceHasStrokes) return;
+    // Capture immédiatement l'image dessinée — le canevas disparaît de l'écran dès l'étape suivante
+    setFreelanceSigCapture(freelanceCanvasRef.current?.toDataURL("image/png") || null);
     setFreelanceSigned(true);
     setStep(1);
   };
@@ -11672,7 +11707,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
       // Sauvegarde réelle des deux signatures dessinées, sinon elles disparaissent à la fermeture
       if (contractId) {
         try {
-          const freelanceSig = freelanceCanvasRef.current?.toDataURL("image/png") || null;
+          const freelanceSig = freelanceSigCapture; // capturée à l'étape précédente, le canevas n'existe plus ici
           const clientSig = clientCanvasRef.current?.toDataURL("image/png") || null;
           const { data: existing, error: e1 } = await supabase.from("contracts").select("content").eq("id", contractId).single();
           if (e1) throw e1;
@@ -12143,15 +12178,27 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 Télécharger la facture d'acompte (PDF)
               </button>
 
-              {/* Payment methods */}
-              <div style={{ display:"flex", gap:8, marginBottom:20 }}>
-                {["Apple Pay", "💳 Carte bancaire", "🏦 Virement"].map(m => (
-                  <div key={m} style={{
-                    flex:1, background:C.creamD, borderRadius:8, padding:"8px 6px",
-                    fontFamily:T.body, fontSize:10, fontWeight:600, color:C.textM,
-                    textAlign:"center", border:`1px solid ${C.border}`,
-                  }}>{m}</div>
-                ))}
+              {/* Lien de paiement réel */}
+              <div style={{ marginBottom:20 }}>
+                {!tactilePaymentLink ? (
+                  <button
+                    onClick={handleGetTactilePaymentLink}
+                    disabled={tactilePaymentLoading}
+                    style={{
+                      width:"100%", padding:"12px", borderRadius:10, border:"none",
+                      background: tactilePaymentLoading ? C.creamDD : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
+                      color: tactilePaymentLoading ? C.textL : "#fff",
+                      cursor: tactilePaymentLoading ? "wait" : "pointer",
+                      fontFamily:T.body, fontSize:13, fontWeight:700,
+                    }}
+                  >{tactilePaymentLoading ? "Génération du lien…" : "💳 Générer le lien de paiement par carte"}</button>
+                ) : (
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input readOnly value={tactilePaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"9px 10px", border:"1px solid #86EFAC", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#166534", background:"#F0FDF4" }} />
+                    <button onClick={() => { navigator.clipboard.writeText(tactilePaymentLink); setTactilePaymentCopied(true); setTimeout(()=>setTactilePaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{tactilePaymentCopied ? "Copié !" : "Copier"}</button>
+                  </div>
+                )}
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:6, textAlign:"center" }}>Carte bancaire (Stripe) — ou par virement avec l'IBAN sur la facture</div>
               </div>
 
               {/* Confirm message */}
@@ -12201,17 +12248,25 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 </button>
               </div>
 
-              <button onClick={onClose} style={{
-                width:"100%", padding:"13px",
-                background:C.navy, color:C.white,
-                border:"none", borderRadius:10, cursor:"pointer",
-                fontSize:14, fontFamily:T.body, fontWeight:700,
-                boxShadow:"0 4px 14px #1B2E4B28",
-                transition:"all 0.2s",
-              }}
-                onMouseOver={e=>{ e.currentTarget.style.background="#152438"; e.currentTarget.style.transform="translateY(-1px)"; }}
-                onMouseOut={e=>{ e.currentTarget.style.background=C.navy; e.currentTarget.style.transform="translateY(0)"; }}
-              >✓ Fermer — Revenir au contrat</button>
+              <div style={{ display:"flex", gap:10 }}>
+                <button onClick={onClose} style={{
+                  flex:1, padding:"13px",
+                  background:C.white, color:C.navy,
+                  border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer",
+                  fontSize:13, fontFamily:T.body, fontWeight:600,
+                }}>Fermer</button>
+                <button onClick={() => { if (onGoToHistory) onGoToHistory(); onClose(); }} style={{
+                  flex:2, padding:"13px",
+                  background:C.navy, color:C.white,
+                  border:"none", borderRadius:10, cursor:"pointer",
+                  fontSize:14, fontFamily:T.body, fontWeight:700,
+                  boxShadow:"0 4px 14px #1B2E4B28",
+                  transition:"all 0.2s",
+                }}
+                  onMouseOver={e=>{ e.currentTarget.style.background="#152438"; e.currentTarget.style.transform="translateY(-1px)"; }}
+                  onMouseOut={e=>{ e.currentTarget.style.background=C.navy; e.currentTarget.style.transform="translateY(0)"; }}
+                >📁 Voir dans Mes contrats</button>
+              </div>
             </div>
           )}
 
