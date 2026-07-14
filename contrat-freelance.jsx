@@ -1863,6 +1863,25 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       setReviseSuccess(true);
       setReviseMessage("");
       setTimeout(() => { setReviseSuccess(false); setReviseOpen(false); }, 2600);
+      // Sauvegarde réelle du texte révisé — sinon la version corrigée n'existe que le temps de la session
+      const contractId = history[0]?.id;
+      if (contractId) {
+        try {
+          const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+          if (e1) throw e1;
+          const currentContent = parseContent(existing.content);
+          const newContent = { ...currentContent, contract: newContract };
+          const { error: e2 } = await supabase.rpc("update_contract_content", {
+            p_contract_id: contractId,
+            p_new_content: JSON.stringify(newContent),
+            p_new_status: existing.status,
+          });
+          if (e2) throw e2;
+          setHistory(await getHistory());
+        } catch(e) {
+          console.error("Erreur sauvegarde révision:", e);
+        }
+      }
     } catch(e) {
       setReviseError("Erreur lors de la révision. Vérifie ta connexion et réessaie.");
     } finally {
