@@ -236,6 +236,7 @@ const getHistory = async () => {
       signedByClientAt: content.signedByClientAt || contenu.signedByClientAt || null,
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
+      paymentStatus: row.payment_status || "pending",
     };
   });
 };
@@ -4059,6 +4060,7 @@ CONSIGNES :
           amount: effectiveAjustement,
           description: `Avenant n°${avenantNum} — ${form.missionTitle || "mission"}`,
           customerEmail: form.clientEmail || undefined,
+          metadata: { contractId: contractId || "", paymentType: "avenant", avenantNum: String(avenantNum) },
         }),
       });
       const data = await res.json();
@@ -5483,13 +5485,11 @@ const markAllAlertsReadPersist = (ids) => {
 function getRecouvrementCases(history) {
   if (!Array.isArray(history) || !history.length) return [];
   const now = new Date();
-  let payStatus = {};
-  try { payStatus = JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) {}
 
   const cases = [];
   history.forEach(c => {
     const basePrice = parseFloat(c.price) || 0;
-    const baseIsPaid = payStatus[c.id] === "paid";
+    const baseIsPaid = c.paymentStatus === "paid";
     // Les avenants signés mais pas encore marqués payés restent dus, même si le contrat de base est réglé
     const avenants = Array.isArray(c.avenants) ? c.avenants : [];
     const unpaidAvenantsTotal = avenants
@@ -8543,6 +8543,7 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
         amount: depositAmt,
         description: `${paymentWordCap} — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
+        metadata: { contractId: entry?.id || "", paymentType: "contract" },
       }),
     });
     const data = await res.json();
@@ -8833,10 +8834,6 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
 
 /* ══════════════════════════════════════════ HISTORY PAGE ══ */
 function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenContract }) {
-  // Statuts de paiement stockés
-  let payStatus = {};
-  try { payStatus = JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) {}
-
   const total = history.length;
   let caTotal = 0, caPaid = 0, caPending = 0, nbPaid = 0, nbPending = 0, nbLate = 0;
   let caFromAvenants = 0, caFromAvenantsPaid = 0;
@@ -8853,7 +8850,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
     caFromAvenantsPaid += avenantsPaidTotal;
 
     caTotal += price + avenantsSignedTotal;
-    const st = payStatus[c.id] || "pending";
+    const st = c.paymentStatus || "pending";
     if (st === "paid") { caPaid += price; nbPaid++; }
     else {
       caPending += price;
@@ -9229,15 +9226,12 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     if (onRefreshHistory) onRefreshHistory();
   }, []);
 
-  const [paymentStatuses, setPaymentStatuses] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("freeley_payment_status") || "{}"); } catch(e) { return {}; }
-  });
-  const setPaymentStatus = (contractId, status) => {
-    setPaymentStatuses(prev => {
-      const next = { ...prev, [contractId]: status };
-      try { localStorage.setItem("freeley_payment_status", JSON.stringify(next)); } catch(e) {}
-      return next;
-    });
+  // Écrit le vrai statut en base — plus dans le navigateur, pour que le webhook Stripe (côté serveur) puisse aussi le faire
+  const setPaymentStatus = async (contractId, status) => {
+    try {
+      await supabase.from("contracts").update({ payment_status: status }).eq("id", contractId);
+    } catch(e) { console.error("Erreur mise à jour statut paiement:", e); }
+    if (onRefreshHistory) await onRefreshHistory(); // recharge les données fraîches (met aussi à jour historyView)
     if (onPaymentStatusChanged) onPaymentStatusChanged(); // rafraîchit immédiatement la cloche d'alertes
   };
   const [deletingId, setDeletingId] = useState(null);
@@ -9335,7 +9329,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
       {/* Suivi du paiement */}
       {(() => {
-        const st = paymentStatuses[historyView.id] || "pending";
+        const st = historyView.paymentStatus || "pending";
         const options = [
           { key:"pending", label:"⏳ En attente", bg:"#FEF3C7", border:"#FCD34D", color:"#92400E" },
           { key:"paid", label:"✓ Payé", bg:"#D1FAE5", border:"#6EE7B7", color:"#065F46" },
@@ -9401,7 +9395,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* 🛡️ Garant d'Acompte Automatique */}
-      <DepositGuard entry={historyView} paid={paymentStatuses[historyView.id] === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} />
+      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} />
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
@@ -11674,6 +11668,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           amount: acompte,
           description: `${isComptant ? "Paiement" : "Acompte"} — ${form?.missionTitle || "Prestation Freeley"}`,
           customerEmail: form?.clientEmail || undefined,
+          metadata: { contractId: contractId || "", paymentType: "contract" },
         }),
       });
       const data = await res.json();
