@@ -8555,6 +8555,9 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
   // Récupère un lien de paiement existant, ou en crée un nouveau (réutilisé par "Copier le lien" et "Relancer")
   const ensurePaymentLink = async () => {
     if (stripeLinkUrl) return stripeLinkUrl;
+    if (!entry?.id) {
+      alert("⚠️ Problème détecté : ce contrat n'a pas d'identifiant valide (entry.id est vide). Le paiement automatique ne pourra pas fonctionner pour ce lien. Réessaie depuis 'Mes contrats' après un rafraîchissement de la page.");
+    }
     const res = await fetch("/api/create-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
