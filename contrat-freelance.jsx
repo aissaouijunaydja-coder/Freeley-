@@ -1087,7 +1087,7 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results","profile-gate","dashboard","cgu","drafts","mes-ndas"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","profile-gate","dashboard","cgu","drafts","mes-ndas","archives"].includes(saved) ? saved : "app";
   });
   const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
@@ -2867,6 +2867,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             return fresh || current;
           });
         }}
+        onGoToArchives={() => goToScreen("archives")}
       />
       {ratingModal && (
         <ClientRatingModal
@@ -2877,6 +2878,28 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onSave={handleSaveRating}
         />
       )}
+    </Shell>
+  );
+
+  /* ── ARCHIVES (contrats supprimés) ── */
+  if (screen === "archives") return (
+    <Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <ArchivesPage
+        history={history}
+        onBack={() => goToScreen("history")}
+        profile={profile}
+        authUser={authUser}
+        onRestore={async (id) => {
+          try {
+            const { error } = await supabase.rpc("restore_contract", { p_contract_id: id });
+            if (error) throw error;
+            const hist = await getHistory();
+            setHistory(hist);
+          } catch(e) { console.error("Erreur restauration contrat:", e); alert("La restauration a échoué. Réessaie."); }
+        }}
+      />
     </Shell>
   );
 
@@ -3766,7 +3789,7 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
 };
 
 // Génère une vraie facture pour l'ajustement de prix d'un avenant — même style que la facture d'acompte du contrat principal
-const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser) => {
+const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser, contractId) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const { jsPDF } = window.jspdf;
@@ -3777,10 +3800,38 @@ const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, free
     // Numéro réel, séquentiel, partagé avec les factures du contrat principal — jamais un horodatage
     const year = new Date().getFullYear();
     let invoiceNum = `FA-${year}-····`;
-    if (authUser?.id) {
+
+    // Réutilise le numéro déjà attribué à cet avenant précis, s'il en a déjà un
+    let existingContent = null, existingStatus = null, avenantsArr = null, avenantIdx = -1;
+    if (contractId) {
+      try {
+        const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+        if (existing) {
+          existingContent = parseContent(existing.content);
+          existingStatus = existing.status;
+          avenantsArr = Array.isArray(existingContent.avenants) ? existingContent.avenants : [];
+          avenantIdx = avenantsArr.findIndex(a => String(a.num) === String(avenantNum));
+          if (avenantIdx !== -1 && avenantsArr[avenantIdx].invoiceNumber) invoiceNum = avenantsArr[avenantIdx].invoiceNumber;
+        }
+      } catch(e) { console.error("Erreur lecture numéro de facture existant (avenant):", e); }
+    }
+
+    if (invoiceNum === `FA-${year}-····` && authUser?.id) {
       const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
       if (error) console.error("Erreur réservation numéro de facture (avenant):", error);
-      else invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
+      else {
+        invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
+        if (contractId && avenantsArr && avenantIdx !== -1) {
+          try {
+            avenantsArr[avenantIdx] = { ...avenantsArr[avenantIdx], invoiceNumber: invoiceNum };
+            await supabase.rpc("update_contract_content", {
+              p_contract_id: contractId,
+              p_new_content: JSON.stringify({ ...existingContent, avenants: avenantsArr }),
+              p_new_status: existingStatus,
+            });
+          } catch(e) { console.error("Erreur sauvegarde numéro de facture (avenant):", e); }
+        }
+      }
     }
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(24); doc.setTextColor(...NAVY);
@@ -3849,7 +3900,7 @@ const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, free
 };
 
 // Facture pour un acompte ou un solde — même structure légale que la facture d'avenant, juste un libellé différent
-const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser) => {
+const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser, contractId, invoiceType) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const { jsPDF } = window.jspdf;
@@ -3858,11 +3909,40 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
     const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREY = [107, 114, 128];
     const today = new Date().toLocaleDateString("fr-FR");
     const year = new Date().getFullYear();
+    const invoiceKey = invoiceType === "solde" ? "soldeInvoiceNumber" : "acompteInvoiceNumber";
     let invoiceNum = `FA-${year}-····`;
-    if (authUser?.id) {
+
+    // Réutilise le numéro déjà attribué à cette facture précise s'il existe — un re-téléchargement
+    // ne doit jamais consommer un nouveau numéro pour la même vente (obligation légale de continuité).
+    let existingContent = null;
+    let existingStatus = null;
+    if (contractId) {
+      try {
+        const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+        if (existing) {
+          existingContent = parseContent(existing.content);
+          existingStatus = existing.status;
+          if (existingContent[invoiceKey]) invoiceNum = existingContent[invoiceKey];
+        }
+      } catch(e) { console.error("Erreur lecture numéro de facture existant:", e); }
+    }
+
+    if (invoiceNum === `FA-${year}-····` && authUser?.id) {
       const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
       if (error) console.error("Erreur réservation numéro de facture (paiement):", error);
-      else invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
+      else {
+        invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
+        // Retient ce numéro pour la prochaine fois
+        if (contractId && existingContent) {
+          try {
+            await supabase.rpc("update_contract_content", {
+              p_contract_id: contractId,
+              p_new_content: JSON.stringify({ ...existingContent, [invoiceKey]: invoiceNum }),
+              p_new_status: existingStatus,
+            });
+          } catch(e) { console.error("Erreur sauvegarde numéro de facture:", e); }
+        }
+      }
     }
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(24); doc.setTextColor(...NAVY);
@@ -8929,7 +9009,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 {paymentWordCap} reçu · Production démarrée
               </div>
               <button
-                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser)}
+                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "acompte")}
                 style={{ marginTop:10, padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
               >🧾 Télécharger la facture ({paymentWordCap.toLowerCase()})</button>
             </div>
@@ -8951,7 +9031,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   ✓ Solde également réglé — contrat entièrement payé
                 </div>
                 <button
-                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser)}
+                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "solde")}
                   style={{ padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
                 >🧾 Télécharger la facture (solde)</button>
               </div>
@@ -8973,7 +9053,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                     cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534",
                   }}>✓ Marquer le solde comme reçu</button>
                   <button
-                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser)}
+                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "solde")}
                     style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
                   >🧾 Télécharger la facture</button>
                 </div>
@@ -9051,7 +9131,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 
             {/* Télécharger la facture — pour la réclamer, même avant paiement */}
             <button
-              onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser)}
+              onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "acompte")}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -9419,6 +9499,109 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
   );
 }
 
+/* ── ArchivesPage : retrouver un contrat supprimé (et ses factures) par nom de client ── */
+function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
+  const [search, setSearch] = useState("");
+  const [openId, setOpenId] = useState(null);
+  const [restoringId, setRestoringId] = useState(null);
+
+  const archived = history.filter(h => h.deleted);
+  const filtered = search.trim()
+    ? archived.filter(h => (h.clientName || "").toLowerCase().includes(search.trim().toLowerCase()) || (h.missionTitle || "").toLowerCase().includes(search.trim().toLowerCase()))
+    : archived;
+
+  return (
+    <div style={{ maxWidth:820, margin:"0 auto", padding:"24px 16px 80px" }}>
+      <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Mes contrats</button>
+      <div className="fade-up" style={{ marginBottom:28 }}>
+        <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:10 }}>ARCHIVES</div>
+        <h1 style={{ fontFamily:T.display, fontSize:28, color:C.navy, fontWeight:600, marginBottom:6 }}>Contrats supprimés</h1>
+        <p style={{ fontFamily:T.body, fontSize:13, color:C.textM }}>Rien n'est jamais vraiment effacé — retrouve un contrat et ses factures ici, même après suppression.</p>
+      </div>
+
+      <input
+        type="text"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        placeholder="Rechercher par nom du client ou de la mission…"
+        style={{
+          width:"100%", padding:"12px 16px", marginBottom:24,
+          fontFamily:T.body, fontSize:14, color:C.text,
+          background:C.white, border:`1.5px solid ${C.border}`,
+          borderRadius:10, outline:"none", boxSizing:"border-box",
+        }}
+      />
+
+      {filtered.length === 0 ? (
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"48px 24px", textAlign:"center" }}>
+          <div style={{ fontSize:36, marginBottom:12 }}>🗄️</div>
+          <div style={{ fontFamily:T.body, fontSize:14, color:C.textM }}>
+            {archived.length === 0 ? "Aucun contrat supprimé pour l'instant." : "Aucun résultat pour cette recherche."}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {filtered.map(entry => {
+            const isOpen = openId === entry.id;
+            const cNumMatch = entry.contract && entry.contract.match(/CP-\d{4}-\d{3,5}/);
+            const cNum = cNumMatch ? cNumMatch[0] : null;
+            const acomptePctA = entry.form?.acomptePourcentage != null && entry.form.acomptePourcentage !== "" ? Number(entry.form.acomptePourcentage) : null;
+            const isComptantA = acomptePctA === 0 && Number(entry.price) > 0;
+            const hasSoldeA = !isComptantA && acomptePctA > 0 && acomptePctA < 100;
+            const acompteAmtA = isComptantA ? Number(entry.price) : (acomptePctA ? Math.round(Number(entry.price) * (acomptePctA / 100)) || 0 : 0);
+            const soldeAmtA = hasSoldeA ? Math.max(Number(entry.price) - acompteAmtA, 0) : 0;
+            return (
+              <div key={entry.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
+                <div onClick={() => setOpenId(isOpen ? null : entry.id)} style={{ padding:"14px 18px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:C.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{entry.missionTitle || "Sans titre"}</div>
+                    <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>{entry.clientName || "Client sans nom"} · {entry.date} · {Number(entry.price || 0).toLocaleString("fr-FR")} € HT</div>
+                  </div>
+                  <span style={{ fontSize:16, color:C.textL, flexShrink:0, transform: isOpen ? "rotate(90deg)" : "none", transition:"transform 0.2s" }}>›</span>
+                </div>
+                {isOpen && (
+                  <div style={{ padding:"0 18px 18px", borderTop:`1px solid ${C.borderL}` }}>
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:14 }}>
+                      <button
+                        onClick={() => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt)}
+                        style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                      >⬇ PDF du contrat</button>
+                      {acompteAmtA > 0 && (
+                        <button
+                          onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
+                          style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                        >🧾 Facture {isComptantA ? "paiement" : "acompte"}</button>
+                      )}
+                      {hasSoldeA && (
+                        <button
+                          onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "solde")}
+                          style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                        >🧾 Facture solde</button>
+                      )}
+                      {Array.isArray(entry.avenants) && entry.avenants.map(av => (
+                        <button
+                          key={av.num}
+                          onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id)}
+                          style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                        >🧾 Facture avenant n°{av.num}</button>
+                      ))}
+                      <button
+                        onClick={async () => { setRestoringId(entry.id); await onRestore(entry.id); setRestoringId(null); }}
+                        disabled={restoringId === entry.id}
+                        style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, cursor: restoringId === entry.id ? "wait" : "pointer", fontFamily:T.body }}
+                      >{restoringId === entry.id ? "Restauration…" : "↩ Restaurer dans Mes contrats"}</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DraftsPage({ onBack, onResume, onNewContract }) {
   const [drafts, setDrafts] = useState(() => getDraftsList());
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -9527,7 +9710,7 @@ function CGUPage({ onBack }) {
   );
 }
 
-function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory }) {
+function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
@@ -9817,7 +10000,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                         </div>
                       )}
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientEmail, profile, authUser)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
+                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientEmail, profile, authUser, historyView.id)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
                         {!av.paymentReceived && (
                           <button onClick={() => markAvenantPaid(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #86EFAC", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534" }}>✓ Marquer comme reçu</button>
                         )}
@@ -9892,6 +10075,11 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             {history.filter(h => !h.deleted).length} contrat{history.filter(h => !h.deleted).length !== 1 ? "s" : ""} sauvegardé{history.filter(h => !h.deleted).length !== 1 ? "s" : ""}
           </span>
         </div>
+        {onGoToArchives && history.some(h => h.deleted) && (
+          <button onClick={onGoToArchives} style={{ marginTop:8, background:"none", border:"none", color:C.textL, fontSize:12, cursor:"pointer", fontFamily:T.body, padding:0, textDecoration:"underline" }}>
+            🗄️ Voir les contrats supprimés ({history.filter(h => h.deleted).length})
+          </button>
+        )}
       </div>
 
       {/* Scan results link */}
