@@ -238,6 +238,8 @@ const getHistory = async () => {
       form: content.form || contenu.form || {},
       paymentStatus: row.payment_status || "pending",
       stripeSessionId: row.stripe_session_id || null,
+      soldeStatus: row.solde_status || "pending",
+      soldeStripeSessionId: row.solde_stripe_session_id || null,
     };
   });
 };
@@ -5527,12 +5529,24 @@ function getRecouvrementCases(history) {
   history.forEach(c => {
     const basePrice = parseFloat(c.price) || 0;
     const baseIsPaid = c.paymentStatus === "paid";
+    // Un acompte payé ne règle pas forcément le solde — on ne compte que ce qui reste vraiment dû
+    const acomptePctC = c.form?.acomptePourcentage != null && c.form.acomptePourcentage !== "" ? Number(c.form.acomptePourcentage) : null;
+    const isComptantC = acomptePctC === 0 && basePrice > 0;
+    const hasSoldeC = !isComptantC && acomptePctC > 0 && acomptePctC < 100;
+    const acompteAmtC = isComptantC ? basePrice : (acomptePctC ? Math.round(basePrice * (acomptePctC / 100)) || 0 : 0);
+    const soldeAmtC = hasSoldeC ? Math.max(basePrice - acompteAmtC, 0) : 0;
+
+    let baseDue;
+    if (!baseIsPaid) baseDue = basePrice; // rien payé du tout, tout est dû
+    else if (hasSoldeC && c.soldeStatus !== "paid") baseDue = soldeAmtC; // acompte réglé, solde encore dû
+    else baseDue = 0; // tout est réglé
+
     // Les avenants signés mais pas encore marqués payés restent dus, même si le contrat de base est réglé
     const avenants = Array.isArray(c.avenants) ? c.avenants : [];
     const unpaidAvenantsTotal = avenants
       .filter(a => a.status === "signed" && a.ajustementMontant > 0 && !a.paymentReceived)
       .reduce((s, a) => s + a.ajustementMontant, 0);
-    const amountDue = (baseIsPaid ? 0 : basePrice) + unpaidAvenantsTotal;
+    const amountDue = baseDue + unpaidAvenantsTotal;
 
     if (!c.endDate || amountDue <= 0) return;
     const end = new Date(c.endDate);
@@ -8552,7 +8566,7 @@ function ContractTimeline({ entry }) {
 }
 
 /* ══════════════════════════════════════════ DEPOSIT GUARD ══ */
-function DepositGuard({ entry, paid, onMarkPaid }) {
+function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
   const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 0;
   // Utilise le vrai pourcentage d'acompte choisi sur ce contrat — jamais un taux fixe supposé
   const acomptePct = entry?.form?.acomptePourcentage != null && entry.form.acomptePourcentage !== ""
@@ -8563,12 +8577,70 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
   const paymentWord = isComptant ? "paiement" : "acompte";
   const paymentWordCap = isComptant ? "Paiement" : "Acompte";
   const progress = paid ? (isComptant ? 100 : Math.min(acomptePct || 0, 100)) : 0;
+  // Le solde ne concerne que les contrats avec un vrai acompte partiel (pas comptant, pas 100%)
+  const hasSolde = !isComptant && acomptePct > 0 && acomptePct < 100;
+  const soldeAmt = hasSolde ? Math.max(rawPrice - depositAmt, 0) : 0;
+  const soldePaid = entry?.soldeStatus === "paid";
 
   const [linkCopied, setLinkCopied] = useState(false);
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
   const [relanceSent, setRelanceSent] = useState(false);
   const [linkGenerating, setLinkGenerating] = useState(false);
   const [relanceSending, setRelanceSending] = useState(false);
+
+  // ── Même mécanisme, mais pour le solde restant une fois l'acompte reçu ──
+  const [soldeLinkCopied, setSoldeLinkCopied] = useState(false);
+  const [soldeStripeLinkUrl, setSoldeStripeLinkUrl] = useState("");
+  const [soldeLinkGenerating, setSoldeLinkGenerating] = useState(false);
+  const [soldeRelanceSent, setSoldeRelanceSent] = useState(false);
+
+  const ensureSoldePaymentLink = async () => {
+    if (soldeStripeLinkUrl) return soldeStripeLinkUrl;
+    const res = await fetch("/api/create-payment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: soldeAmt,
+        description: `Solde — ${entry?.missionTitle || "Prestation Freeley"}`,
+        customerEmail: entry?.form?.clientEmail || undefined,
+        metadata: { contractId: entry?.id || "", paymentType: "solde" },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+    setSoldeStripeLinkUrl(data.url);
+    if (data.id && entry?.id) {
+      try { await supabase.from("contracts").update({ solde_stripe_session_id: data.id }).eq("id", entry.id); } catch(e) { console.error("Erreur sauvegarde session Stripe (solde):", e); }
+    }
+    return data.url;
+  };
+
+  const handleCopySoldeLink = async () => {
+    if (soldeLinkGenerating) return;
+    setSoldeLinkGenerating(true);
+    try {
+      const url = await ensureSoldePaymentLink();
+      navigator.clipboard.writeText(url).catch(()=>{});
+      setSoldeLinkCopied(true);
+      setTimeout(() => setSoldeLinkCopied(false), 2800);
+    } catch(e) {
+      alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
+    } finally {
+      setSoldeLinkGenerating(false);
+    }
+  };
+
+  const handleSendSoldeRelance = async () => {
+    const email = entry?.form?.clientEmail;
+    if (!email) { alert("Aucun email client renseigné sur ce contrat."); return; }
+    let url = soldeStripeLinkUrl;
+    try { if (!url) url = await ensureSoldePaymentLink(); } catch(e) { alert("Erreur lors de la création du lien de paiement."); return; }
+    const subject = `Solde à régler — ${entry?.missionTitle || "votre mission"}`;
+    const body = `Bonjour${entry?.clientName ? " " + entry.clientName : ""},\n\nL'acompte a bien été reçu, merci ! Il reste le solde de ${soldeAmt.toLocaleString("fr-FR")} € à régler pour cette mission.\n\nLien de paiement : ${url}\n\nMerci,\n${entry?.form?.freelanceName || ""}`;
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    setSoldeRelanceSent(true);
+    setTimeout(() => setSoldeRelanceSent(false), 4000);
+  };
 
   // Récupère un lien de paiement existant, ou en crée un nouveau (réutilisé par "Copier le lien" et "Relancer")
   const ensurePaymentLink = async () => {
@@ -8741,6 +8813,42 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
           )}
         </div>}
 
+        {/* Zone Solde — une fois l'acompte reçu, s'il reste un solde à encaisser */}
+        {paid && hasSolde && (
+          <div style={{
+            padding: "16px 22px",
+            background: soldePaid ? "#F0FDF4" : "#FFFBEB",
+            border: `1.5px solid ${soldePaid ? "#86EFAC" : "#FDE68A"}`,
+            borderRadius: 14,
+            marginBottom: 24,
+          }}>
+            {soldePaid ? (
+              <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534" }}>
+                ✓ Solde également réglé — contrat entièrement payé
+              </div>
+            ) : (
+              <>
+                <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:2, textTransform:"uppercase", letterSpacing:"0.05em" }}>Solde restant à encaisser</div>
+                <div style={{ fontFamily:T.display, fontSize:22, fontWeight:800, color:"#92400E", marginBottom:12 }}>{soldeAmt.toLocaleString("fr-FR")} €</div>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <button onClick={handleCopySoldeLink} disabled={soldeLinkGenerating} style={{
+                    padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8,
+                    cursor: soldeLinkGenerating ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E",
+                  }}>{soldeLinkGenerating ? "Génération…" : soldeLinkCopied ? "✓ Copié !" : "💳 Copier le lien de paiement"}</button>
+                  <button onClick={handleSendSoldeRelance} style={{
+                    padding:"9px 14px", background:"#92400E", border:"none", borderRadius:8,
+                    cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#fff",
+                  }}>{soldeRelanceSent ? "✓ Envoyé !" : "✉️ Relancer pour le solde"}</button>
+                  <button onClick={() => onMarkSoldePaid && onMarkSoldePaid()} style={{
+                    padding:"9px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8,
+                    cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534",
+                  }}>✓ Marquer le solde comme reçu</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Zone actions — visible seulement si non payé */}
         {!paid && (
           <div style={{
@@ -8891,9 +8999,24 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
     caFromAvenantsPaid += avenantsPaidTotal;
 
     caTotal += price + avenantsSignedTotal;
+
+    // Sépare acompte et solde : payer l'acompte ne règle pas le solde, contrairement à avant
+    const acomptePctC = c.form?.acomptePourcentage != null && c.form.acomptePourcentage !== "" ? Number(c.form.acomptePourcentage) : null;
+    const isComptantC = acomptePctC === 0 && price > 0;
+    const hasSoldeC = !isComptantC && acomptePctC > 0 && acomptePctC < 100;
+    const acompteAmtC = isComptantC ? price : (acomptePctC ? Math.round(price * (acomptePctC / 100)) || 0 : 0);
+    const soldeAmtC = hasSoldeC ? Math.max(price - acompteAmtC, 0) : 0;
+
     const st = c.paymentStatus || "pending";
-    if (st === "paid") { caPaid += price; nbPaid++; }
-    else {
+    if (st === "paid" && hasSoldeC) {
+      // Acompte réglé, mais le solde peut rester dû
+      caPaid += acompteAmtC;
+      nbPaid++;
+      if (c.soldeStatus === "paid") caPaid += soldeAmtC;
+      else caPending += soldeAmtC;
+    } else if (st === "paid") {
+      caPaid += price; nbPaid++;
+    } else {
       caPending += price;
       if (st === "late") nbLate++; else nbPending++;
     }
@@ -9283,6 +9406,22 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     })();
   }, [historyView?.id, historyView?.stripeSessionId]);
 
+  // Même vérification, mais pour le solde restant
+  useEffect(() => {
+    if (!historyView || historyView.soldeStatus === "paid" || !historyView.soldeStripeSessionId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/check-payment?sessionId=${encodeURIComponent(historyView.soldeStripeSessionId)}`);
+        const data = await res.json();
+        if (data.paid) {
+          await supabase.from("contracts").update({ solde_status: "paid" }).eq("id", historyView.id);
+          if (onRefreshHistory) await onRefreshHistory();
+          if (onPaymentStatusChanged) onPaymentStatusChanged();
+        }
+      } catch(e) { console.error("Erreur vérification paiement (solde):", e); }
+    })();
+  }, [historyView?.id, historyView?.soldeStripeSessionId]);
+
   // Écrit le vrai statut en base — plus dans le navigateur, pour que le webhook Stripe (côté serveur) puisse aussi le faire
   const setPaymentStatus = async (contractId, status) => {
     try {
@@ -9290,6 +9429,14 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     } catch(e) { console.error("Erreur mise à jour statut paiement:", e); }
     if (onRefreshHistory) await onRefreshHistory(); // recharge les données fraîches (met aussi à jour historyView)
     if (onPaymentStatusChanged) onPaymentStatusChanged(); // rafraîchit immédiatement la cloche d'alertes
+  };
+  // Même mécanisme, mais pour le solde restant une fois l'acompte reçu
+  const setSoldeStatus = async (contractId, status) => {
+    try {
+      await supabase.from("contracts").update({ solde_status: status }).eq("id", contractId);
+    } catch(e) { console.error("Erreur mise à jour statut solde:", e); }
+    if (onRefreshHistory) await onRefreshHistory();
+    if (onPaymentStatusChanged) onPaymentStatusChanged();
   };
   const [deletingId, setDeletingId] = useState(null);
   const [filter, setFilter] = useState("tous"); // "tous" | "pending" | "signed"
@@ -9452,7 +9599,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* 🛡️ Garant d'Acompte Automatique */}
-      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} />
+      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} />
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
