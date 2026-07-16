@@ -267,7 +267,8 @@ const deleteFromHistory = async (id) => {
   if (!user) return;
   // Masque le contrat au lieu de l'effacer pour de bon — l'argent réellement encaissé
   // doit rester dans l'historique financier, même si le contrat quitte ta liste active.
-  await supabase.from("contracts").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await supabase.rpc("soft_delete_contract", { p_contract_id: id });
+  if (error) { console.error("Erreur suppression contrat:", error); alert("La suppression a échoué. Réessaie."); }
 };
 
 const getUserPlan = async () => {
