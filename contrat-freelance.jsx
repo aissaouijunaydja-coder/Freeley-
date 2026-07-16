@@ -1110,6 +1110,25 @@ function AppInner() {
       }
     } catch(e) {}
   }, [screen, history]);
+
+  // Retient et restaure l'écran "Contrat généré" après un rafraîchissement — sinon on retombe sur le formulaire vide
+  const resultRestoreAttempted = useRef(false);
+  useEffect(() => {
+    if (screen !== "app" || step !== 0 || !history.length || resultRestoreAttempted.current) return;
+    resultRestoreAttempted.current = true;
+    try {
+      const savedId = localStorage.getItem("freeley_result_contract_id");
+      if (!savedId) return;
+      const found = history.find(h => String(h.id) === savedId);
+      if (found && found.contract) {
+        setContract(found.contract);
+        setForm(f => ({ ...f, ...found.form }));
+        setStep(3);
+      } else {
+        localStorage.removeItem("freeley_result_contract_id");
+      }
+    } catch(e) {}
+  }, [screen, step, history]);
   const [animDone, setAnimDone]   = useState(false);
   const animDoneRef               = useRef(false); // ref pour lecture correcte dans les closures async
   const apiReadyRef               = useRef(null); // stocke le texte dès que l'API répond
@@ -1135,6 +1154,7 @@ function AppInner() {
 
   const goToScreen = (s) => {
     localStorage.setItem("freeley_screen", s);
+    if (s !== "app") { try { localStorage.removeItem("freeley_result_contract_id"); } catch(e) {} }
     setScreen(s);
   };
 
@@ -1615,7 +1635,11 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     setAnimDone(false);
     animDoneRef.current = false;
     apiReadyRef.current = null;
-    try { localStorage.removeItem("freeley_current_draft"); } catch(e) {}
+    try {
+      localStorage.removeItem("freeley_current_draft");
+      // Retient quel contrat vient d'être généré, pour survivre à un rafraîchissement de la page
+      if (history[0]?.id) localStorage.setItem("freeley_result_contract_id", history[0].id);
+    } catch(e) {}
   };
 
   const generateContract = async () => {
@@ -2503,7 +2527,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   };
 
   const startFreshContract = () => {
-    try { localStorage.removeItem("freeley_current_draft"); } catch(e) {}
+    try {
+      localStorage.removeItem("freeley_current_draft");
+      localStorage.removeItem("freeley_result_contract_id");
+    } catch(e) {}
     const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ");
     setStep(0); setContract("");
     setForm({
