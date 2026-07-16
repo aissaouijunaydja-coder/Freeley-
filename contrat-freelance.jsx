@@ -1091,6 +1091,23 @@ function AppInner() {
   const [ndaSignGenerating, setNdaSignGenerating] = useState(null);
   const [ndaSignCopied, setNdaSignCopied] = useState(null);
   const [historyView, setHistoryView] = useState(null);
+  // Retient quel contrat précis était ouvert, pour ne pas tout perdre au rafraîchissement de la page
+  useEffect(() => {
+    try {
+      if (historyView?.id) localStorage.setItem("freeley_history_view_id", historyView.id);
+      else localStorage.removeItem("freeley_history_view_id");
+    } catch(e) {}
+  }, [historyView?.id]);
+  useEffect(() => {
+    if (screen !== "history" || historyView || !history.length) return;
+    try {
+      const savedId = localStorage.getItem("freeley_history_view_id");
+      if (savedId) {
+        const found = history.find(h => String(h.id) === savedId);
+        if (found) setHistoryView(found);
+      }
+    } catch(e) {}
+  }, [screen, history]);
   const [animDone, setAnimDone]   = useState(false);
   const animDoneRef               = useRef(false); // ref pour lecture correcte dans les closures async
   const apiReadyRef               = useRef(null); // stocke le texte dès que l'API répond
