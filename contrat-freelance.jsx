@@ -237,6 +237,7 @@ const getHistory = async () => {
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
       paymentStatus: row.payment_status || "pending",
+      stripeSessionId: row.stripe_session_id || null,
     };
   });
 };
@@ -8555,9 +8556,6 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
   // Récupère un lien de paiement existant, ou en crée un nouveau (réutilisé par "Copier le lien" et "Relancer")
   const ensurePaymentLink = async () => {
     if (stripeLinkUrl) return stripeLinkUrl;
-    if (!entry?.id) {
-      alert("⚠️ Problème détecté : ce contrat n'a pas d'identifiant valide (entry.id est vide). Le paiement automatique ne pourra pas fonctionner pour ce lien. Réessaie depuis 'Mes contrats' après un rafraîchissement de la page.");
-    }
     const res = await fetch("/api/create-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -8571,6 +8569,10 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
     const data = await res.json();
     if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
     setStripeLinkUrl(data.url);
+    // Garde l'identifiant de session pour pouvoir vérifier plus tard si le paiement est passé
+    if (data.id && entry?.id) {
+      try { await supabase.from("contracts").update({ stripe_session_id: data.id }).eq("id", entry.id); } catch(e) { console.error("Erreur sauvegarde session Stripe:", e); }
+    }
     return data.url;
   };
 
@@ -9247,6 +9249,22 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
   useEffect(() => {
     if (onRefreshHistory) onRefreshHistory();
   }, []);
+
+  // Vérifie directement auprès de Stripe si le paiement en attente est passé — pas besoin de webhook
+  useEffect(() => {
+    if (!historyView || historyView.paymentStatus === "paid" || !historyView.stripeSessionId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/check-payment?sessionId=${encodeURIComponent(historyView.stripeSessionId)}`);
+        const data = await res.json();
+        if (data.paid) {
+          await supabase.from("contracts").update({ payment_status: "paid" }).eq("id", historyView.id);
+          if (onRefreshHistory) await onRefreshHistory();
+          if (onPaymentStatusChanged) onPaymentStatusChanged();
+        }
+      } catch(e) { console.error("Erreur vérification paiement:", e); }
+    })();
+  }, [historyView?.id, historyView?.stripeSessionId]);
 
   // Écrit le vrai statut en base — plus dans le navigateur, pour que le webhook Stripe (côté serveur) puisse aussi le faire
   const setPaymentStatus = async (contractId, status) => {
