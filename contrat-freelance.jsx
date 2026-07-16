@@ -241,6 +241,8 @@ const getHistory = async () => {
       soldeStatus: row.solde_status || "pending",
       soldeStripeSessionId: row.solde_stripe_session_id || null,
       deleted: !!row.deleted_at,
+      isStandaloneInvoice: !!(content.isStandaloneInvoice || contenu.isStandaloneInvoice),
+      invoiceNumber: content.invoiceNumber || contenu.invoiceNumber || null,
     };
   });
 };
@@ -9505,7 +9507,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
   const [openId, setOpenId] = useState(null);
   const [restoringId, setRestoringId] = useState(null);
 
-  const archived = history.filter(h => h.deleted);
+  const archived = history.filter(h => h.deleted || h.isStandaloneInvoice);
   const filtered = search.trim()
     ? archived.filter(h => (h.clientName || "").toLowerCase().includes(search.trim().toLowerCase()) || (h.missionTitle || "").toLowerCase().includes(search.trim().toLowerCase()))
     : archived;
@@ -9515,8 +9517,8 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Mes contrats</button>
       <div className="fade-up" style={{ marginBottom:28 }}>
         <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:10 }}>ARCHIVES</div>
-        <h1 style={{ fontFamily:T.display, fontSize:28, color:C.navy, fontWeight:600, marginBottom:6 }}>Contrats supprimés</h1>
-        <p style={{ fontFamily:T.body, fontSize:13, color:C.textM }}>Rien n'est jamais vraiment effacé — retrouve un contrat et ses factures ici, même après suppression.</p>
+        <h1 style={{ fontFamily:T.display, fontSize:28, color:C.navy, fontWeight:600, marginBottom:6 }}>Archives</h1>
+        <p style={{ fontFamily:T.body, fontSize:13, color:C.textM }}>Contrats supprimés et factures générées seules depuis l'accueil — rien n'est jamais vraiment perdu.</p>
       </div>
 
       <input
@@ -9536,7 +9538,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
         <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"48px 24px", textAlign:"center" }}>
           <div style={{ fontSize:36, marginBottom:12 }}>🗄️</div>
           <div style={{ fontFamily:T.body, fontSize:14, color:C.textM }}>
-            {archived.length === 0 ? "Aucun contrat supprimé pour l'instant." : "Aucun résultat pour cette recherche."}
+            {archived.length === 0 ? "Rien à afficher pour l'instant." : "Aucun résultat pour cette recherche."}
           </div>
         </div>
       ) : (
@@ -9554,7 +9556,10 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
               <div key={entry.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
                 <div onClick={() => setOpenId(isOpen ? null : entry.id)} style={{ padding:"14px 18px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
                   <div style={{ minWidth:0 }}>
-                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:C.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{entry.missionTitle || "Sans titre"}</div>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:C.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                      {entry.isStandaloneInvoice && <span style={{ fontSize:10, fontWeight:700, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:20, padding:"2px 8px", marginRight:8, verticalAlign:"middle" }}>FACTURE LIBRE</span>}
+                      {entry.missionTitle || "Sans titre"}
+                    </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>{entry.clientName || "Client sans nom"} · {entry.date} · {Number(entry.price || 0).toLocaleString("fr-FR")} € HT</div>
                   </div>
                   <span style={{ fontSize:16, color:C.textL, flexShrink:0, transform: isOpen ? "rotate(90deg)" : "none", transition:"transform 0.2s" }}>›</span>
@@ -9562,34 +9567,43 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
                 {isOpen && (
                   <div style={{ padding:"0 18px 18px", borderTop:`1px solid ${C.borderL}` }}>
                     <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:14 }}>
+                      {entry.isStandaloneInvoice ? (
+                        <button
+                          onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
+                          style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                        >🧾 Télécharger la facture</button>
+                      ) : (
                       <button
                         onClick={() => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt)}
                         style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                       >⬇ PDF du contrat</button>
-                      {acompteAmtA > 0 && (
+                      )}
+                      {!entry.isStandaloneInvoice && acompteAmtA > 0 && (
                         <button
                           onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
                           style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                         >🧾 Facture {isComptantA ? "paiement" : "acompte"}</button>
                       )}
-                      {hasSoldeA && (
+                      {!entry.isStandaloneInvoice && hasSoldeA && (
                         <button
                           onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "solde")}
                           style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                         >🧾 Facture solde</button>
                       )}
-                      {Array.isArray(entry.avenants) && entry.avenants.map(av => (
+                      {!entry.isStandaloneInvoice && Array.isArray(entry.avenants) && entry.avenants.map(av => (
                         <button
                           key={av.num}
                           onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id)}
                           style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                         >🧾 Facture avenant n°{av.num}</button>
                       ))}
-                      <button
-                        onClick={async () => { setRestoringId(entry.id); await onRestore(entry.id); setRestoringId(null); }}
-                        disabled={restoringId === entry.id}
-                        style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, cursor: restoringId === entry.id ? "wait" : "pointer", fontFamily:T.body }}
-                      >{restoringId === entry.id ? "Restauration…" : "↩ Restaurer dans Mes contrats"}</button>
+                      {!entry.isStandaloneInvoice && (
+                        <button
+                          onClick={async () => { setRestoringId(entry.id); await onRestore(entry.id); setRestoringId(null); }}
+                          disabled={restoringId === entry.id}
+                          style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, cursor: restoringId === entry.id ? "wait" : "pointer", fontFamily:T.body }}
+                        >{restoringId === entry.id ? "Restauration…" : "↩ Restaurer dans Mes contrats"}</button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -10075,9 +10089,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             {history.filter(h => !h.deleted).length} contrat{history.filter(h => !h.deleted).length !== 1 ? "s" : ""} sauvegardé{history.filter(h => !h.deleted).length !== 1 ? "s" : ""}
           </span>
         </div>
-        {onGoToArchives && history.some(h => h.deleted) && (
+        {onGoToArchives && history.some(h => h.deleted || h.isStandaloneInvoice) && (
           <button onClick={onGoToArchives} style={{ marginTop:8, background:"none", border:"none", color:C.textL, fontSize:12, cursor:"pointer", fontFamily:T.body, padding:0, textDecoration:"underline" }}>
-            🗄️ Voir les contrats supprimés ({history.filter(h => h.deleted).length})
+            🗄️ Voir les contrats supprimés et factures libres ({history.filter(h => h.deleted || h.isStandaloneInvoice).length})
           </button>
         )}
       </div>
@@ -10160,7 +10174,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       {/* Contract list */}
       {history.length > 0 && (() => {
         const filtered = history.filter(entry => {
-          if (entry.deleted) return false;
+          if (entry.deleted || entry.isStandaloneInvoice) return false;
           if (filter === "pending") return entry.signatureStatus === "pending_client" || entry.signatureStatus === "none" || !entry.signatureStatus;
           if (filter === "signed") return entry.signatureStatus === "signed";
           return true;
@@ -10653,6 +10667,13 @@ ${freelanceName}`;
       doc.text("Pas d'escompte pour paiement anticipé.", ML, y);
 
       doc.save(`Facture_${invoiceNum}.pdf`);
+      // Sauvegarde une fiche minimaliste pour pouvoir retrouver cette facture plus tard, même
+      // si elle n'est liée à aucun contrat complet (outil "Facture" utilisé seul depuis l'accueil).
+      if (authUser?.id) {
+        try {
+          await saveToHistory({ isStandaloneInvoice: true, acompteInvoiceNumber: invoiceNum }, form);
+        } catch(e) { console.error("Erreur sauvegarde facture libre:", e); }
+      }
       setDownloaded(true);
       setTimeout(() => setDownloaded(false), 3000);
     } catch(err) {
