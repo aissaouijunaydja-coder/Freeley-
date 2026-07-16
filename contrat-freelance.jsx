@@ -1377,6 +1377,10 @@ function AppInner() {
                   tx2.objectStore("pending").delete("step");
                   goToScreen("app");
                   setAuthReady(true);
+                  // Ce nettoyage ne concerne QUE ce cas précis (retour d'OAuth Google avec un
+                  // formulaire en attente) — il ne doit pas s'exécuter à chaque rafraîchissement,
+                  // sinon la mémoire de l'écran (Mes contrats, contrat généré...) est perdue à tort.
+                  localStorage.removeItem("freeley_screen");
                 }
                 resolve();
               };
@@ -1384,7 +1388,6 @@ function AppInner() {
             req.onerror = () => resolve();
           } catch(e) { resolve(); }
         });
-        localStorage.removeItem("freeley_screen");
       }
       setAuthReady(true);
     });
