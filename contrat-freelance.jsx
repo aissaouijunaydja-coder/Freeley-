@@ -240,6 +240,7 @@ const getHistory = async () => {
       stripeSessionId: row.stripe_session_id || null,
       soldeStatus: row.solde_status || "pending",
       soldeStripeSessionId: row.solde_stripe_session_id || null,
+      deleted: !!row.deleted_at,
     };
   });
 };
@@ -264,7 +265,9 @@ const saveToHistory = async (entry, form) => {
 const deleteFromHistory = async (id) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
-  await supabase.from("contracts").delete().eq("id", id);
+  // Masque le contrat au lieu de l'effacer pour de bon — l'argent réellement encaissé
+  // doit rester dans l'historique financier, même si le contrat quitte ta liste active.
+  await supabase.from("contracts").update({ deleted_at: new Date().toISOString() }).eq("id", id);
 };
 
 const getUserPlan = async () => {
@@ -5554,6 +5557,7 @@ function getRecouvrementCases(history) {
 
   const cases = [];
   history.forEach(c => {
+    if (c.deleted) return; // un contrat supprimé n'a plus besoin d'être relancé
     const basePrice = parseFloat(c.price) || 0;
     const baseIsPaid = c.paymentStatus === "paid";
     // Un acompte payé ne règle pas forcément le solde — on ne compte que ce qui reste vraiment dû
@@ -9119,7 +9123,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
 
   // ── Missions en cours (date de fin future) ──
   const missionsEnCours = history.filter(c => {
-    if (!c.endDate) return false;
+    if (c.deleted || !c.endDate) return false;
     const end = new Date(c.endDate);
     return !isNaN(end) && end >= now;
   }).sort((a, b) => new Date(a.endDate) - new Date(b.endDate)).slice(0, 5);
@@ -9127,6 +9131,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
   // ── Avenants à suivre (en attente de signature, ou signés mais pas encore payés) ──
   const avenantsASuivre = [];
   history.forEach(c => {
+    if (c.deleted) return;
     const avenants = Array.isArray(c.avenants) ? c.avenants : [];
     avenants.forEach(a => {
       if (a.status === "pending_signature" || (a.status === "signed" && a.ajustementMontant > 0 && !a.paymentReceived)) {
@@ -9135,8 +9140,8 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
     });
   });
 
-  // ── Activité récente (5 derniers) ──
-  const recent = [...history].slice(0, 5);
+  // ── Activité récente (5 derniers, hors supprimés) ──
+  const recent = history.filter(c => !c.deleted).slice(0, 5);
 
   const stat = (label, value, sub, color) => (
     <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06", flex:"1 1 200px", minWidth:0 }}>
@@ -9768,7 +9773,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             Mes contrats
           </h1>
           <span style={{ fontFamily:T.body, fontSize:13, color:C.textL }}>
-            {history.length} contrat{history.length !== 1 ? "s" : ""} sauvegardé{history.length !== 1 ? "s" : ""}
+            {history.filter(h => !h.deleted).length} contrat{history.filter(h => !h.deleted).length !== 1 ? "s" : ""} sauvegardé{history.filter(h => !h.deleted).length !== 1 ? "s" : ""}
           </span>
         </div>
       </div>
@@ -9830,7 +9835,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* Empty state */}
-      {history.length === 0 && (
+      {history.filter(h => !h.deleted).length === 0 && (
         <div className="fade-up fade-up-2" style={{
           background:C.white, border:`1px solid ${C.border}`, borderRadius:12,
           padding:"64px 32px", textAlign:"center",
@@ -9851,6 +9856,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       {/* Contract list */}
       {history.length > 0 && (() => {
         const filtered = history.filter(entry => {
+          if (entry.deleted) return false;
           if (filter === "pending") return entry.signatureStatus === "pending_client" || entry.signatureStatus === "none" || !entry.signatureStatus;
           if (filter === "signed") return entry.signatureStatus === "signed";
           return true;
