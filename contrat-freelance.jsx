@@ -8545,7 +8545,7 @@ function DepositGuard({ entry, paid, onMarkPaid }) {
   const depositAmt = isComptant ? rawPrice : (acomptePct ? Math.round(rawPrice * (acomptePct / 100)) || 0 : 0);
   const paymentWord = isComptant ? "paiement" : "acompte";
   const paymentWordCap = isComptant ? "Paiement" : "Acompte";
-  const progress = paid ? Math.min(acomptePct || 30, 100) : 0;
+  const progress = paid ? (isComptant ? 100 : Math.min(acomptePct || 0, 100)) : 0;
 
   const [linkCopied, setLinkCopied] = useState(false);
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
