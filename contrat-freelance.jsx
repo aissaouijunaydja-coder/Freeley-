@@ -3844,6 +3844,87 @@ const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, free
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
+// Facture pour un acompte ou un solde — même structure légale que la facture d'avenant, juste un libellé différent
+const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser) => {
+  if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
+    const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREY = [107, 114, 128];
+    const today = new Date().toLocaleDateString("fr-FR");
+    const year = new Date().getFullYear();
+    let invoiceNum = `FA-${year}-····`;
+    if (authUser?.id) {
+      const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
+      if (error) console.error("Erreur réservation numéro de facture (paiement):", error);
+      else invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
+    }
+
+    doc.setFont("helvetica", "bold"); doc.setFontSize(24); doc.setTextColor(...NAVY);
+    doc.text("FACTURE", PW - MR, 22, { align: "right" });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
+    doc.text(`N° ${invoiceNum}`, PW - MR, 30, { align: "right" });
+    doc.text(`Date d'émission : ${today}`, PW - MR, 35, { align: "right" });
+    doc.text(`Échéance : ${today} (à réception)`, PW - MR, 40, { align: "right" });
+    doc.setDrawColor(...GOLD); doc.setLineWidth(0.8); doc.line(ML, 48, PW - MR, 48);
+
+    let y = 60;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+    doc.text("ÉMETTEUR", ML, y);
+    doc.text("CLIENT", ML + cw/2, y);
+    y += 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
+    doc.text(freelanceName || "Prestataire", ML, y);
+    doc.text(clientName || "Client", ML + cw/2, y);
+    y += 5;
+    if (freelanceSiret) { doc.setFontSize(9); doc.setTextColor(...GREY); doc.text(`SIRET : ${freelanceSiret}`, ML, y); }
+    doc.setFontSize(9); doc.setTextColor(...GREY);
+    if (clientEmail) doc.text(clientEmail, ML + cw/2, y);
+    y += 5;
+    if (freelanceEmail) doc.text(freelanceEmail, ML, y);
+    y += 15;
+
+    doc.setFillColor(...NAVY); doc.rect(ML, y, cw, 9, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255,255,255);
+    doc.text("DÉSIGNATION", ML + 4, y + 6);
+    doc.text("MONTANT", PW - MR - 4, y + 6, { align: "right" });
+    y += 9;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
+    doc.setDrawColor(230,230,230); doc.setLineWidth(0.3); doc.line(ML, y+10, PW-MR, y+10);
+    doc.text(`${designation} — ${missionTitle || "mission"}`, ML + 4, y + 7);
+    doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y + 7, { align: "right" });
+    y += 18;
+
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+    doc.text("Total HT", ML + cw - 60, y); doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y, { align:"right" });
+    y += 6;
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(...GREY);
+    doc.text("TVA non applicable, art. 293 B du CGI", ML + cw - 60, y);
+    y += 7;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...NAVY);
+    doc.text("Total à payer", ML + cw - 60, y); doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y, { align:"right" });
+    y += 18;
+
+    if (profile?.iban) {
+      doc.setFillColor(248, 247, 244); doc.rect(ML, y, cw, 30, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+      doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 8);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(40,40,40);
+      doc.text(`IBAN : ${profile.iban}`, ML + 4, y + 15);
+      if (profile.bic) doc.text(`BIC : ${profile.bic}`, ML + 4, y + 20);
+      if (profile.bankName) doc.text(`Banque : ${profile.bankName}`, ML + 4, y + 25);
+      y += 38;
+    }
+
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
+    const legalLines = doc.splitTextToSize("Pénalités de retard : taux BCE + 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.\nPas d'escompte pour paiement anticipé.", cw);
+    legalLines.forEach(l => { doc.text(l, ML, y); y += 4; });
+
+    doc.save(`Facture_${designation.replace(/[^a-zA-Z0-9]/g,"_")}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`);
+  } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
+};
+
 function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated }) {
   const [mode, setMode]               = useState("magic"); // "magic" | "manuel"
   const [clientMessage, setClientMessage] = useState("");
@@ -8597,7 +8678,7 @@ function ContractTimeline({ entry }) {
 }
 
 /* ══════════════════════════════════════════ DEPOSIT GUARD ══ */
-function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
+function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authUser }) {
   const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 0;
   // Utilise le vrai pourcentage d'acompte choisi sur ce contrat — jamais un taux fixe supposé
   const acomptePct = entry?.form?.acomptePourcentage != null && entry.form.acomptePourcentage !== ""
@@ -8607,6 +8688,9 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
   const depositAmt = isComptant ? rawPrice : (acomptePct ? Math.round(rawPrice * (acomptePct / 100)) || 0 : 0);
   const paymentWord = isComptant ? "paiement" : "acompte";
   const paymentWordCap = isComptant ? "Paiement" : "Acompte";
+  // "le paiement" mais "l'acompte" — l'élision est nécessaire devant une voyelle
+  const paymentWordArticleLe = isComptant ? "le paiement" : "l'acompte";
+  const paymentWordArticleLeCap = isComptant ? "Le paiement" : "L'acompte";
   const progress = paid ? (isComptant ? 100 : Math.min(acomptePct || 0, 100)) : 0;
   // Le solde ne concerne que les contrats avec un vrai acompte partiel (pas comptant, pas 100%)
   const hasSolde = !isComptant && acomptePct > 0 && acomptePct < 100;
@@ -8723,7 +8807,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
     const lines = [
       `Bonjour${entry?.clientName ? " " + entry.clientName : ""},`,
       ``,
-      `Petit rappel concernant le ${paymentWord} de ${depositAmt.toLocaleString("fr-FR")} € pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
+      `Petit rappel concernant ${paymentWordArticleLe} de ${depositAmt.toLocaleString("fr-FR")} € pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
     ];
     if (link) lines.push(``, `Vous pouvez régler directement via ce lien sécurisé : ${link}`);
     lines.push(``, `Merci et à bientôt,`);
@@ -8799,7 +8883,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
                 transition: "color 0.4s",
               }}>
                 {paid
-                  ? `Le ${paymentWord} a été reçu et confirmé. Le contrat est actif — la mission peut démarrer immédiatement.`
+                  ? `${paymentWordArticleLeCap} a été reçu et confirmé. Le contrat est actif — la mission peut démarrer immédiatement.`
                   : "Ne commencez pas la production. Le contrat stipule que le projet ne démarre qu'à réception des fonds."
                 }
               </div>
@@ -8840,6 +8924,10 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
               <div style={{ fontFamily:T.body, fontSize:10, color:"#166534", marginTop:5, opacity:0.8 }}>
                 {paymentWordCap} reçu · Production démarrée
               </div>
+              <button
+                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser)}
+                style={{ marginTop:10, padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
+              >🧾 Télécharger la facture ({paymentWordCap.toLowerCase()})</button>
             </div>
           )}
         </div>}
@@ -8854,8 +8942,14 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
             marginBottom: 24,
           }}>
             {soldePaid ? (
-              <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534" }}>
-                ✓ Solde également réglé — contrat entièrement payé
+              <div>
+                <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534", marginBottom:10 }}>
+                  ✓ Solde également réglé — contrat entièrement payé
+                </div>
+                <button
+                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser)}
+                  style={{ padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
+                >🧾 Télécharger la facture (solde)</button>
               </div>
             ) : (
               <>
@@ -8874,6 +8968,10 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
                     padding:"9px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8,
                     cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534",
                   }}>✓ Marquer le solde comme reçu</button>
+                  <button
+                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser)}
+                    style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
+                  >🧾 Télécharger la facture</button>
                 </div>
               </>
             )}
@@ -8946,6 +9044,20 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid }) {
                 <><span>✉️</span> Relancer automatiquement le client</>
               )}
             </button>
+
+            {/* Télécharger la facture — pour la réclamer, même avant paiement */}
+            <button
+              onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser)}
+              style={{
+                flex: 1, minWidth: 200,
+                display:"flex", alignItems:"center", justifyContent:"center", gap:9,
+                padding:"13px 18px",
+                background: "#fff", color: "#9A3412",
+                border: "1.5px solid #FED7AA",
+                borderRadius:10, cursor:"pointer",
+                fontFamily:T.body, fontSize:13, fontWeight:700,
+              }}
+            ><span>🧾</span> Télécharger la facture</button>
 
             {/* QR code réel — utile en présentiel, le client scanne pour payer */}
             {stripeLinkUrl && (
@@ -9631,7 +9743,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* 🛡️ Garant d'Acompte Automatique */}
-      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} />
+      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} profile={profile} authUser={authUser} />
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
