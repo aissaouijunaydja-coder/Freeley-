@@ -1089,7 +1089,7 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results","profile-gate","dashboard","cgu","drafts","mes-ndas","archives"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","dashboard","cgu","drafts","mes-ndas","archives"].includes(saved) ? saved : "app";
   });
   const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
@@ -2480,9 +2480,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       goToScreen("app");
       return;
     }
-    if (screen === "profile-gate") {
-      goToScreen("profile");
-    }
   };
 
   const handleSignOut = async () => {
@@ -2587,7 +2584,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     onDrafts: () => goToScreen("drafts"),
     onCGU: () => goToScreen("cgu"),
     onMyNdas: () => goToScreen("mes-ndas"),
-    onProfile: () => authUser ? goToScreen("profile") : setScreen("profile-gate"),
+    onProfile: () => goToScreen("profile"),
     onOpenRecouvrement: () => setShowRecouvrementModal(true),
     onOpenNda: () => setShowNdaModal(true),
     onAlertsChanged: () => setAlertsTick(t => t + 1),
@@ -2611,24 +2608,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       else { goToScreen("history"); }
     },
   };
-
-  /* ── PROFILE GATE (visiteur anonyme) ── */
-  if (screen === "profile-gate") return (
-    <Shell>
-      {AuthModalEl}
-      <Header {...headerProps} />
-      <ProfileGate
-        onCreateAccount={() => {
-          // Simule la création de compte et débloque le profil
-          setAuthMode("signup");
-          setShowAuthModal(true);
-          // Après connexion, AuthModal appelle handleAuthSuccess qui set authUser
-          // On redirige ensuite vers profile
-        }}
-        onBack={() => goToScreen("app")}
-      />
-    </Shell>
-  );
 
   /* ── PROFILE ── */
   if (screen === "profile") return (
@@ -3162,7 +3141,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         onRecouvrement={() => setShowRecouvrementModal(true)}
         onScanner={() => setShowScannerModal(true)}
         onInvoice={() => setShowInvoiceModal(true)}
-        onProfile={() => authUser ? goToScreen("profile") : setScreen("profile-gate")}
+        onProfile={() => goToScreen("profile")}
       />
 
       {/* ── ⚡ Relance Toast ── */}
@@ -13016,84 +12995,6 @@ function SubscriptionModal({ onClose, onSubscribe }) {
           style={{ display:"block", margin:"0 auto", background:"none", border:"none", color:C.textL, fontSize:12, cursor:"pointer", fontFamily:T.body, textDecoration:"underline" }}
         >
           Pas maintenant — revenir en arrière
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════ PROFILE GATE ══ */
-function ProfileGate({ onCreateAccount, onBack }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <div style={{ maxWidth:560, margin:"0 auto", padding:"60px 20px 40px", display:"flex", alignItems:"center", justifyContent:"center", minHeight:"calc(100vh - 120px)" }}>
-      <div className="fade-up" style={{
-        width:"100%", background:C.white,
-        border:`1px solid ${C.border}`, borderRadius:24,
-        padding:"48px 40px", boxShadow:"0 24px 64px #1B2E4B10",
-        textAlign:"center", position:"relative", overflow:"hidden",
-      }}>
-        {/* Decorative */}
-        <div style={{ position:"absolute", top:-30, right:-30, width:130, height:130, borderRadius:"50%", background:`linear-gradient(135deg, ${C.navy}08 0%, ${C.gold}10 100%)`, pointerEvents:"none" }} />
-        <div style={{ position:"absolute", bottom:-40, left:-20, width:100, height:100, borderRadius:"50%", background:`${C.navy}05`, pointerEvents:"none" }} />
-
-        {/* Lock icon */}
-        <div style={{
-          width:72, height:72, borderRadius:"50%",
-          background:`linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`,
-          display:"flex", alignItems:"center", justifyContent:"center",
-          margin:"0 auto 24px", fontSize:30,
-          boxShadow:"0 12px 32px #1B2E4B28",
-        }}>🔒</div>
-
-        <h2 style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:12, lineHeight:1.2 }}>
-          Option réservée aux membres
-        </h2>
-        <p style={{ fontFamily:T.body, fontSize:14, color:C.textM, lineHeight:1.75, marginBottom:32, maxWidth:380, margin:"0 auto 32px" }}>
-          Créez un compte gratuit ou abonnez-vous pour <strong style={{color:C.navy}}>sauvegarder vos informations</strong> et débloquer votre vitrine pro accessible à vos clients.
-        </p>
-
-        {/* Benefits */}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:10, marginBottom:32, textAlign:"left" }}>
-          {[
-            { icon:"💾", title:"Profil sauvegardé", desc:"Vos infos pré-remplissent vos contrats" },
-            { icon:"🌐", title:"Vitrine pro", desc:"Une page publique à partager" },
-            { icon:"🔗", title:"Liens & réseaux", desc:"Portfolio, LinkedIn, GitHub" },
-            { icon:"⭐", title:"Badge vérifié", desc:"Renforcez votre crédibilité" },
-          ].map(b => (
-            <div key={b.title} style={{ background:C.creamD, borderRadius:12, padding:"14px 14px" }}>
-              <div style={{ fontSize:20, marginBottom:6 }}>{b.icon}</div>
-              <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:C.navy, marginBottom:3 }}>{b.title}</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5 }}>{b.desc}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* CTA */}
-        <button
-          onClick={onCreateAccount}
-          onMouseOver={() => setHovered(true)}
-          onMouseOut={() => setHovered(false)}
-          style={{
-            width:"100%", padding:"16px",
-            background: hovered ? C.navyD : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`,
-            color:C.white, border:"none", borderRadius:14, cursor:"pointer",
-            fontFamily:T.body, fontSize:15, fontWeight:700,
-            boxShadow: hovered ? "0 12px 36px #1B2E4B50" : "0 6px 24px #1B2E4B30",
-            transition:"all 0.2s",
-            transform: hovered ? "translateY(-2px)" : "none",
-            marginBottom:12,
-            display:"flex", alignItems:"center", justifyContent:"center", gap:10,
-          }}
-        >
-          <span style={{ fontSize:18 }}>🚀</span>
-          Créer un compte gratuit
-        </button>
-        <button
-          onClick={onBack}
-          style={{ background:"none", border:"none", color:C.textL, fontSize:12, cursor:"pointer", fontFamily:T.body, textDecoration:"underline" }}
-        >
-          ← Revenir à l'accueil
         </button>
       </div>
     </div>
