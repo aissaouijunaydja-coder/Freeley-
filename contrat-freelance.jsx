@@ -2467,12 +2467,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     setAuthUser(user);
     await loadUserData(user);
     setShowAuthModal(false);
-    // Restaurer le formulaire en cours si sauvegardé (priorité sur scanner)
-    const pendingForm2 = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null);
-    if (pendingForm2) {
-      goToScreen("app");
-      return;
-    }
     // Restaurer le formulaire en cours si sauvegardé
     const pendingForm = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null);
     const pendingStep = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
@@ -2496,14 +2490,21 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     setAuthUser(null);
     setPremium(false); setPlan(null);
     setContractsUsed(0); setHistory([]);
+    setMyNdas([]);
+    // Efface le profil et son cache local — sinon le profil de cette session reste affiché
+    // (et pourrait même être ré-enregistré par erreur) sur le compte de la prochaine personne
+    // qui se connecte sur ce même appareil.
+    setProfile({
+      firstName: "", lastName: "", jobTitle: "", bio: "", tjm: "",
+      siret: "", linkedin: "", portfolio: "", github: "",
+      skills: [], photo: null,
+      companyName: "", legalStatus: "", tvaNumber: "", address: "",
+      iban: "", bic: "", bankName: "", logo: null,
+    });
+    try { localStorage.removeItem("freeley_profile"); } catch(e) {}
   };
 
   /* ── Attente session ── */
-  // Forcer connexion au démarrage
-  if (authReady && !authUser && !showAuthModal) {
-    setTimeout(() => { setShowAuthModal(true); setAuthMode("login"); }, 100);
-  }
-
   // Forcer connexion au démarrage
   if (authReady && !authUser && !showAuthModal) {
     setTimeout(() => { setShowAuthModal(true); setAuthMode("login"); }, 100);
@@ -2900,6 +2901,14 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             const hist = await getHistory();
             setHistory(hist);
           } catch(e) { console.error("Erreur restauration contrat:", e); alert("La restauration a échoué. Réessaie."); }
+        }}
+        onMarkPaid={async (id) => {
+          try {
+            const { error } = await supabase.from("contracts").update({ payment_status: "paid" }).eq("id", id);
+            if (error) throw error;
+            const hist = await getHistory();
+            setHistory(hist);
+          } catch(e) { console.error("Erreur marquage facture libre payée:", e); alert("Le marquage a échoué. Réessaie."); }
         }}
       />
     </Shell>
@@ -5724,7 +5733,7 @@ function getRecouvrementCases(history) {
 
   const cases = [];
   history.forEach(c => {
-    if (c.deleted) return; // un contrat supprimé n'a plus besoin d'être relancé
+    if (c.deleted || c.isStandaloneInvoice) return; // ni un contrat supprimé, ni une simple facture libre n'ont besoin d'être relancés ici
     const basePrice = parseFloat(c.price) || 0;
     const baseIsPaid = c.paymentStatus === "paid";
     // Un acompte payé ne règle pas forcément le solde — on ne compte que ce qui reste vraiment dû
@@ -5810,7 +5819,7 @@ function buildAlertsFromHistory(history) {
 
   history.forEach(c => {
     // Alerte 2 : contrat non signé
-    if (c.signatureStatus === "none" && c.date) {
+    if (!c.deleted && !c.isStandaloneInvoice && c.signatureStatus === "none" && c.date) {
       alerts.push({
         id: "sign_" + c.id,
         read: false,
@@ -5852,7 +5861,7 @@ function buildAvenantAlerts(history) {
   if (!Array.isArray(history) || !history.length) return [];
   const alerts = [];
   history.forEach(entry => {
-    if (!Array.isArray(entry.avenants)) return;
+    if (entry.deleted || !Array.isArray(entry.avenants)) return;
     entry.avenants.forEach(av => {
       if (av.status === "signed") {
         alerts.push({
@@ -7655,7 +7664,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const [loading, setLoading]     = useState(false);
   const [oauthLoading, setOauthLoading] = useState(""); // "google" | "linkedin" | ""
   const [error, setError]         = useState("");
-  const [magicSent, setMagicSent] = useState(false);
+  const [needsEmailConfirm, setNeedsEmailConfirm] = useState(false);
 
   const handleMagicLink = async () => {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -7675,16 +7684,15 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
         data = res.data; error = res.error;
       }
       if (error) { setError(error.message); setLoading(false); return; }
+      if (mode === "signup" && data?.user && !data?.session) {
+        // Le compte est créé mais Supabase exige une confirmation par email avant de pouvoir se connecter —
+        // ce n'est pas une vraie connexion réussie, il ne faut surtout pas faire comme si ça l'était.
+        setLoading(false);
+        setNeedsEmailConfirm(true);
+        return;
+      }
       if (data?.user) { setLoading(false); onSuccess(data.user); }
       else { setError("Erreur connexion"); setLoading(false); }
-
-
-
-
-
-
-
-
     } catch(e) {
       setError("Erreur réseau"); setLoading(false);
     }
@@ -7775,19 +7783,15 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
             <span style={{ fontFamily:T.display, fontSize:17, color:C.navy, fontWeight:600, letterSpacing:"-0.01em" }}>Freeley</span>
           </div>
 
-          {magicSent ? (
-            /* ── État : lien envoyé ── */
+          {needsEmailConfirm ? (
+            /* ── État : confirmation email requise ── */
             <div style={{ textAlign:"center", paddingBottom:36 }}>
               <div style={{ width:64, height:64, borderRadius:"50%", background:"linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)", border:"2px solid #6EE7B7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, margin:"0 auto 20px" }}>📬</div>
-              <div style={{ fontFamily:T.display, fontSize:22, color:C.navy, fontWeight:700, marginBottom:8, lineHeight:1.2 }}>Lien envoyé !</div>
+              <div style={{ fontFamily:T.display, fontSize:22, color:C.navy, fontWeight:700, marginBottom:8, lineHeight:1.2 }}>Vérifie ta boîte mail</div>
               <p style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.7, marginBottom:8 }}>
-                Vérifie ta boîte mail à <strong style={{ color:C.navy }}>{email}</strong>.<br/>
-                Clique sur le lien pour accéder à ton espace en un instant.
+                Un email de confirmation a été envoyé à <strong style={{ color:C.navy }}>{email}</strong>.<br/>
+                Clique sur le lien qu'il contient pour activer ton compte, puis reviens te connecter ici.
               </p>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:T.body, fontSize:12, color:C.textL }}>
-                <span style={{ width:14, height:14, border:`2px solid ${C.gold}`, borderTopColor:"transparent", borderRadius:"50%", display:"inline-block", animation:"spin 0.9s linear infinite" }} />
-                Connexion automatique en cours…
-              </div>
             </div>
           ) : (
             <>
@@ -7950,7 +7954,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
         </div>
 
         {/* ── Bandeau points forts ── */}
-        {!magicSent && (
+        {!needsEmailConfirm && (
           <div style={{
             margin:"20px 0 0",
             background:`linear-gradient(135deg, ${C.cream} 0%, #FFF9EE 100%)`,
@@ -9321,7 +9325,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
 
   // ── Missions en cours (date de fin future) ──
   const missionsEnCours = history.filter(c => {
-    if (c.deleted || !c.endDate) return false;
+    if (c.deleted || c.isStandaloneInvoice || !c.endDate) return false;
     const end = new Date(c.endDate);
     return !isNaN(end) && end >= now;
   }).sort((a, b) => new Date(a.endDate) - new Date(b.endDate)).slice(0, 5);
@@ -9339,7 +9343,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
   });
 
   // ── Activité récente (5 derniers, hors supprimés) ──
-  const recent = history.filter(c => !c.deleted).slice(0, 5);
+  const recent = history.filter(c => !c.deleted && !c.isStandaloneInvoice).slice(0, 5);
 
   const stat = (label, value, sub, color) => (
     <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06", flex:"1 1 200px", minWidth:0 }}>
@@ -9502,7 +9506,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
 }
 
 /* ── ArchivesPage : retrouver un contrat supprimé (et ses factures) par nom de client ── */
-function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
+function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPaid }) {
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState(null);
   const [restoringId, setRestoringId] = useState(null);
@@ -9558,6 +9562,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
                   <div style={{ minWidth:0 }}>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:C.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
                       {entry.isStandaloneInvoice && <span style={{ fontSize:10, fontWeight:700, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:20, padding:"2px 8px", marginRight:8, verticalAlign:"middle" }}>FACTURE LIBRE</span>}
+                      {entry.isStandaloneInvoice && entry.paymentStatus === "paid" && <span style={{ fontSize:10, fontWeight:700, color:"#166534", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:20, padding:"2px 8px", marginRight:8, verticalAlign:"middle" }}>✓ PAYÉE</span>}
                       {entry.missionTitle || "Sans titre"}
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>{entry.clientName || "Client sans nom"} · {entry.date} · {Number(entry.price || 0).toLocaleString("fr-FR")} € HT</div>
@@ -9568,10 +9573,20 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore }) {
                   <div style={{ padding:"0 18px 18px", borderTop:`1px solid ${C.borderL}` }}>
                     <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:14 }}>
                       {entry.isStandaloneInvoice ? (
-                        <button
-                          onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
-                          style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                        >🧾 Télécharger la facture</button>
+                        <>
+                          <button
+                            onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
+                            style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                          >🧾 Télécharger la facture</button>
+                          {entry.paymentStatus === "paid" ? (
+                            <span style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, fontFamily:T.body }}>✓ Payée</span>
+                          ) : (
+                            <button
+                              onClick={() => onMarkPaid && onMarkPaid(entry.id)}
+                              style={{ padding:"8px 14px", background:"#fff", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                            >✓ Marquer comme payée</button>
+                          )}
+                        </>
                       ) : (
                       <button
                         onClick={() => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt)}
@@ -10086,7 +10101,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             Mes contrats
           </h1>
           <span style={{ fontFamily:T.body, fontSize:13, color:C.textL }}>
-            {history.filter(h => !h.deleted).length} contrat{history.filter(h => !h.deleted).length !== 1 ? "s" : ""} sauvegardé{history.filter(h => !h.deleted).length !== 1 ? "s" : ""}
+            {history.filter(h => !h.deleted && !h.isStandaloneInvoice).length} contrat{history.filter(h => !h.deleted && !h.isStandaloneInvoice).length !== 1 ? "s" : ""} sauvegardé{history.filter(h => !h.deleted && !h.isStandaloneInvoice).length !== 1 ? "s" : ""}
           </span>
         </div>
         {onGoToArchives && history.some(h => h.deleted || h.isStandaloneInvoice) && (
@@ -10153,7 +10168,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* Empty state */}
-      {history.filter(h => !h.deleted).length === 0 && (
+      {history.filter(h => !h.deleted && !h.isStandaloneInvoice).length === 0 && (
         <div className="fade-up fade-up-2" style={{
           background:C.white, border:`1px solid ${C.border}`, borderRadius:12,
           padding:"64px 32px", textAlign:"center",
@@ -10367,8 +10382,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 }
 
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
-function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser }) {
+function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser, contractId }) {
   const [downloaded, setDownloaded] = useState(false);
+  const [standaloneEntryId, setStandaloneEntryId] = useState(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
   const depositPct = depositPctProp ?? _depositPct;
@@ -10500,8 +10516,20 @@ ${freelanceName}`;
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie dans un instant."); return; }
     setPdfGenerating(true);
     try {
-      // 0. Réserve le vrai numéro de facture (séquentiel, sans trou) juste avant de générer — remplace l'aperçu
-      const invoiceNum = await reserveInvoiceNumber();
+      // 0. Réutilise le numéro déjà attribué à cette facture précise s'il existe (contrat lié, ou
+      //    facture libre déjà sauvegardée dans cette session) — sinon en réserve un nouveau.
+      const existingId = contractId || standaloneEntryId;
+      let invoiceNum = null;
+      if (existingId) {
+        try {
+          const { data: existingRow } = await supabase.from("contracts").select("content").eq("id", existingId).single();
+          if (existingRow) {
+            const existingParsed = parseContent(existingRow.content);
+            if (existingParsed.acompteInvoiceNumber) invoiceNum = existingParsed.acompteInvoiceNumber;
+          }
+        } catch(e) { console.error("Erreur lecture numéro de facture existant:", e); }
+      }
+      if (!invoiceNum) invoiceNum = await reserveInvoiceNumber();
 
       // 1. Récupérer (ou réutiliser) le lien de paiement Stripe pour l'intégrer au PDF
       let payUrl = stripeLinkUrl;
@@ -10667,11 +10695,25 @@ ${freelanceName}`;
       doc.text("Pas d'escompte pour paiement anticipé.", ML, y);
 
       doc.save(`Facture_${invoiceNum}.pdf`);
-      // Sauvegarde une fiche minimaliste pour pouvoir retrouver cette facture plus tard, même
-      // si elle n'est liée à aucun contrat complet (outil "Facture" utilisé seul depuis l'accueil).
-      if (authUser?.id) {
+      // Sauvegarde une fiche minimaliste pour pouvoir retrouver cette facture plus tard — uniquement
+      // si elle n'est liée à AUCUN contrat réel (sinon elle est déjà bien suivie ailleurs).
+      // Réutilise la même fiche si on re-télécharge plusieurs fois dans la même session, pour éviter les doublons.
+      if (authUser?.id && !contractId) {
         try {
-          await saveToHistory({ isStandaloneInvoice: true, acompteInvoiceNumber: invoiceNum }, form);
+          if (standaloneEntryId) {
+            const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", standaloneEntryId).single();
+            if (existing) {
+              const existingContent = parseContent(existing.content);
+              await supabase.rpc("update_contract_content", {
+                p_contract_id: standaloneEntryId,
+                p_new_content: JSON.stringify({ ...existingContent, form, acompteInvoiceNumber: invoiceNum }),
+                p_new_status: existing.status,
+              });
+            }
+          } else {
+            const saved = await saveToHistory({ isStandaloneInvoice: true, acompteInvoiceNumber: invoiceNum }, form);
+            if (saved?.id) setStandaloneEntryId(saved.id);
+          }
         } catch(e) { console.error("Erreur sauvegarde facture libre:", e); }
       }
       setDownloaded(true);
@@ -12841,6 +12883,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           onClose={() => setShowDepositInvoiceModal(false)}
           onGoToProfileTva={onGoToProfileTva}
           authUser={authUser}
+          contractId={contractId}
         />
       )}
     </div>
