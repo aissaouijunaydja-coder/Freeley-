@@ -39,6 +39,9 @@ export default async function handler(req, res) {
   const userId = userData.user.id;
 
   try {
+    const { error: profileError } = await supabaseAdmin.from('profiles').delete().eq('id', userId);
+    if (profileError) console.error('delete-account: failed to clean table "profiles"', profileError);
+
     const tablesToClean = ['contracts', 'invoice_counters', 'client_ratings', 'ndas'];
     for (const table of tablesToClean) {
       const { error } = await supabaseAdmin.from(table).delete().eq('user_id', userId);
