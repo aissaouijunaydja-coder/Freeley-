@@ -13471,7 +13471,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             Cette action est permanente et irréversible. Toutes vos données seront effacées conformément au RGPD.
           </div>
           <button
-            onClick={() => setShowDeleteModal(true)}
+            onClick={() => { setDeleteError(""); setShowDeleteModal(true); }}
             style={{
               display:"flex", alignItems:"center", gap:8,
               background:"transparent", border:"1.5px solid #EF4444",
