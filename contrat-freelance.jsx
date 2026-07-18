@@ -1038,8 +1038,6 @@ class ErrorBoundary extends React.Component {
 /* ══════════════════════════════════════════════════════════ APP ══ */
 function AppInner() {
   const [step, setStep]           = useState(() => {
-    const s = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
-    if (s) return Number(s);
     try {
       const draft = JSON.parse(localStorage.getItem("freeley_current_draft") || "null");
       if (draft && typeof draft.step === "number") return draft.step;
@@ -1047,11 +1045,6 @@ function AppInner() {
     return 0;
   });
   const [form, setForm]           = useState(() => {
-    // Effacer le cookie si on arrive sans OAuth (pas de hash #access_token)
-    if (!window.location.hash.includes("access_token")) {
-      document.cookie = "freeley_pending_form=;path=/;max-age=0";
-      document.cookie = "freeley_pending_step=;path=/;max-age=0";
-    }
     // Restaurer le brouillon en cours (survit au rafraîchissement de page)
     try {
       const draft = JSON.parse(localStorage.getItem("freeley_current_draft") || "null");
@@ -1345,6 +1338,15 @@ function AppInner() {
 
 
   useEffect(() => {
+    // Redirige vers "Mes contrats" si relancé depuis l'écran de crash
+    try {
+      const goto = sessionStorage.getItem("freeley_goto");
+      if (goto === "encours") {
+        sessionStorage.removeItem("freeley_goto");
+        goToScreen("history");
+      }
+    } catch(_) {}
+
     if (window.jspdf) { setPDFReady(true); }
     else {
       const s = document.createElement("script");
@@ -1357,40 +1359,6 @@ function AppInner() {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
-        // Restaurer formulaire sauvegardé après OAuth Google
-        // Restaurer formulaire depuis IndexedDB après OAuth Google
-        await new Promise((resolve) => {
-          try {
-            const req = indexedDB.open("freeley_db", 2);
-            req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
-            req.onsuccess = e => {
-              const db = e.target.result;
-              const tx = db.transaction("pending", "readonly");
-              const store = tx.objectStore("pending");
-              const getForm = store.get("form");
-              const getStep = store.get("step");
-              tx.oncomplete = () => {
-                const f = getForm.result;
-                const s = getStep.result;
-                if (f) {
-                  try { setForm(JSON.parse(f)); setStep(Number(s) || 0); } catch(e) {}
-                  // Effacer IndexedDB
-                  const tx2 = db.transaction("pending", "readwrite");
-                  tx2.objectStore("pending").delete("form");
-                  tx2.objectStore("pending").delete("step");
-                  goToScreen("app");
-                  setAuthReady(true);
-                  // Ce nettoyage ne concerne QUE ce cas précis (retour d'OAuth Google avec un
-                  // formulaire en attente) — il ne doit pas s'exécuter à chaque rafraîchissement,
-                  // sinon la mémoire de l'écran (Mes contrats, contrat généré...) est perdue à tort.
-                  localStorage.removeItem("freeley_screen");
-                }
-                resolve();
-              };
-            };
-            req.onerror = () => resolve();
-          } catch(e) { resolve(); }
-        });
       }
       setAuthReady(true);
     });
@@ -1404,30 +1372,12 @@ function AppInner() {
       if (session?.user) {
         setAuthUser(session.user);
         loadUserData(session.user);
-        // Restaurer formulaire après OAuth Google
-        const _pf = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null);
-        const _ps = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
-        if (_pf) {
-          try { setForm(JSON.parse(_pf)); setStep(Number(_ps) || 0); } catch(e) {}
-          document.cookie = "freeley_pending_form=;path=/;max-age=0";
-          document.cookie = "freeley_pending_step=;path=/;max-age=0";
-          goToScreen("app");
-          return;
-        }
       } else {
         setAuthUser(null);
       }
     });
 
     return () => subscription.unsubscribe();
-    // Redirige vers "En cours" si relancé depuis l'écran de crash
-    try {
-      const goto = sessionStorage.getItem("freeley_goto");
-      if (goto === "encours") {
-        sessionStorage.removeItem("freeley_goto");
-        goToScreen("history");
-      }
-    } catch(_) {}
   }, []);
 
   const loadUserData = async (user) => {
@@ -1605,21 +1555,6 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setErrors({});
     if (step < 2) { setStep(s => s + 1); return; }
-    // Obliger la connexion avant de générer
-    if (!authUser) {
-      // Sauvegarder directement dans IndexedDB
-      try {
-        const req = indexedDB.open("freeley_db", 2);
-        req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
-        req.onsuccess = e => {
-          const db = e.target.result;
-          const tx = db.transaction("pending", "readwrite");
-          tx.objectStore("pending").put(JSON.stringify(form), "form");
-          tx.objectStore("pending").put(String(step), "step");
-        };
-      } catch(e) {}
-      setShowAuthModal(true); setAuthMode("signup"); return;
-    }
     // Limite gratuite → pop-up abonnement
     if (!isPremium && contractsUsed >= FREE_LIMIT) { setShowSubscriptionModal(true); return; }
     generateContract();
@@ -2467,19 +2402,6 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     setAuthUser(user);
     await loadUserData(user);
     setShowAuthModal(false);
-    // Restaurer le formulaire en cours si sauvegardé
-    const pendingForm = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_form=")).split("=")[1]) : null);
-    const pendingStep = (document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step="))?.split("=")[1] ? decodeURIComponent(document.cookie.split("; ").find(r=>r.startsWith("freeley_pending_step=")).split("=")[1]) : null);
-    if (pendingForm) {
-      try {
-        setForm(JSON.parse(pendingForm));
-        setStep(Number(pendingStep) || 0);
-      } catch(e) {}
-      document.cookie = "freeley_pending_form=;path=/;max-age=0";
-      document.cookie = "freeley_pending_step=;path=/;max-age=0";
-      goToScreen("app");
-      return;
-    }
   };
 
   const handleSignOut = async () => {
@@ -2502,8 +2424,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   };
 
   /* ── Attente session ── */
-  // Forcer connexion au démarrage
-  if (authReady && !authUser && !showAuthModal) {
+  // Forcer connexion au démarrage — sauf pendant la réinitialisation du mot de passe,
+  // où l'utilisateur n'est pas censé être "connecté" normalement à ce stade précis.
+  if (authReady && !authUser && !showAuthModal && screen !== "reset-password") {
     setTimeout(() => { setShowAuthModal(true); setAuthMode("login"); }, 100);
   }
 
@@ -7643,9 +7566,10 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const [loading, setLoading]     = useState(false);
   const [oauthLoading, setOauthLoading] = useState(""); // "google" | "linkedin" | ""
   const [error, setError]         = useState("");
+  const [resetEmailSent, setResetEmailSent] = useState("");
   const [needsEmailConfirm, setNeedsEmailConfirm] = useState(false);
 
-  const handleMagicLink = async () => {
+  const handleEmailPasswordSubmit = async () => {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setError("Saisis une adresse email valide.");
       return;
@@ -7680,28 +7604,6 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const handleOAuth = async (provider) => {
     setOauthLoading(provider);
     try {
-      // Sauvegarder form dans IndexedDB avant redirect Google
-      await new Promise((resolve) => {
-        try {
-          const getCookie = (name) => {
-            const c = document.cookie.split("; ").find(r=>r.startsWith(name+"="));
-            return c ? decodeURIComponent(c.split("=")[1]) : "";
-          };
-          const formData = getCookie("freeley_pending_form");
-          const stepData = getCookie("freeley_pending_step");
-          const req = indexedDB.open("freeley_db", 2);
-          req.onupgradeneeded = e => e.target.result.createObjectStore("pending");
-          req.onsuccess = e => {
-            const db = e.target.result;
-            const tx = db.transaction("pending", "readwrite");
-            const store = tx.objectStore("pending");
-            store.put(formData || "", "form");
-            store.put(stepData || "0", "step");
-            tx.oncomplete = () => resolve();
-          };
-          req.onerror = () => resolve();
-        } catch(e) { resolve(); }
-      });
       const { error } = await supabase.auth.signInWithOAuth({
         provider: provider === "linkedin" ? "linkedin_oidc" : provider,
         options: {
@@ -7784,10 +7686,10 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 </p>
               </div>
               <div style={{ display:"flex", gap:8, marginBottom:20 }}>
-                <button onClick={() => setMode("login")} style={{ flex:1, padding:"10px", borderRadius:10, border:`2px solid ${mode === "login" ? C.navy : C.border}`, background: mode === "login" ? C.navy : "white", color: mode === "login" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                <button onClick={() => { setMode("login"); setError(""); setResetEmailSent(""); setNeedsEmailConfirm(false); }} style={{ flex:1, padding:"10px", borderRadius:10, border:`2px solid ${mode === "login" ? C.navy : C.border}`, background: mode === "login" ? C.navy : "white", color: mode === "login" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
                   Se connecter
                 </button>
-                <button onClick={() => setMode("signup")} style={{ flex:1, padding:"10px", borderRadius:10, border:`2px solid ${mode === "signup" ? C.navy : C.border}`, background: mode === "signup" ? C.navy : "white", color: mode === "signup" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                <button onClick={() => { setMode("signup"); setError(""); setResetEmailSent(""); setNeedsEmailConfirm(false); }} style={{ flex:1, padding:"10px", borderRadius:10, border:`2px solid ${mode === "signup" ? C.navy : C.border}`, background: mode === "signup" ? C.navy : "white", color: mode === "signup" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
                   Créer un compte
                 </button>
               </div>
@@ -7847,7 +7749,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   value={email}
                   onChange={e => { setEmail(e.target.value); setError(""); }}
                   placeholder="Votre adresse email pro"
-                  onKeyDown={e => e.key === "Enter" && handleMagicLink()}
+                  onKeyDown={e => e.key === "Enter" && handleEmailPasswordSubmit()}
                   style={inputBase}
                   onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
                   onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
@@ -7859,7 +7761,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   value={password || ""}
                   onChange={e => { setPassword(e.target.value); setError(""); }}
                   placeholder="Mot de passe (6 caractères min.)"
-                  onKeyDown={e => e.key === "Enter" && handleMagicLink()}
+                  onKeyDown={e => e.key === "Enter" && handleEmailPasswordSubmit()}
                   style={{ ...inputBase, paddingRight:44 }}
                   onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
                   onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
@@ -7873,7 +7775,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   value={confirmPwd || ""}
                   onChange={e => { setConfirmPwd(e.target.value); setError(""); }}
                   placeholder="Confirmer le mot de passe"
-                  onKeyDown={e => e.key === "Enter" && handleMagicLink()}
+                  onKeyDown={e => e.key === "Enter" && handleEmailPasswordSubmit()}
                   style={{ ...inputBase, paddingRight:44 }}
                   onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
                   onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
@@ -7889,7 +7791,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
               )}
 
               <button
-                onClick={handleMagicLink}
+                onClick={handleEmailPasswordSubmit}
                 disabled={loading || !email.trim()}
                 style={{
                   width:"100%", padding:"14px 20px",
@@ -7910,9 +7812,9 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 onMouseOut={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = loading || !email.trim() ? "none" : "0 8px 28px #1B2E4B30"; }}
               >
                 {loading ? (
-                  <><span style={{ width:15, height:15, border:`2px solid rgba(255,255,255,0.4)`, borderTopColor:"#fff", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }} /> Envoi en cours…</>
+                  <><span style={{ width:15, height:15, border:`2px solid rgba(255,255,255,0.4)`, borderTopColor:"#fff", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }} /> {mode === "signup" ? "Création en cours…" : "Connexion en cours…"}</>
                 ) : (
-                  <><span>✨</span> Recevoir mon lien magique de connexion</>
+                  <><span>{mode === "signup" ? "🛡️" : "👋"}</span> {mode === "signup" ? "Créer mon compte" : "Se connecter"}</>
                 )}
               </button>
 
@@ -7920,12 +7822,16 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, textAlign:"center", lineHeight:1.6, margin:"8px 0 0" }}>
                   <span onClick={async () => {
                     if (!email.trim()) { setError("Entre ton email d'abord"); return; }
+                    setError(""); setResetEmailSent("");
                     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: "https://freeley-ten.vercel.app" });
                     if (error) setError(error.message);
-                    else setError("Email de réinitialisation envoyé ! Vérifie ta boite mail.");
+                    else setResetEmailSent("✓ Email de réinitialisation envoyé ! Vérifie ta boîte mail.");
                   }} style={{ cursor:"pointer", color:C.navy, textDecoration:"underline", fontWeight:500 }}>
                     Mot de passe oublié ?
                   </span>
+                  {resetEmailSent && (
+                    <div style={{ marginTop:10, color:"#166534", fontWeight:600 }}>{resetEmailSent}</div>
+                  )}
                 </p>
               )}
             </>
@@ -13090,13 +12996,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
     setDeleteConfirming(true);
     setDeleteError("");
     try {
-      // 1. Supprime les contrats de l'utilisateur dans Supabase
-      if (authUser?.id) {
-        await supabase.from("contracts").delete().eq("user_id", authUser.id);
-      }
-      // 2. Supprime le compte d'authentification lui-même côté serveur
-      //    (nécessaire : la suppression d'un compte auth requiert la clé service_role,
-      //    qui ne peut jamais être exposée côté navigateur)
+      // Toute la suppression (contrats + comptes rendus + factures + NDA + le compte lui-même) se fait
+      // désormais uniquement côté serveur, en une seule fois — pour ne jamais risquer de perdre tes
+      // contrats si la suppression du compte échouait juste après côté client.
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       const res = await fetch("/api/delete-account", {
@@ -13105,7 +13007,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
       });
       if (!res.ok) throw new Error("delete-account request failed");
 
-      // 3. Nettoie toutes les données locales de l'app sur cet appareil
+      // Nettoie toutes les données locales de l'app sur cet appareil — seulement une fois la
+      // suppression confirmée réussie côté serveur.
       ["freeley_profile","freeley_current_draft","freeley_drafts_list","freeley_invoice_counters",
        "freeley_nda_list","freeley_payment_status","freeley_read_alerts","freeley_scan_list",
        "freeley_scan_results","freeley_screen"].forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
@@ -13114,7 +13017,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
       if (onGoHome) onGoHome();
     } catch (e) {
       console.error("Erreur suppression compte:", e);
-      setDeleteError("La suppression a échoué. Vérifie ta connexion et réessaie — si le problème persiste, contacte le support.");
+      setDeleteError("La suppression a échoué. Rien n'a été perdu — vérifie ta connexion et réessaie, ou contacte le support si le problème persiste.");
       setDeleteConfirming(false);
     }
   };
