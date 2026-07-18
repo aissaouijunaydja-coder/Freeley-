@@ -1078,7 +1078,8 @@ function AppInner() {
   const [copied, setCopied]       = useState(false);
   const [jsPDFReady, setPDFReady] = useState(false);
   const [showPaywall, setPaywall] = useState(false);
-  const [isPremium, setPremium]   = useState(false);
+  // Ancien système d'abonnement neutralisé (en attente de refonte) — tout le monde a un accès illimité
+  const [isPremium, setPremium]   = useState(true);
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
@@ -1381,11 +1382,10 @@ function AppInner() {
   }, []);
 
   const loadUserData = async (user) => {
-    const { plan, contractsUsed: used } = await getUserPlan();
-    const isPrem = plan !== "free";
-    setPremium(isPrem);
-    setPlan(isPrem ? plan : null);
-    setContractsUsed(used);
+    // Ancien système d'abonnement neutralisé (en attente de refonte) — accès illimité pour tout le monde
+    setPremium(true);
+    setPlan(null);
+    setContractsUsed(0);
     const hist = await getHistory();
     setHistory(hist);
     if (user?.id) await loadProfileFromSupabase(user.id);
@@ -1555,8 +1555,6 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setErrors({});
     if (step < 2) { setStep(s => s + 1); return; }
-    // Limite gratuite → pop-up abonnement
-    if (!isPremium && contractsUsed >= FREE_LIMIT) { setShowSubscriptionModal(true); return; }
     generateContract();
   };
 
@@ -3126,27 +3124,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             </div>
           )}
 
-          {/* Status banner */}
-          {!isPremium && (
-            <div className="fade-up" style={{
-              display:"flex", alignItems:"center", justifyContent:"space-between",
-              background: contractsLeft === 0 ? "#FEF2F2" : contractsLeft === 1 ? "#FFFBEB" : "#F0FDF4",
-              border:`1px solid ${contractsLeft === 0 ? "#FECACA" : contractsLeft === 1 ? "#FDE68A" : "#BBF7D0"}`,
-              borderRadius:8, padding:"10px 16px", marginBottom:28, fontFamily:T.body, fontSize:13,
-            }}>
-              <span style={{ color: contractsLeft === 0 ? "#DC2626" : contractsLeft === 1 ? "#D97706" : "#16A34A" }}>
-                {contractsLeft === 0 ? "Limite gratuite atteinte" : contractsLeft === 1 ? "Dernier contrat gratuit disponible" : `${contractsLeft} contrats gratuits restants`}
-              </span>
-              <span onClick={() => goToScreen("pricing")} style={{ fontSize:12, color:C.navy, cursor:"pointer", textDecoration:"underline", fontWeight:500 }}>
-                Voir les tarifs →
-              </span>
-            </div>
-          )}
-          {isPremium && (
-            <div className="fade-up" style={{ display:"flex", alignItems:"center", gap:8, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8, padding:"10px 16px", marginBottom:28, fontFamily:T.body, fontSize:13, color:"#16A34A" }}>
-              {premiumPlan==="unite" ? "📄 Contrat à l'unité activé" : premiumPlan==="mensuel" ? "⭐ Abonnement Mensuel · Contrats illimités" : "👑 Abonnement Annuel · Contrats illimités"}
-            </div>
-          )}
+          {/* Ancien bandeau abonnement retiré (en attente de refonte) */}
 
           {/* Stepper */}
           <div className="fade-up" style={{ display:"flex", alignItems:"center", marginBottom:48 }}>
@@ -6052,14 +6030,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
       {/* ── Actions droite ── */}
       <div style={{ display:"flex", alignItems:"center", gap:isMobile ? 4 : 8, flexShrink:0 }}>
 
-        {/* Compteur gratuits — masqué sur mobile */}
-        {!isMobile && (isPremium ? (
-          <span style={{ fontFamily:T.body, fontSize:11, color:C.success, background:"#F0FDF4", border:"1px solid #BBF7D0", padding:"4px 10px", borderRadius:20, fontWeight:500, whiteSpace:"nowrap" }}>
-            {planLabel}
-          </span>
-        ) : (
-          <span style={{ fontFamily:T.body, fontSize:11, color:C.textL, whiteSpace:"nowrap" }}>{left}/2 gratuits</span>
-        ))}
+        {/* Ancien badge d'abonnement retiré (en attente de refonte) */}
 
         {/* Tableau de bord */}
         <button onClick={onDashboard} title="Tableau de bord" style={{
@@ -6097,17 +6068,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
           )}
         </button>
 
-        {/* Tarifs — masqué sur mobile (accessible via menu) */}
-        {!isMobile && (
-          <button onClick={onPricing} style={{
-            padding:"7px 14px", background:"transparent", border:`1.5px solid ${C.navy}`,
-            color:C.navy, borderRadius:7, cursor:"pointer", fontSize:12, fontFamily:T.body, fontWeight:600,
-            transition:"all .18s", whiteSpace:"nowrap",
-          }}
-            onMouseOver={e=>{e.currentTarget.style.background=C.navy; e.currentTarget.style.color=C.white;}}
-            onMouseOut={e=>{e.currentTarget.style.background="transparent"; e.currentTarget.style.color=C.navy;}}
-          >Tarifs</button>
-        )}
+        {/* Ancien bouton Tarifs retiré (en attente de refonte) */}
 
         {/* ── 🔔 CLOCHE ALERTES ── */}
         <div style={{ position:"relative" }} className="bell-btn">
@@ -7849,7 +7810,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
             flexWrap:"wrap",
           }}>
             {[
-              { icon:"📦", text:"Essai inclus : 2 contrats gratuits" },
+              { icon:"📄", text:"Contrats juridiquement solides" },
               { icon:"🪄", text:"Scanner IA intégré" },
             ].map((item, i) => (
               <React.Fragment key={i}>
@@ -10025,32 +9986,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         </div>
       )}
 
-      {/* Premium upsell banner for free users */}
-      {!isPremium && (
-        <div className="fade-up fade-up-1" style={{
-          display:"flex", alignItems:"center", justifyContent:"space-between",
-          background:"#FFFBEB", border:"1px solid #FDE68A",
-          borderRadius:10, padding:"14px 18px", marginBottom:24,
-          flexWrap:"wrap", gap:10,
-        }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <span style={{ fontSize:18 }}>⭐</span>
-            <div>
-              <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color:"#92400E" }}>
-                Historique limité en version gratuite
-              </div>
-              <div style={{ fontFamily:T.body, fontSize:12, color:"#B45309", marginTop:2 }}>
-                Passe premium pour conserver tous tes contrats sans limite
-              </div>
-            </div>
-          </div>
-          <button onClick={onUpgrade} style={{
-            padding:"9px 18px", background:C.navy, color:C.white,
-            border:"none", borderRadius:7, cursor:"pointer",
-            fontSize:12, fontFamily:T.body, fontWeight:600, whiteSpace:"nowrap",
-          }}>Voir les offres →</button>
-        </div>
-      )}
+      {/* Ancien bandeau abonnement retiré (en attente de refonte) */}
 
       {/* Empty state */}
       {history.filter(h => !h.deleted && !h.isStandaloneInvoice).length === 0 && (
@@ -13401,58 +13337,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
         </div>
       </div>
 
-      {/* ── SECTION ABONNEMENT ── */}
-      <div className="fade-up fade-up-2" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06", marginTop:24 }}>
-        <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:18 }}>ABONNEMENT & FACTURATION</div>
-
-        {/* Forfait actuel */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:C.creamD, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
-          <div>
-            <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:3 }}>
-              {isPremium
-                ? (premiumPlan === "yearly" ? "Forfait Pro Annuel 🚀" : "Forfait Pro Mensuel ⚡")
-                : "Forfait Gratuit"}
-            </div>
-            <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>
-              {isPremium
-                ? (premiumPlan === "yearly" ? "99 €/an · Contrats illimités" : "14,99 €/mois · Contrats illimités")
-                : "2 contrats offerts pour tester"}
-            </div>
-          </div>
-          <div style={{
-            background: isPremium ? "linear-gradient(135deg, #1B2E4B 0%, #2D4A7A 100%)" : C.creamDD,
-            color: isPremium ? C.white : C.textM,
-            fontFamily:T.body, fontSize:11, fontWeight:700,
-            padding:"5px 12px", borderRadius:20, letterSpacing:"0.05em",
-          }}>
-            {isPremium ? "ACTIF" : "GRATUIT"}
-          </div>
-        </div>
-
-        {/* Bouton Stripe */}
-        <button
-          onClick={() => alert("La gestion d'abonnement et de facturation par carte (Stripe) sera disponible prochainement.")}
-          style={{
-            width:"100%", padding:"13px 18px",
-            background:C.white, border:`1.5px solid ${C.border}`,
-            borderRadius:12, cursor:"pointer",
-            display:"flex", alignItems:"center", justifyContent:"space-between",
-            fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy,
-            transition:"all 0.18s", boxShadow:"0 1px 4px #1B2E4B08",
-          }}
-          onMouseOver={e=>{ e.currentTarget.style.borderColor=C.navy; e.currentTarget.style.boxShadow="0 4px 16px #1B2E4B14"; }}
-          onMouseOut={e=>{ e.currentTarget.style.borderColor=C.border; e.currentTarget.style.boxShadow="0 1px 4px #1B2E4B08"; }}
-        >
-          <span style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <span style={{ fontSize:16 }}>💳</span>
-            Gérer mon abonnement & Factures
-          </span>
-          <span style={{ fontSize:12, color:C.textL }}>↗</span>
-        </button>
-        <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, marginTop:10, lineHeight:1.6, textAlign:"center" }}>
-          Vous pouvez suspendre votre abonnement ou modifier vos informations de paiement à tout moment via l'espace sécurisé Stripe.
-        </div>
-      </div>
+      {/* Ancienne section Abonnement & Facturation retirée (en attente de refonte) */}
 
       {/* ── ZONE DE DANGER ── */}
       <div className="fade-up fade-up-2" style={{ marginTop:32 }}>
