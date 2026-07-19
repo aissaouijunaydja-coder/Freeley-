@@ -5278,7 +5278,7 @@ function ContractLivePreview({ form, phase, onAnimationDone, apiReady, streaming
       </div>
 
       <p style={{ color:C.textL, fontSize:11, marginTop:14, textAlign:"center", fontFamily:T.body }}>
-        ⚡ Génération en cours — cela peut prendre environ 15 secondes…
+        ⚡ Génération de ton contrat en cours…
       </p>
     </div>
   );
