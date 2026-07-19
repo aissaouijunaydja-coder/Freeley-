@@ -5113,7 +5113,10 @@ function ContractLivePreview({ form, phase, onAnimationDone, apiReady, streaming
   // Progression réelle : compte combien d'articles sont déjà apparus dans le texte reçu jusqu'ici —
   // fini la fausse minuterie, ça reflète vraiment ce que l'IA a rédigé à cet instant précis.
   const articlesWritten = (streamingText.match(/ARTICLE\s+\d+\s*[—-]/g) || []).length;
-  const visibleArticles = Math.min(articlesWritten, articles.length);
+  // Toujours au moins 1 : l'article 1 doit apparaître "en cours" dès le lancement, avant même que
+  // l'IA n'ait écrit le mot "ARTICLE 1" (elle rédige d'abord l'en-tête et le préambule du contrat) —
+  // sinon l'écran semble figé/buggé pendant ce court instant.
+  const visibleArticles = Math.max(1, Math.min(articlesWritten, articles.length));
 
   const phases = [
     { label: "Analyse de ta mission…", icon: "🔍" },
