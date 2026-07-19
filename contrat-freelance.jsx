@@ -1064,6 +1064,7 @@ function AppInner() {
   }, [form, step]);
   const [contract, setContract]   = useState("");
   const [loading, setLoading]     = useState(false);
+  const [streamingText, setStreamingText] = useState("");
   const [loadingPhase, setLoadingPhase] = useState(0);
   const [apiError, setApiError]   = useState("");
   const [pdfLoading, setPdfLoad]  = useState(false);
@@ -1715,12 +1716,14 @@ CONSIGNES DE RÉDACTION
 - MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € HT"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
 - Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").`;
 
+      setStreamingText("");
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-5",
-          max_tokens: 20000,
+          max_tokens: 8000,
+          stream: true,
           messages: [{ role: "user", content: prompt }],
         }),
       });
@@ -1730,17 +1733,47 @@ CONSIGNES DE RÉDACTION
         throw new Error(`HTTP ${res.status}: ${errBody}`);
       }
 
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
+      // Lit le flux morceau par morceau — le texte s'affiche au fur et à mesure de sa rédaction,
+      // au lieu de faire attendre l'utilisateur devant un écran figé pendant toute la génération.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+      let stopReason = null;
 
-      const text = (data.content || []).map(i => i.text || "").join("\n").trim();
-      if (!text) throw new Error("Réponse vide — content: " + JSON.stringify(data.content));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // garde la ligne incomplète pour le prochain morceau
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr || jsonStr === "[DONE]") continue;
+          let evt;
+          try { evt = JSON.parse(jsonStr); } catch(e) { continue; }
+
+          if (evt.type === "content_block_delta" && evt.delta?.text) {
+            fullText += evt.delta.text;
+            setStreamingText(fullText);
+          } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
+            stopReason = evt.delta.stop_reason;
+          } else if (evt.type === "error") {
+            throw new Error(evt.error?.message || "Erreur de streaming");
+          }
+        }
+      }
+
+      const text = fullText.trim();
+      if (!text) throw new Error("Réponse vide");
 
       // Filet de sécurité : si la réponse a été coupée avant la fin (limite de longueur atteinte),
       // le contrat est légalement incomplet — on prévient plutôt que de le faire passer pour complet.
       const looksComplete = /ARTICLE 1[23]|voie électronique/i.test(text);
-      if (data.stop_reason === "max_tokens" || !looksComplete) {
-        console.error("[Freeley] Contrat possiblement tronqué — stop_reason:", data.stop_reason);
+      if (stopReason === "max_tokens" || !looksComplete) {
+        console.error("[Freeley] Contrat possiblement tronqué — stop_reason:", stopReason);
         setApiError("Le contrat généré semble incomplet (trop long pour être terminé). Réessaie — si le problème persiste, réduis la description de la mission.");
       }
 
@@ -3102,6 +3135,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           form={form}
           phase={loadingPhase}
           apiReady={animDone && !!apiReadyRef.current}
+          streamingText={streamingText}
           onAnimationDone={() => {
             if (apiReadyRef.current) doTransition.current(apiReadyRef.current);
           }}
@@ -5055,25 +5089,31 @@ function LegalTooltip({ text }) {
 }
 
 /* ══════════════════════════════════════════ LIVE PREVIEW ══ */
-function ContractLivePreview({ form, phase, onAnimationDone, apiReady }) {
+function ContractLivePreview({ form, phase, onAnimationDone, apiReady, streamingText }) {
   const { useState: _useState, useEffect: _useEffect, useRef: _useRef } = { useState, useEffect, useRef };
-  const [visibleArticles, setVisibleArticles] = _useState(0);
   const [dotCount, setDotCount] = _useState(1);
-  const cascadeDoneRef = _useRef(false); // cascade visuelle terminée
+  const doneTriggeredRef = _useRef(false);
 
   const articles = [
-    "ARTICLE 1 — OBJET DU CONTRAT",
-    "ARTICLE 2 — DESCRIPTION DE LA MISSION ET LIVRABLES",
-    "ARTICLE 3 — DÉLAIS ET PLANNING",
-    "ARTICLE 4 — RÉMUNÉRATION ET MODALITÉS DE PAIEMENT",
+    "ARTICLE 1 — INDÉPENDANCE DU PRESTATAIRE",
+    "ARTICLE 2 — OBJET ET DESCRIPTION DE LA MISSION",
+    "ARTICLE 3 — DÉLAIS ET PROCÉDURE DE VALIDATION",
+    "ARTICLE 4 — HONORAIRES ET MODALITÉS DE PAIEMENT",
     "ARTICLE 5 — RÉVISIONS ET MODIFICATIONS",
     "ARTICLE 6 — PROPRIÉTÉ INTELLECTUELLE",
     "ARTICLE 7 — CONFIDENTIALITÉ",
-    "ARTICLE 8 — RESPONSABILITÉS ET GARANTIES",
+    "ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE",
     "ARTICLE 9 — RÉSILIATION",
-    "ARTICLE 10 — DROIT APPLICABLE ET LITIGES",
-    "ARTICLE 11 — SIGNATURES",
+    "ARTICLE 10 — FORCE MAJEURE",
+    "ARTICLE 11 — DROIT APPLICABLE ET JURIDICTION",
+    "ARTICLE 12 — DISPOSITIONS GÉNÉRALES",
+    "ARTICLE 13 — SIGNATURES",
   ];
+
+  // Progression réelle : compte combien d'articles sont déjà apparus dans le texte reçu jusqu'ici —
+  // fini la fausse minuterie, ça reflète vraiment ce que l'IA a rédigé à cet instant précis.
+  const articlesWritten = (streamingText.match(/ARTICLE\s+\d+\s*[—-]/g) || []).length;
+  const visibleArticles = Math.min(articlesWritten, articles.length);
 
   const phases = [
     { label: "Analyse de ta mission…", icon: "🔍" },
@@ -5082,33 +5122,10 @@ function ContractLivePreview({ form, phase, onAnimationDone, apiReady }) {
   ];
   const currentPhase = phases[Math.max(0, phase - 1)] || phases[0];
 
+  // Une fois l'API prête (flux terminé), laisse un court instant pour l'effet visuel puis transite
   _useEffect(() => {
-    // Cascade sur 1.5s : articles 1→10 au vert, article 11 en spinner
-    const interval = setInterval(() => {
-      setVisibleArticles(v => {
-        const next = v + 1;
-        if (next >= articles.length) {
-          clearInterval(interval);
-          cascadeDoneRef.current = true;
-          // Cas : API déjà prête avant la fin de cascade → passer l'article 11 au vert et transiter
-          if (apiReady) {
-            setTimeout(() => {
-              setVisibleArticles(vv => vv + 1);
-              setTimeout(() => { if (onAnimationDone) onAnimationDone(); }, 500);
-            }, 0);
-          }
-          return next;
-        }
-        return next;
-      });
-    }, 120);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Cas : cascade déjà finie quand l'API répond → passer l'article 11 au vert et transiter
-  _useEffect(() => {
-    if (!apiReady || !cascadeDoneRef.current) return;
-    setVisibleArticles(v => v + 1);
+    if (!apiReady || doneTriggeredRef.current) return;
+    doneTriggeredRef.current = true;
     setTimeout(() => { if (onAnimationDone) onAnimationDone(); }, 500);
   }, [apiReady]);
 
