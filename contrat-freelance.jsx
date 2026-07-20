@@ -1282,6 +1282,10 @@ function AppInner() {
     return base;
   });
   const updateProfile = (key, val) => setProfile(p => ({ ...p, [key]: val }));
+  // Volontairement séparé de "profile" : géré uniquement par la connexion Stripe elle-même,
+  // jamais par la sauvegarde automatique du profil (pour ne jamais risquer de l'écraser par erreur).
+  const [stripeConnectAccountId, setStripeConnectAccountId] = useState(null);
+  const [stripeConnectReady, setStripeConnectReady] = useState(false);
 
   // Convertit le profil (camelCase, utilisé partout dans l'app) vers les colonnes Supabase (snake_case)
   const profileToRow = (p, userId) => ({
@@ -1310,7 +1314,11 @@ function AppInner() {
     try {
       const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
       if (error) { console.error("Erreur chargement profil:", error); return; }
-      if (data) setProfile(p => ({ ...p, ...rowToProfile(data) }));
+      if (data) {
+        setProfile(p => ({ ...p, ...rowToProfile(data) }));
+        setStripeConnectAccountId(data.stripe_connect_account_id || null);
+        setStripeConnectReady(!!data.stripe_connect_ready);
+      }
     } catch(e) { console.error("Erreur chargement profil:", e); }
   };
 
@@ -2435,6 +2443,54 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     setShowAuthModal(false);
   };
 
+  // Lance (ou reprend) la connexion du compte Stripe personnel du freelance
+  const [connectingStripe, setConnectingStripe] = useState(false);
+  const handleConnectStripe = async () => {
+    if (!authUser?.id || connectingStripe) return;
+    setConnectingStripe(true);
+    try {
+      const res = await fetch("/api/stripe-connect-onboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: authUser.id,
+          email: authUser.email,
+          existingAccountId: stripeConnectAccountId || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      if (data.accountId && data.accountId !== stripeConnectAccountId) {
+        setStripeConnectAccountId(data.accountId);
+        await supabase.from("profiles").update({ stripe_connect_account_id: data.accountId }).eq("id", authUser.id);
+      }
+      window.location.href = data.url;
+    } catch(e) {
+      console.error("Erreur connexion Stripe:", e);
+      alert("Erreur lors de la connexion à Stripe. Réessaie.");
+      setConnectingStripe(false);
+    }
+  };
+
+  // Vérifie si le compte Stripe est bien prêt, au retour du formulaire d'inscription Stripe
+  useEffect(() => {
+    if (!authUser?.id || !stripeConnectAccountId) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("stripe_connect") !== "done") return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/stripe-connect-status?accountId=${encodeURIComponent(stripeConnectAccountId)}`);
+        const data = await res.json();
+        if (data.ready) {
+          setStripeConnectReady(true);
+          await supabase.from("profiles").update({ stripe_connect_ready: true }).eq("id", authUser.id);
+        }
+      } catch(e) { console.error("Erreur vérification Stripe Connect:", e); }
+      // Nettoie l'URL pour ne pas re-vérifier à chaque rafraîchissement
+      window.history.replaceState({}, "", window.location.pathname);
+    })();
+  }, [authUser?.id, stripeConnectAccountId]);
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setAuthUser(null);
@@ -2583,6 +2639,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         profileScanLoading={profileScanLoading}
         profileScanSuccess={profileScanSuccess}
         profileScanError={profileScanError}
+        stripeConnectReady={stripeConnectReady}
+        onConnectStripe={handleConnectStripe}
+        connectingStripe={connectingStripe}
       />
     </Shell>
   );
@@ -2804,6 +2863,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           });
         }}
         onGoToArchives={() => goToScreen("archives")}
+        stripeConnectAccountId={stripeConnectAccountId}
       />
       {ratingModal && (
         <ClientRatingModal
@@ -2956,6 +3016,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onGoToProfileTva={goToProfileFacturation}
           authUser={authUser}
           onGoToHistory={() => { if (history[0]) setHistoryView(history[0]); goToScreen("history"); }}
+          stripeConnectAccountId={stripeConnectAccountId}
         />
       )}
       {showNdaModal && <NdaExpressModal onClose={() => setShowNdaModal(false)} profile={profile} authUser={authUser} />}
@@ -3934,7 +3995,7 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
-function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated }) {
+function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated, stripeConnectAccountId }) {
   const [mode, setMode]               = useState("magic"); // "magic" | "manuel"
   const [clientMessage, setClientMessage] = useState("");
   const [objet, setObjet]             = useState("");
@@ -4220,6 +4281,7 @@ CONSIGNES :
           description: `Avenant n°${avenantNum} — ${form.missionTitle || "mission"}`,
           customerEmail: form.clientEmail || undefined,
           metadata: { contractId: contractId || "", paymentType: "avenant", avenantNum: String(avenantNum) },
+          connectedAccountId: stripeConnectAccountId || undefined,
         }),
       });
       const data = await res.json();
@@ -8634,7 +8696,7 @@ function ContractTimeline({ entry }) {
 }
 
 /* ══════════════════════════════════════════ DEPOSIT GUARD ══ */
-function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authUser }) {
+function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authUser, stripeConnectAccountId }) {
   const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 0;
   // Utilise le vrai pourcentage d'acompte choisi sur ce contrat — jamais un taux fixe supposé
   const acomptePct = entry?.form?.acomptePourcentage != null && entry.form.acomptePourcentage !== ""
@@ -8675,6 +8737,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
         description: `Solde — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
         metadata: { contractId: entry?.id || "", paymentType: "solde" },
+        connectedAccountId: stripeConnectAccountId || undefined,
       }),
     });
     const data = await res.json();
@@ -8724,6 +8787,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
         description: `${paymentWordCap} — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
         metadata: { contractId: entry?.id || "", paymentType: "contract" },
+        connectedAccountId: stripeConnectAccountId || undefined,
       }),
     });
     const data = await res.json();
@@ -9605,7 +9669,7 @@ function CGUPage({ onBack }) {
   );
 }
 
-function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives }) {
+function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, stripeConnectAccountId }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
@@ -9825,7 +9889,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* 🛡️ Garant d'Acompte Automatique */}
-      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} profile={profile} authUser={authUser} />
+      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} profile={profile} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} />
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
@@ -9948,6 +10012,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
           contractId={historyView.id}
           onClose={() => setShowAvenantModal(false)}
           onCreated={() => {}}
+          stripeConnectAccountId={stripeConnectAccountId}
         />
       )}
 
@@ -10226,7 +10291,47 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser, contractId }) {
   const [downloaded, setDownloaded] = useState(false);
   const [standaloneEntryId, setStandaloneEntryId] = useState(null);
+  const [resumeCandidate, setResumeCandidate] = useState(null);
+  const [resumeDismissed, setResumeDismissed] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  // Cherche une facture libre récente et pas encore payée, pour proposer de la reprendre
+  // plutôt que d'en recréer une nouvelle (et donc un nouveau numéro) sans le vouloir.
+  useEffect(() => {
+    if (contractId || !authUser?.id) return; // uniquement pour l'usage "libre" depuis l'accueil
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("contracts")
+          .select("*")
+          .eq("user_id", authUser.id)
+          .order("created_at", { ascending: false })
+          .limit(15);
+        if (error || !Array.isArray(data)) return;
+        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+        const candidate = data.find(row => {
+          if (row.deleted_at) return false;
+          if (row.payment_status === "paid") return false;
+          let content = {};
+          try { content = typeof row.content === "string" ? JSON.parse(row.content) : (row.content || {}); } catch(e) {}
+          if (!content.isStandaloneInvoice) return false;
+          return new Date(row.created_at).getTime() > oneDayAgo;
+        });
+        if (candidate) {
+          let content = {};
+          try { content = typeof candidate.content === "string" ? JSON.parse(candidate.content) : (candidate.content || {}); } catch(e) {}
+          setResumeCandidate({ id: candidate.id, form: content.form || {}, missionTitle: candidate.title, price: candidate.price });
+        }
+      } catch(e) { console.error("Erreur recherche facture libre à reprendre:", e); }
+    })();
+  }, []);
+
+  const handleResumeInvoice = () => {
+    if (!resumeCandidate) return;
+    setStandaloneEntryId(resumeCandidate.id);
+    setForm(f => ({ ...f, ...resumeCandidate.form }));
+    setResumeDismissed(true);
+  };
   const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
   const depositPct = depositPctProp ?? _depositPct;
   const setDepositPct = (v) => {
@@ -10607,6 +10712,24 @@ ${freelanceName}`;
 
         {/* Corps */}
         <div style={{ padding:"24px 24px 0" }}>
+
+          {/* Proposition de reprendre une facture libre récente et pas encore payée */}
+          {resumeCandidate && !resumeDismissed && standaloneEntryId !== resumeCandidate.id && (
+            <div style={{
+              background:"#EFF6FF", border:"1px solid #BFDBFE",
+              borderRadius:8, padding:"12px 14px", marginBottom:16,
+              fontFamily:T.body, fontSize:12.5, color:"#1E3A8A", lineHeight:1.6,
+            }}>
+              <div style={{ marginBottom:8 }}>
+                📎 Tu as une facture libre récente non terminée : <strong>{resumeCandidate.missionTitle || "Sans titre"}</strong>
+                {resumeCandidate.price ? ` · ${Number(resumeCandidate.price).toLocaleString("fr-FR")} €` : ""}
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={handleResumeInvoice} style={{ padding:"6px 12px", background:"#1E3A8A", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontSize:11.5, fontWeight:700, fontFamily:T.body }}>Reprendre celle-ci</button>
+                <button onClick={() => setResumeDismissed(true)} style={{ padding:"6px 12px", background:"#fff", color:"#1E3A8A", border:"1px solid #BFDBFE", borderRadius:6, cursor:"pointer", fontSize:11.5, fontWeight:600, fontFamily:T.body }}>Nouvelle facture</button>
+              </div>
+            </div>
+          )}
 
           {/* Avertissement données manquantes */}
           {(!hasClient || !hasPrice) && (
@@ -12022,7 +12145,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, authUser, onGoToHistory }) {
+function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, authUser, onGoToHistory, stripeConnectAccountId }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -12114,6 +12237,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           description: `${isComptant ? "Paiement" : "Acompte"} — ${form?.missionTitle || "Prestation Freeley"}`,
           customerEmail: form?.clientEmail || undefined,
           metadata: { contractId: contractId || "", paymentType: "contract" },
+          connectedAccountId: stripeConnectAccountId || undefined,
         }),
       });
       const data = await res.json();
@@ -12889,7 +13013,7 @@ function MiniPlanCard({ icon, title, price, sub, color, recommended, onSelect })
 }
 
 /* ══════════════════════════════════════════ PROFILE PAGE ══ */
-function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError }) {
+function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, stripeConnectReady, onConnectStripe, connectingStripe }) {
   const [newSkill, setNewSkill] = useState("");
   const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState(initialSection || "identity");
@@ -13251,6 +13375,35 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 <input style={inputStyle} value={profile.bankName} placeholder="BNP Paribas" onChange={e => updateProfile("bankName", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
               </div>
             </div>
+          </div>
+
+          {/* Paiements des clients — Stripe Connect */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06", marginTop:24 }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>PAIEMENTS DE TES CLIENTS</div>
+            <p style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.6, marginBottom:16 }}>
+              Connecte ton propre compte Stripe pour que l'argent que tes clients payent (acompte, solde, avenants) arrive directement sur ton compte à toi — jamais sur celui de Freeley.
+            </p>
+            {stripeConnectReady ? (
+              <div style={{ display:"flex", alignItems:"center", gap:10, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 16px" }}>
+                <span style={{ fontSize:18 }}>✓</span>
+                <div>
+                  <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534" }}>Compte Stripe connecté</div>
+                  <div style={{ fontFamily:T.body, fontSize:11.5, color:"#15803D" }}>Les paiements de tes clients arrivent directement chez toi.</div>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={onConnectStripe}
+                disabled={connectingStripe}
+                style={{
+                  width:"100%", padding:"13px 18px",
+                  background: connectingStripe ? C.creamDD : "#635BFF",
+                  border:"none", borderRadius:10, cursor: connectingStripe ? "wait" : "pointer",
+                  display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+                  fontFamily:T.body, fontSize:13.5, fontWeight:700, color:"#fff",
+                }}
+              >{connectingStripe ? "Redirection vers Stripe…" : "💳 Connecter mon compte Stripe"}</button>
+            )}
           </div>
 
           {/* Mentions légales */}
