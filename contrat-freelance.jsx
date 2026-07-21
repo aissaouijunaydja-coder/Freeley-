@@ -2866,6 +2866,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         stripeConnectAccountId={stripeConnectAccountId}
         stripeConnectReady={stripeConnectReady}
         onGoToProfile={() => goToScreen("profile")}
+        onGoToProfileTva={goToProfileFacturation}
         onConnectStripe={handleConnectStripe}
         connectingStripe={connectingStripe}
       />
@@ -4002,7 +4003,7 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
-function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onConnectStripe, connectingStripe }) {
+function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe }) {
   const [mode, setMode]               = useState("magic"); // "magic" | "manuel"
   const [clientMessage, setClientMessage] = useState("");
   const [objet, setObjet]             = useState("");
@@ -4279,8 +4280,8 @@ CONSIGNES :
   const handleGenerateAvenantPaymentLink = async () => {
     if (!effectiveAjustement || effectiveAjustement <= 0 || avenantPaymentLoading) return;
     if (!stripeConnectReady) {
-      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
-      if (onGoToProfile) onGoToProfile();
+      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
+      if (onGoToProfileTva) onGoToProfileTva();
       return;
     }
     setAvenantPaymentLoading(true);
@@ -8716,7 +8717,7 @@ function ContractTimeline({ entry }) {
 }
 
 /* ══════════════════════════════════════════ DEPOSIT GUARD ══ */
-function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authUser, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onConnectStripe, connectingStripe }) {
+function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authUser, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe }) {
   const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 0;
   // Utilise le vrai pourcentage d'acompte choisi sur ce contrat — jamais un taux fixe supposé
   const acomptePct = entry?.form?.acomptePourcentage != null && entry.form.acomptePourcentage !== ""
@@ -8780,8 +8781,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       setTimeout(() => setSoldeLinkCopied(false), 2800);
     } catch(e) {
       if (e.message === "STRIPE_NOT_CONNECTED") {
-        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil) pour que l'argent de ton client arrive bien chez toi.");
-        if (onGoToProfile) onGoToProfile();
+        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi.");
+        if (onGoToProfileTva) onGoToProfileTva();
       } else {
         alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
       }
@@ -8798,8 +8799,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       if (!url) url = await ensureSoldePaymentLink();
     } catch(e) {
       if (e.message === "STRIPE_NOT_CONNECTED") {
-        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil) pour que l'argent de ton client arrive bien chez toi.");
-        if (onGoToProfile) onGoToProfile();
+        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi.");
+        if (onGoToProfileTva) onGoToProfileTva();
       } else {
         alert("Erreur lors de la création du lien de paiement.");
       }
@@ -8847,8 +8848,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       setTimeout(() => setLinkCopied(false), 2800);
     } catch(e) {
       if (e.message === "STRIPE_NOT_CONNECTED") {
-        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
-        if (onGoToProfile) onGoToProfile();
+        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
+        if (onGoToProfileTva) onGoToProfileTva();
       } else {
         alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
       }
@@ -8862,8 +8863,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     const email = entry?.form?.clientEmail;
     if (!email) { alert("Aucun email client renseigné sur ce contrat — impossible d'envoyer une relance."); return; }
     if (!stripeConnectReady) {
-      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil) pour que l'argent de ton client arrive bien chez toi.");
-      if (onGoToProfile) onGoToProfile();
+      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi.");
+      if (onGoToProfileTva) onGoToProfileTva();
       return;
     }
     setRelanceSending(true);
@@ -9745,7 +9746,7 @@ function CGUPage({ onBack }) {
   );
 }
 
-function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onConnectStripe, connectingStripe }) {
+function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
@@ -9965,7 +9966,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* 🛡️ Garant d'Acompte Automatique */}
-      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} profile={profile} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} onGoToProfile={onGoToProfile} onConnectStripe={onConnectStripe} connectingStripe={connectingStripe} />
+      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} profile={profile} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} onGoToProfile={onGoToProfile} onGoToProfileTva={onGoToProfileTva} onConnectStripe={onConnectStripe} connectingStripe={connectingStripe} />
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
@@ -10091,6 +10092,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
           stripeConnectAccountId={stripeConnectAccountId}
           stripeConnectReady={stripeConnectReady}
           onGoToProfile={onGoToProfile}
+          onGoToProfileTva={onGoToProfileTva}
           onConnectStripe={onConnectStripe}
           connectingStripe={connectingStripe}
         />
@@ -12308,8 +12310,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const handleGetTactilePaymentLink = async () => {
     if (tactilePaymentLoading) return;
     if (!stripeConnectReady) {
-      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
-      if (onGoToProfile) onGoToProfile();
+      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
+      if (onGoToProfileTva) onGoToProfileTva();
       return;
     }
     setTactilePaymentLoading(true);
