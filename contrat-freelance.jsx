@@ -5325,8 +5325,8 @@ function ContractLivePreview({ form, phase, onAnimationDone, apiReady, streaming
                 <div key={i} style={{
                   display:"flex", alignItems:"center", gap:12,
                   padding:"10px 14px",
-                  background: active ? "#F0FDF4" : visible ? C.creamD : C.creamD,
-                  border:`1px solid ${active ? "#86EFAC" : visible ? C.borderL : C.borderL}`,
+                  background: active ? "#F0FDF4" : C.creamD,
+                  border:`1px solid ${active ? "#86EFAC" : C.borderL}`,
                   borderRadius:7,
                   opacity: visible ? 1 : 0.25,
                   transform: visible ? "translateX(0)" : "translateX(-8px)",
@@ -8078,7 +8078,7 @@ function Field({ label, value, onChange, placeholder, type="text", error, delay,
         <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
           style={{
             width:"100%", padding: prefix ? "12px 14px 12px 28px" : "12px 14px",
-            background: focused ? C.white : C.white,
+            background: C.white,
             border:`1.5px solid ${error ? C.error : focused ? C.navy : C.border}`,
             borderRadius:8, color:C.text, fontSize:14, outline:"none", boxSizing:"border-box",
             fontFamily:T.body, transition:"border-color 0.18s",
@@ -10414,7 +10414,7 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
     setForm(f => ({ ...f, ...resumeCandidate.form }));
     setResumeDismissed(true);
   };
-  const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 30);
+  const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 0);
   const depositPct = depositPctProp ?? _depositPct;
   const setDepositPct = (v) => {
     setLocalDepositPct(v);
