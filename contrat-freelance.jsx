@@ -5666,7 +5666,223 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
   );
 }
 function Shell({ children }) {
-  return <div style={{ minHeight:"100vh", background:C.cream, fontFamily:T.body, color:C.text }}>{children}</div>;
+  return (
+    <div style={{ minHeight:"100vh", background:C.cream, fontFamily:T.body, color:C.text }}>
+      {children}
+      <FeedbackBubble />
+    </div>
+  );
+}
+
+// ─── Bulle "Un problème ? Une idée ?" — flottante sur tous les écrans ───
+// ─── Ton email admin — DOIT être le même que dans la policy Supabase ───
+const ADMIN_EMAIL = "aissaoui.junayd.ja@gmail.com";
+
+// ─── Page privée pour lire les messages de la bulle feedback : /?admin=feedback ───
+function AdminFeedbackPage() {
+  const [status, setStatus] = useState("checking"); // checking | denied | ok
+  const [messages, setMessages] = useState([]);
+  const [filter, setFilter] = useState("tous"); // tous | bug | idee
+  const [loadErr, setLoadErr] = useState("");
+
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user || user.email !== ADMIN_EMAIL) {
+        setStatus("denied");
+        return;
+      }
+      setStatus("ok");
+      const { data, error } = await supabase
+        .from("feedback_messages")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) setLoadErr("Impossible de charger les messages.");
+      else setMessages(data || []);
+    }).catch(() => setStatus("denied"));
+  }, []);
+
+  if (status === "checking") {
+    return <div style={{ padding:40, fontFamily:T.body, textAlign:"center", color:"#888" }}>Chargement…</div>;
+  }
+  if (status === "denied") {
+    return (
+      <div style={{ padding:40, fontFamily:T.body, textAlign:"center" }}>
+        <div style={{ fontSize:32, marginBottom:10 }}>🔒</div>
+        <div style={{ fontWeight:700 }}>Accès réservé</div>
+        <div style={{ color:"#888", fontSize:13, marginTop:6 }}>Connecte-toi avec le compte admin pour voir cette page.</div>
+      </div>
+    );
+  }
+
+  const filtered = filter === "tous" ? messages : messages.filter(m => m.type === filter);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.cream, fontFamily:T.body, padding:"32px 20px", maxWidth:760, margin:"0 auto" }}>
+      <div style={{ fontWeight:800, fontSize:22, marginBottom:4 }}>Messages reçus</div>
+      <div style={{ color:"#888", fontSize:13, marginBottom:20 }}>{messages.length} message{messages.length > 1 ? "s" : ""} au total</div>
+
+      <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+        {["tous", "bug", "idee"].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding:"7px 14px", borderRadius:8, fontSize:12.5, fontWeight:600, cursor:"pointer",
+            border: filter === f ? "2px solid #1E1B4B" : "1px solid #ddd",
+            background: filter === f ? "#EEF2FF" : "#fff", color: filter === f ? "#1E1B4B" : "#666",
+          }}>{f === "tous" ? "Tous" : f === "bug" ? "🐛 Bugs" : "💡 Idées"}</button>
+        ))}
+      </div>
+
+      {loadErr && <div style={{ color:"#DC2626", marginBottom:16 }}>{loadErr}</div>}
+
+      {filtered.length === 0 && !loadErr && (
+        <div style={{ textAlign:"center", color:"#aaa", padding:"40px 0" }}>Aucun message pour l'instant.</div>
+      )}
+
+      {filtered.map(m => (
+        <div key={m.id} style={{
+          background:"#fff", borderRadius:12, padding:16, marginBottom:12,
+          border:"1px solid #eee", boxShadow:"0 2px 8px rgba(0,0,0,0.04)",
+        }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+            <span style={{
+              fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:6,
+              background: m.type === "bug" ? "#FEF2F2" : "#ECFDF5",
+              color: m.type === "bug" ? "#DC2626" : "#059669",
+            }}>{m.type === "bug" ? "🐛 BUG" : "💡 IDÉE"}</span>
+            <span style={{ fontSize:11.5, color:"#999" }}>
+              {new Date(m.created_at).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })}
+            </span>
+          </div>
+          <div style={{ fontSize:14, lineHeight:1.5, marginBottom:8, whiteSpace:"pre-wrap" }}>{m.message}</div>
+          <div style={{ fontSize:11.5, color:"#999" }}>
+            {m.email && <>✉️ {m.email} · </>}
+            {m.page_url && <a href={m.page_url} style={{ color:"#999" }}>page concernée</a>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FeedbackBubble() {
+  const [open, setOpen] = useState(false);
+  const [type, setType] = useState("bug"); // "bug" | "idee"
+  const [message, setMessage] = useState("");
+  const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user?.email) setEmail(user.email);
+    }).catch(() => {});
+  }, []);
+
+  const handleSend = async () => {
+    if (!message.trim() || sending) return;
+    setSending(true);
+    setErr("");
+    try {
+      const { error } = await supabase.from("feedback_messages").insert({
+        type,
+        message: message.trim(),
+        email: email.trim() || null,
+        page_url: window.location.href,
+        created_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+      setSent(true);
+      setMessage("");
+      setTimeout(() => { setOpen(false); setSent(false); }, 2200);
+    } catch (e) {
+      setErr("Envoi impossible, réessaie dans un instant.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-label="Signaler un problème ou une idée"
+        style={{
+          position:"fixed", bottom:20, right:20, zIndex:9998,
+          width:52, height:52, borderRadius:"50%",
+          background: C.navy || "#1E1B4B", border:"none", cursor:"pointer",
+          boxShadow:"0 4px 16px rgba(0,0,0,0.25)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:22,
+        }}
+      >💬</button>
+
+      {open && (
+        <div style={{
+          position:"fixed", bottom:82, right:20, zIndex:9999,
+          width:320, maxWidth:"calc(100vw - 40px)",
+          background:"#fff", borderRadius:16, padding:18,
+          boxShadow:"0 8px 32px rgba(0,0,0,0.2)", border:"1px solid #eee",
+        }}>
+          {sent ? (
+            <div style={{ textAlign:"center", padding:"12px 0", fontFamily:T.body }}>
+              <div style={{ fontSize:28, marginBottom:6 }}>✅</div>
+              <div style={{ fontWeight:700 }}>Message envoyé, merci !</div>
+              <div style={{ fontSize:12.5, color:"#888", marginTop:4 }}>On revient vers toi si besoin.</div>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontWeight:700, fontFamily:T.body, marginBottom:10, fontSize:14 }}>
+                Un problème ? Une idée ?
+              </div>
+              <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                <button onClick={() => setType("bug")} style={{
+                  flex:1, padding:"7px 0", borderRadius:8, fontSize:12.5, fontWeight:600, cursor:"pointer",
+                  border: type === "bug" ? "2px solid #DC2626" : "1px solid #ddd",
+                  background: type === "bug" ? "#FEF2F2" : "#fff", color: type === "bug" ? "#DC2626" : "#666",
+                }}>🐛 Bug</button>
+                <button onClick={() => setType("idee")} style={{
+                  flex:1, padding:"7px 0", borderRadius:8, fontSize:12.5, fontWeight:600, cursor:"pointer",
+                  border: type === "idee" ? "2px solid #059669" : "1px solid #ddd",
+                  background: type === "idee" ? "#ECFDF5" : "#fff", color: type === "idee" ? "#059669" : "#666",
+                }}>💡 Idée</button>
+              </div>
+              <textarea
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                placeholder={type === "bug" ? "Décris le problème rencontré…" : "Décris ton idée d'amélioration…"}
+                rows={4}
+                style={{
+                  width:"100%", boxSizing:"border-box", padding:10, borderRadius:8,
+                  border:"1px solid #ddd", fontFamily:T.body, fontSize:13, resize:"none", marginBottom:8,
+                }}
+              />
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="Ton email (pour te répondre)"
+                style={{
+                  width:"100%", boxSizing:"border-box", padding:9, borderRadius:8,
+                  border:"1px solid #ddd", fontFamily:T.body, fontSize:12.5, marginBottom:10,
+                }}
+              />
+              {err && <div style={{ color:"#DC2626", fontSize:12, marginBottom:8 }}>{err}</div>}
+              <button
+                onClick={handleSend}
+                disabled={!message.trim() || sending}
+                style={{
+                  width:"100%", padding:"10px 0", borderRadius:8, border:"none",
+                  background: !message.trim() || sending ? "#ccc" : (C.navy || "#1E1B4B"),
+                  color:"#fff", fontWeight:700, fontSize:13,
+                  cursor: !message.trim() || sending ? "default" : "pointer",
+                }}
+              >{sending ? "Envoi…" : "Envoyer"}</button>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 /* ══════════════════════════════════════════════════════════ ALERT CENTER ══ */
@@ -14099,6 +14315,15 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
 }
 
 export default function App() {
+  // Page admin (privée) : ?admin=feedback
+  const adminParam = new URLSearchParams(window.location.search).get("admin");
+  if (adminParam === "feedback") {
+    return (
+      <ErrorBoundary>
+        <AdminFeedbackPage />
+      </ErrorBoundary>
+    );
+  }
   // Lien de signature client : ?sign=<contractId>
   const signParam = new URLSearchParams(window.location.search).get("sign");
   if (signParam) {
