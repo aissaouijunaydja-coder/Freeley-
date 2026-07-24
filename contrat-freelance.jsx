@@ -1150,6 +1150,7 @@ function AppInner() {
 
   // Scanner modal state
   const [showScannerModal, setShowScannerModal] = useState(false);
+  const [showRadarModal, setShowRadarModal] = useState(false);
   const [scanResultsToShow, setScanResultsToShow] = useState(null);
   const [hasScanResults, setHasScanResults] = useState(!!localStorage.getItem("freeley_scan_results"));
 
@@ -3008,6 +3009,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onScanSaved={() => setHasScanResults(true)}
         />
       )}
+      {showRadarModal && <RadarClientModal onClose={() => setShowRadarModal(false)} />}
       {showTactileSign && (
         <TactileSignatureModal
           form={form}
@@ -3165,6 +3167,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         onScanner={() => setShowScannerModal(true)}
         onInvoice={() => setShowInvoiceModal(true)}
         onProfile={() => goToScreen("profile")}
+        onRadar={() => setShowRadarModal(true)}
       />
 
       {/* ── ⚡ Relance Toast ── */}
@@ -5451,7 +5454,7 @@ function PricingPage({ onSelect, onBack }) {
 /* ══════════════════════════════════════════ COMPONENTS ══ */
 
 /* ── InstantToolsBar : barre d'outils IA en haut de page ── */
-function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfile }) {
+function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfile, onRadar }) {
   const [openTip, setOpenTip] = useState(null);
 
   const TOOLS = [
@@ -5519,6 +5522,19 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
       title: "Profil freelance complet",
       description: "Gérez vos informations, compétences et liens professionnels.",
       example: "Votre nom, SIRET et titre se remplissent automatiquement dans chaque contrat généré.",
+    },
+    {
+      id: "radar",
+      icon: "🛡️",
+      label: "Radar Client",
+      accent: "#7C3AED",
+      accentLight: "#F5F3FF",
+      accentBorder: "#DDD6FE",
+      accentText: "#6D28D9",
+      onClick: onRadar,
+      title: "Vérification d'entreprise",
+      description: "Vérifiez qu'un client existe vraiment avant de signer.",
+      example: "Entrez le nom ou le SIRET d'un client pro, l'app vérifie en 2 secondes qu'il est bien actif et depuis quand.",
     },
   ];
 
@@ -5882,6 +5898,189 @@ function FeedbackBubble() {
         </div>
       )}
     </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════ RADAR CLIENT ══ */
+// Vérifie l'existence et le statut d'une entreprise via l'API publique gratuite
+// de l'État (recherche-entreprises.api.gouv.fr) — aucune clé requise.
+function RadarClientModal({ onClose }) {
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const handleSearch = async () => {
+    if (!query.trim() || loading) return;
+    setLoading(true);
+    setErr("");
+    setResults(null);
+    setSelected(null);
+    try {
+      const res = await fetch(
+        `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(query.trim())}&per_page=6`
+      );
+      if (!res.ok) throw new Error("api");
+      const data = await res.json();
+      setResults(data.results || []);
+    } catch (e) {
+      setErr("Recherche impossible pour le moment, réessaie dans un instant.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const yearsSince = (dateStr) => {
+    if (!dateStr) return null;
+    const diff = Date.now() - new Date(dateStr).getTime();
+    return diff / (1000 * 60 * 60 * 24 * 365.25);
+  };
+
+  const renderVerdict = (c) => {
+    const active = c.etat_administratif === "A";
+    const age = yearsSince(c.date_creation);
+    if (!active) {
+      return { color: "#DC2626", bg: "#FEF2F2", icon: "🔴", text: "Entreprise fermée / cessée d'activité" };
+    }
+    if (age !== null && age < 1) {
+      return { color: "#D97706", bg: "#FFFBEB", icon: "🟠", text: "Entreprise active, mais créée il y a moins d'un an" };
+    }
+    return { color: "#059669", bg: "#ECFDF5", icon: "🟢", text: "Entreprise active et établie" };
+  };
+
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:10000, background:"rgba(0,0,0,0.5)",
+      display:"flex", alignItems:"flex-end", justifyContent:"center",
+    }} onClick={onClose}>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background:"#fff", borderRadius:"20px 20px 0 0", padding:20,
+          width:"100%", maxWidth:520, maxHeight:"88vh", overflowY:"auto",
+          fontFamily:T.body,
+        }}
+      >
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <div style={{ fontWeight:800, fontSize:18 }}>🛡️ Radar Client</div>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:22, cursor:"pointer", color:"#999" }}>×</button>
+        </div>
+        <div style={{ fontSize:13, color:"#888", marginBottom:16 }}>
+          Vérifie qu'une entreprise cliente existe vraiment et est toujours active, avant de signer.
+        </div>
+
+        <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSearch()}
+            placeholder="Nom de l'entreprise ou SIRET"
+            style={{
+              flex:1, padding:"12px 14px", borderRadius:10, border:"1px solid #ddd",
+              fontFamily:T.body, fontSize:14,
+            }}
+          />
+          <button
+            onClick={handleSearch}
+            disabled={!query.trim() || loading}
+            style={{
+              padding:"0 20px", borderRadius:10, border:"none",
+              background: !query.trim() || loading ? "#ccc" : "#7C3AED",
+              color:"#fff", fontWeight:700, cursor: !query.trim() || loading ? "default" : "pointer",
+            }}
+          >{loading ? "…" : "Chercher"}</button>
+        </div>
+
+        {err && <div style={{ color:"#DC2626", fontSize:13, marginBottom:12 }}>{err}</div>}
+
+        {results && results.length === 0 && !err && (
+          <div style={{ textAlign:"center", color:"#aaa", padding:"20px 0" }}>Aucune entreprise trouvée avec ce nom.</div>
+        )}
+
+        {!selected && results && results.map(c => (
+          <button
+            key={c.siren}
+            onClick={() => setSelected(c)}
+            style={{
+              display:"block", width:"100%", textAlign:"left",
+              background:"#fafafa", border:"1px solid #eee", borderRadius:10,
+              padding:12, marginBottom:8, cursor:"pointer",
+            }}
+          >
+            <div style={{ fontWeight:700, fontSize:14 }}>{c.nom_complet}</div>
+            <div style={{ fontSize:12, color:"#888", marginTop:2 }}>{c.siege?.adresse || "Adresse non renseignée"}</div>
+          </button>
+        ))}
+
+        {selected && (() => {
+          const v = renderVerdict(selected);
+          const age = yearsSince(selected.date_creation);
+          return (
+            <div>
+              <button onClick={() => setSelected(null)} style={{
+                background:"none", border:"none", color:"#7C3AED", fontSize:12.5, cursor:"pointer",
+                marginBottom:12, padding:0, fontWeight:600,
+              }}>← Retour aux résultats</button>
+
+              <div style={{ background:v.bg, border:`1px solid ${v.color}33`, borderRadius:12, padding:14, marginBottom:14 }}>
+                <div style={{ color:v.color, fontWeight:700, fontSize:14 }}>{v.icon} {v.text}</div>
+              </div>
+
+              <div style={{ fontWeight:800, fontSize:17, marginBottom:4 }}>{selected.nom_complet}</div>
+              <div style={{ fontSize:13, color:"#888", marginBottom:14 }}>{selected.siege?.adresse}</div>
+
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, fontSize:13 }}>
+                <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
+                  <div style={{ color:"#999", fontSize:11 }}>SIREN</div>
+                  <div style={{ fontWeight:700 }}>{selected.siren}</div>
+                </div>
+                <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
+                  <div style={{ color:"#999", fontSize:11 }}>Créée le</div>
+                  <div style={{ fontWeight:700 }}>
+                    {selected.date_creation ? new Date(selected.date_creation).toLocaleDateString("fr-FR") : "—"}
+                    {age !== null && <span style={{ color:"#999", fontWeight:400 }}> ({age.toFixed(1)} an{age >= 2 ? "s" : ""})</span>}
+                  </div>
+                </div>
+                <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
+                  <div style={{ color:"#999", fontSize:11 }}>Statut</div>
+                  <div style={{ fontWeight:700 }}>{selected.etat_administratif === "A" ? "Active" : "Fermée"}</div>
+                </div>
+                <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
+                  <div style={{ color:"#999", fontSize:11 }}>N° TVA</div>
+                  <div style={{ fontWeight:700 }}>{selected.tva?.[0] || "Non communiqué"}</div>
+                </div>
+              </div>
+
+              <div style={{ fontSize:11, color:"#bbb", marginTop:16, marginBottom:12, textAlign:"center" }}>
+                Données publiques issues du répertoire Sirene (INSEE) via l'API officielle de l'État.
+              </div>
+
+              <button
+                onClick={() => {
+                  const lines = [
+                    selected.nom_complet,
+                    selected.siege?.adresse,
+                    `SIRET : ${selected.siege?.siret || selected.siren}`,
+                    selected.tva?.[0] ? `TVA : ${selected.tva[0]}` : null,
+                  ].filter(Boolean).join("\n");
+                  navigator.clipboard.writeText(lines).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }).catch(() => {});
+                }}
+                style={{
+                  width:"100%", padding:"12px 0", borderRadius:10, border:"none",
+                  background: copied ? "#059669" : "#7C3AED",
+                  color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer",
+                }}
+              >{copied ? "✅ Copié !" : "📋 Copier les infos"}</button>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
   );
 }
 
