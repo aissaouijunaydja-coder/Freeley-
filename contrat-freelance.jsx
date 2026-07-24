@@ -5807,18 +5807,18 @@ function FeedbackBubble() {
         onClick={() => setOpen(o => !o)}
         aria-label="Signaler un problème ou une idée"
         style={{
-          position:"fixed", bottom:20, right:20, zIndex:9998,
-          width:52, height:52, borderRadius:"50%",
+          position:"fixed", bottom:28, right:84, zIndex:9998,
+          width:48, height:48, borderRadius:"50%",
           background: C.navy || "#1E1B4B", border:"none", cursor:"pointer",
           boxShadow:"0 4px 16px rgba(0,0,0,0.25)",
           display:"flex", alignItems:"center", justifyContent:"center",
-          fontSize:22,
+          fontSize:20,
         }}
       >💬</button>
 
       {open && (
         <div style={{
-          position:"fixed", bottom:82, right:20, zIndex:9999,
+          position:"fixed", bottom:88, right:24, zIndex:9999,
           width:320, maxWidth:"calc(100vw - 40px)",
           background:"#fff", borderRadius:16, padding:18,
           boxShadow:"0 8px 32px rgba(0,0,0,0.2)", border:"1px solid #eee",
