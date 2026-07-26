@@ -374,6 +374,7 @@ const initialForm = {
   clientName: "", clientCompany: "", clientAddress: "", clientEmail: "", clientPhone: "", typeClient: "professionnel",
   missionTitle: "", missionDescription: "", categorieMetier: "autre", startDate: "", endDate: "",
   price: "", paymentTerms: "Comptant", revisions: "2", latePaymentPenalty: true, acomptePourcentage: "0",
+  clauseDedit: true,
 };
 
 const validate = (step, form) => {
@@ -1641,6 +1642,7 @@ Honoraires HT      : ${form.price} €
 Conditions paiement: ${paymentTermsLabel}
 Révisions incluses : ${form.revisions} aller(s)-retour(s)
 Pénalités de retard: ${form.latePaymentPenalty ? "OUI (clause légale obligatoire Art. L441-10 C.com.)" : "NON"}
+Clause de dédommagement annulation: ${form.clauseDedit ? "OUI" : "NON"}
 
 ══════════════════════════════════════════════
 STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
@@ -1700,6 +1702,7 @@ Rédige OBLIGATOIREMENT :
 
 ARTICLE 9 — RÉSILIATION
 Conditions de résiliation par l'une ou l'autre des parties. En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire. En cas de résiliation par le Prestataire pour faute du Client, les sommes dues pour les prestations réalisées sont immédiatement exigibles.
+${form.clauseDedit ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après que le Prestataire a commencé l'exécution de la mission, une indemnité sera due au Prestataire au titre du travail déjà engagé et du temps réservé. Le montant de cette indemnité sera déterminé d'un commun accord entre les parties, en fonction de l'état d'avancement de la mission au jour de la résiliation. À défaut d'accord amiable, le Prestataire pourra réclamer une indemnisation proportionnelle au préjudice réellement subi. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due, sous réserve du maintien de l'acompte éventuellement déjà versé conformément au paragraphe précédent."` : ""}
 
 ARTICLE 10 — FORCE MAJEURE
 Clause standard de force majeure conforme à l'art. 1218 du Code civil.
@@ -1931,7 +1934,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
       clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
       endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
-      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre",
+      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true,
       ...rawForm,
     };
     const pContract = overrideContract || contract;
@@ -3439,6 +3442,46 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                           ? "✓ Clause activée — Taux d'intérêt légal en vigueur applicable aux consommateurs"
                           : "Taux BCE + 10 pts · Indemnité 40€ · Art. L441-10 C.com. — Fortement recommandé")
                         : "Active cette clause pour protéger ton paiement en cas de retard client"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clause de dédommagement en cas d'annulation */}
+              <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+                  <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE DÉDOMMAGEMENT EN CAS D'ANNULATION</label>
+                  <LegalTooltip text="Si le client annule la mission après que vous avez commencé à travailler, cette clause vous permet de réclamer un dédommagement pour le temps déjà investi — à négocier selon l'avancement réel. Avant le début des travaux, seul l'acompte déjà versé reste dû." />
+                </div>
+                <div
+                  onClick={() => update("clauseDedit", !form.clauseDedit)}
+                  style={{
+                    display:"flex", alignItems:"flex-start", gap:14,
+                    padding:"16px 18px",
+                    background: form.clauseDedit ? "#F0FDF4" : C.white,
+                    border:`1.5px solid ${form.clauseDedit ? "#86EFAC" : C.border}`,
+                    borderRadius:10, cursor:"pointer",
+                    transition:"all 0.2s",
+                  }}
+                >
+                  <div style={{
+                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    background: form.clauseDedit ? "#16A34A" : C.creamDD,
+                    position:"relative", transition:"background 0.2s",
+                  }}>
+                    <div style={{
+                      position:"absolute", top:3, left: form.clauseDedit ? 21 : 3,
+                      width:18, height:18, borderRadius:"50%", background:C.white,
+                      boxShadow:"0 1px 4px #00000030",
+                      transition:"left 0.2s",
+                    }}/>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: form.clauseDedit ? "#15803D" : C.textM, marginBottom:3 }}>
+                      {form.clauseDedit ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
+                    </div>
+                    <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseDedit ? "#16A34A" : C.textL, lineHeight:1.5 }}>
+                      Si le client annule la mission après que vous avez commencé à travailler, cette clause vous permet de réclamer un dédommagement pour le temps déjà investi — à négocier selon l'avancement réel. Avant le début des travaux, seul l'acompte déjà versé reste dû.
                     </div>
                   </div>
                 </div>
@@ -7274,8 +7317,10 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
   const [manStep,    setManStep]    = useState("form"); // form | loading | result
   const [manLetter,  setManLetter]  = useState("");
   const [manTotal,   setManTotal]   = useState(0);
-  const [manLetterType, setManLetterType] = useState("formal"); // "formal" | "preventive"
+  const [manLetterType, setManLetterType] = useState("formal"); // "formal" | "preventive" | "silence"
   const [manDots,    setManDots]    = useState(1);
+  const [manMode, setManMode] = useState("paiement"); // "paiement" | "silence" — bascule entre relance de paiement et relance pour client silencieux (ghosting)
+  const [manLastContact, setManLastContact] = useState("");
 
   /* ── State envoi mise en demeure ── */
   const [sendModal, setSendModal]   = useState(null); // null | { letter, clientName }
@@ -7392,6 +7437,31 @@ Termine par une formule de politesse simple et la signature "${senderName}".
 Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple uniquement, ce message sera affiché tel quel.`;
   };
 
+  // Relance "SILENCE PROLONGÉ" — pour un client qui ne répond plus en cours de mission (ghosting), indépendamment de tout paiement en retard.
+  // Ton neutre et posé, pas de menace, pas de pénalités — le but est juste de formaliser une trace écrite datée, utile si la situation se dégrade plus tard.
+  const buildSilencePrompt = (debtor, mission, lastContactLabel, details) => {
+    const p = profile || {};
+    const senderName = p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" ") || "le prestataire";
+    return `Tu es un freelance qui n'a plus de nouvelles d'un client en plein milieu d'une mission (silence prolongé, aucune réponse aux messages/appels). Rédige un court message de RELANCE, calme et professionnel — PAS une mise en demeure, aucune menace, aucune mention de pénalités ou de sommes dues.
+
+De la part de : ${senderName}
+Client : ${debtor}
+Mission concernée : ${mission}
+${lastContactLabel ? `Dernier contact / dernière nouvelle : ${lastContactLabel}` : ""}
+${details ? `Contexte complémentaire : ${details}` : ""}
+
+Le message doit :
+1. Rappeler poliment qu'aucune nouvelle n'a été reçue depuis un moment concernant cette mission
+2. Demander un retour clair : le client souhaite-t-il poursuivre la mission ou non
+3. Indiquer, sans agressivité, qu'à défaut de réponse d'ici une date raisonnable (ex : 7 jours), la mission sera considérée en pause
+4. Rester bref (4-6 phrases), courtois et professionnel, sans jargon juridique, sans mention de paiement ou de pénalités
+5. Ne JAMAIS menacer ni évoquer de conséquences juridiques — ce n'est pas un impayé, juste un silence à formaliser par écrit
+
+Termine par une formule de politesse simple et la signature "${senderName}".
+
+Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple uniquement, ce message sera affiché tel quel.`;
+  };
+
   const callAI = async (prompt) => {
     const res = await fetch("/api/generate", {
       method:"POST",
@@ -7439,6 +7509,24 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   };
 
   const generateManual = async () => {
+    if (manMode === "silence") {
+      if (!manDebtor.trim()) return;
+      setManStep("loading");
+      setManLetterType("silence");
+      setStripeLinkUrl(""); setStripeLinkCopied(false);
+      try {
+        const lastContactLabel = manLastContact ? new Date(manLastContact).toLocaleDateString("fr-FR") : "";
+        const prompt = buildSilencePrompt(manDebtor, manDetails || "Mission freelance", lastContactLabel, "");
+        setManTotal(0);
+        const text = await callAI(prompt);
+        setManLetter(text);
+        setManStep("result");
+      } catch {
+        setManLetter("Erreur de génération. Vérifie ta connexion et réessaie.");
+        setManStep("result");
+      }
+      return;
+    }
     if (!manDebtor.trim() || !manAmount.trim()) return;
     setManStep("loading");
     setStripeLinkUrl(""); setStripeLinkCopied(false); // évite de réutiliser le lien d'un dossier précédent
@@ -7486,12 +7574,15 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   /* ── Loading screen shared ── */
   const LoadingScreen = ({ dots, type = "formal" }) => {
     const isPrev = type === "preventive";
+    const isSilence = type === "silence";
     return (
     <div style={{ textAlign:"center", padding:"36px 0" }}>
-      <div style={{ width:52, height:52, border: isPrev ? "3px solid #FEF3C7" : "3px solid #FEE2E2", borderTopColor: isPrev ? "#D97706" : "#DC2626", borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 18px" }} />
-      <div style={{ fontFamily:T.display, fontSize:17, color: isPrev ? "#92400E" : "#7F1D1D", fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
+      <div style={{ width:52, height:52, border: isSilence ? "3px solid #DBEAFE" : isPrev ? "3px solid #FEF3C7" : "3px solid #FEE2E2", borderTopColor: isSilence ? "#2563EB" : isPrev ? "#D97706" : "#DC2626", borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 18px" }} />
+      <div style={{ fontFamily:T.display, fontSize:17, color: isSilence ? "#1E3A8A" : isPrev ? "#92400E" : "#7F1D1D", fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
       <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, lineHeight:1.7 }}>
-        {isPrev ? (
+        {isSilence ? (
+          <>Préparation du message de relance…</>
+        ) : isPrev ? (
           <>Préparation du rappel amical…</>
         ) : (
           <>
@@ -7545,10 +7636,11 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!letter) { alert("Aucune lettre à télécharger."); return; }
     const isPreventive = letterType === "preventive";
+    const isSilence = letterType === "silence";
     try {
-      // 1. Récupérer (ou générer) le lien de paiement Stripe pour le montant dû
+      // 1. Récupérer (ou générer) le lien de paiement Stripe pour le montant dû — non pertinent pour une relance "silence prolongé"
       let payUrl = stripeLinkUrl;
-      if (!payUrl && total > 0) {
+      if (!isSilence && !payUrl && total > 0) {
         payUrl = await handleGeneratePaymentLink(total, clientName, mission, clientEmail);
       }
 
@@ -7575,15 +7667,15 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "mm", format: "a4" });
       const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-      const NAVY = isPreventive ? [180, 140, 70] : [26, 54, 93];
+      const NAVY = isSilence ? [30, 64, 175] : isPreventive ? [180, 140, 70] : [26, 54, 93];
       const GOLD = [180, 140, 70];
       const today = new Date().toLocaleDateString("fr-FR");
       doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
       doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
       doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
-      doc.text(isPreventive ? "RAPPEL AVANT ÉCHÉANCE" : "MISE EN DEMEURE DE PAIEMENT", ML, 15);
+      doc.text(isSilence ? "MESSAGE DE RELANCE" : isPreventive ? "RAPPEL AVANT ÉCHÉANCE" : "MISE EN DEMEURE DE PAIEMENT", ML, 15);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-      doc.text(`Établi le ${today} via Freeley${isPreventive ? "" : " — Recouvrement Ferme"}`, ML, 23);
+      doc.text(`Établi le ${today} via Freeley${isSilence ? "" : isPreventive ? "" : " — Recouvrement Ferme"}`, ML, 23);
       let y = 42;
       doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
       const cleanText = cleanLetterText(letter);
@@ -7611,23 +7703,25 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         y += boxH;
       }
 
-      doc.save(`${isPreventive ? "Rappel" : "Mise_en_demeure"}_${(clientName||"client").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+      doc.save(`${isSilence ? "Relance" : isPreventive ? "Rappel" : "Mise_en_demeure"}_${(clientName||"client").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
     } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
   };
 
   const ResultScreen = ({ letter, onEdit, clientName, clientEmail, clientPhone, total, mission, type = "formal" }) => {
     const isPreventive = type === "preventive";
+    const isSilence = type === "silence";
     return (
     <div className="fade-up">
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background: isPreventive ? "#FFFBEB" : "#FEF2F2", border:`1px solid ${isPreventive ? "#FCD34D" : "#FCA5A5"}`, borderRadius:10, padding:"11px 16px" }}>
-        <span>{isPreventive ? "⏰" : "🚨"}</span>
-        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isPreventive ? "#92400E" : "#991B1B" }}>{isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background: isSilence ? "#EFF6FF" : isPreventive ? "#FFFBEB" : "#FEF2F2", border:`1px solid ${isSilence ? "#BFDBFE" : isPreventive ? "#FCD34D" : "#FCA5A5"}`, borderRadius:10, padding:"11px 16px" }}>
+        <span>{isSilence ? "💬" : isPreventive ? "⏰" : "🚨"}</span>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isSilence ? "#1E3A8A" : isPreventive ? "#92400E" : "#991B1B" }}>{isSilence ? "Message de relance prêt · Client silencieux" : isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
       </div>
       <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"18px 20px", maxHeight:260, overflowY:"auto", marginBottom:14 }}>
         <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanLetterText(letter)}</pre>
       </div>
 
-      {/* Paiement du montant dû */}
+      {/* Paiement du montant dû — non pertinent pour une relance "silence prolongé", aucun montant n'est nécessairement dû */}
+      {!isSilence && (
       <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
         <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Faire régler {isPreventive ? "" : "le montant total "}({total ? total.toFixed(2) : "0.00"} €) par carte</div>
         <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:10 }}>
@@ -7647,6 +7741,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
           </div>
         )}
       </div>
+      )}
 
       <div style={{ display:"flex", gap:10 }}>
         <button onClick={onEdit} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
@@ -7658,11 +7753,11 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         >⬇ PDF</button>
         <button
           onClick={() => setSendModal({ letter, clientName: clientName || "Client", clientEmail, clientPhone, total, type })}
-          style={{ flex:2, padding:"12px", background: isPreventive ? "linear-gradient(135deg, #B45309 0%, #D97706 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: isPreventive ? "0 5px 18px rgba(217,119,6,0.3)" : "0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
+          style={{ flex:2, padding:"12px", background: isSilence ? "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)" : isPreventive ? "linear-gradient(135deg, #B45309 0%, #D97706 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: isSilence ? "0 5px 18px rgba(37,99,235,0.3)" : isPreventive ? "0 5px 18px rgba(217,119,6,0.3)" : "0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
           onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";}}
           onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";}}
         >
-          <span style={{ fontSize:16 }}>✉️</span> {isPreventive ? "Envoyer le rappel" : "Envoyer la mise en demeure"}
+          <span style={{ fontSize:16 }}>✉️</span> {isSilence ? "Envoyer le message" : isPreventive ? "Envoyer le rappel" : "Envoyer la mise en demeure"}
         </button>
       </div>
 
@@ -7699,8 +7794,9 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
               <button
                 onClick={() => {
                   const isPrev = sendModal.type === "preventive";
-                  const subject = isPrev ? `Rappel avant échéance — ${sendModal.clientName}` : `Mise en demeure de paiement — ${sendModal.clientName}`;
-                  const body = (sendModal.letter || "") + (stripeLinkUrl ? `\n\n---\nRéglez ${isPrev ? "" : "immédiatement "}par carte via ce lien sécurisé :\n${stripeLinkUrl}` : "");
+                  const isSilenceSend = sendModal.type === "silence";
+                  const subject = isSilenceSend ? `Petit point sur la mission — ${sendModal.clientName}` : isPrev ? `Rappel avant échéance — ${sendModal.clientName}` : `Mise en demeure de paiement — ${sendModal.clientName}`;
+                  const body = (sendModal.letter || "") + (!isSilenceSend && stripeLinkUrl ? `\n\n---\nRéglez ${isPrev ? "" : "immédiatement "}par carte via ce lien sécurisé :\n${stripeLinkUrl}` : "");
                   const to = sendModal.clientEmail || "";
                   window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
                   setSendSuccess(sendModal.clientName);
@@ -7713,7 +7809,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   <div style={{ width:44, height:44, background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>📧</div>
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#1E3A8A", marginBottom:3 }}>Par Email</div>
-                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Ouvre ton application email avec {sendModal.type === "preventive" ? "le rappel" : "la mise en demeure"} déjà rédigé{sendModal.type === "preventive" ? "" : "e"}, prêt{sendModal.type === "preventive" ? "" : "e"} à envoyer à {sendModal.clientName}.</div>
+                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Ouvre ton application email avec {sendModal.type === "silence" ? "le message" : sendModal.type === "preventive" ? "le rappel" : "la mise en demeure"} déjà rédigé{sendModal.type === "preventive" ? "" : "e"}, prêt{sendModal.type === "preventive" ? "" : "e"} à envoyer à {sendModal.clientName}.</div>
                   </div>
                 </div>
               </button>
@@ -7721,7 +7817,9 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
               {/* Option SMS */}
               <button
                 onClick={() => {
-                  const msg = sendModal.type === "preventive"
+                  const msg = sendModal.type === "silence"
+                    ? `Bonjour ${sendModal.clientName}, je n'ai plus de nouvelles de votre part depuis un moment concernant notre mission en cours. Pourriez-vous me faire un retour quand vous pourrez ? Merci !`
+                    : sendModal.type === "preventive"
                     ? `Bonjour ${sendModal.clientName}, petit rappel amical : ton paiement arrive bientôt à échéance.${stripeLinkUrl ? ` Tu peux régler ici : ${stripeLinkUrl}` : ""} Merci !`
                     : `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement.${stripeLinkUrl ? ` Réglez ici : ${stripeLinkUrl}` : ""} Cordialement.`;
                   window.location.href = `sms:${sendModal.clientPhone || ""}?body=${encodeURIComponent(msg)}`;
@@ -7902,10 +8000,42 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                 <div className="fade-up" style={{ background:C.white, border:`1.5px solid ${C.border}`, borderTop:"none", borderRadius:"0 0 13px 13px", padding:"18px 18px 20px" }}>
                   {manStep === "form" && (
                     <>
+                      <div style={{ marginBottom:16 }}>
+                        <label style={labelSt}>TYPE DE RELANCE</label>
+                        <div style={{ display:"flex", gap:8, marginTop:6 }}>
+                          {[
+                            { key:"paiement", label:"💰 Paiement en retard/à venir" },
+                            { key:"silence", label:"💬 Client silencieux" },
+                          ].map(o => (
+                            <button
+                              key={o.key}
+                              type="button"
+                              onClick={() => setManMode(o.key)}
+                              style={{
+                                flex:1, padding:"9px 6px", borderRadius:8, cursor:"pointer",
+                                fontFamily:T.body, fontSize:11.5, fontWeight:700,
+                                background: manMode === o.key ? (o.key === "silence" ? "#2563EB" : "#7F1D1D") : C.white,
+                                color: manMode === o.key ? "#fff" : C.textM,
+                                border: `1.5px solid ${manMode === o.key ? (o.key === "silence" ? "#2563EB" : "#7F1D1D") : C.border}`,
+                              }}
+                            >{o.label}</button>
+                          ))}
+                        </div>
+                        <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
+                          {manMode === "silence" ? "Pour un client qui ne répond plus (appels, messages) en cours de mission — pas forcément un paiement en retard." : "Pour un montant dû, échu ou à venir."}
+                        </div>
+                      </div>
                       <div style={{ marginBottom:12 }}>
                         <label style={labelSt}>NOM DU CLIENT</label>
                         <input style={inputStyle} value={manDebtor} onChange={e=>setManDebtor(e.target.value)} placeholder="Ex : Pierre Durand / Agence Nova" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
                       </div>
+                      {manMode === "silence" && (
+                        <div style={{ marginBottom:12 }}>
+                          <label style={labelSt}>DERNIER CONTACT (optionnel)</label>
+                          <input type="date" style={inputStyle} value={manLastContact} onChange={e=>setManLastContact(e.target.value)} onFocus={e=>e.target.style.borderColor="#2563EB"} onBlur={e=>e.target.style.borderColor=C.border} />
+                        </div>
+                      )}
+                      {manMode === "paiement" && (
                       <div style={{ marginBottom:12 }}>
                         <label style={labelSt}>TYPE DE CLIENT</label>
                         <div style={{ display:"flex", gap:8 }}>
@@ -7942,6 +8072,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                           Dépassée ou à venir — Freeley choisit automatiquement le bon courrier : rappel préventif (pas encore due) ou mise en demeure (en retard).
                         </div>
                       </div>
+                      )}
                       <div style={{ marginBottom:12, display:"flex", gap:10 }}>
                         <div style={{ flex:1 }}>
                           <label style={labelSt}>EMAIL DU CLIENT (optionnel)</label>
@@ -7953,24 +8084,29 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         </div>
                       </div>
                       <div style={{ marginBottom:18 }}>
-                        <label style={labelSt}>DÉTAILS OU HISTORIQUE DU LITIGE</label>
+                        <label style={labelSt}>{manMode === "silence" ? "DÉTAILS DE LA MISSION" : "DÉTAILS OU HISTORIQUE DU LITIGE"}</label>
                         <textarea
                           value={manDetails}
                           onChange={e=>setManDetails(e.target.value)}
-                          placeholder="Ex : Facture n°2026-08 émise le 10/04. Deux relances sans réponse. Mission de refonte site web."
+                          placeholder={manMode === "silence" ? "Ex : Mission de refonte site web, dernier échange le 12/06 pour valider une maquette, plus aucune réponse depuis." : "Ex : Facture n°2026-08 émise le 10/04. Deux relances sans réponse. Mission de refonte site web."}
                           rows={3}
                           style={{ ...inputStyle, resize:"vertical", lineHeight:1.6, minHeight:80 }}
                           onFocus={e=>e.target.style.borderColor="#DC2626"}
                           onBlur={e=>e.target.style.borderColor=C.border}
                         />
                       </div>
-                      <button
-                        onClick={generateManual}
-                        disabled={!manDebtor.trim() || !manAmount.trim()}
-                        style={{ width:"100%", padding:"13px", background:(!manDebtor.trim()||!manAmount.trim()) ? C.creamDD : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:(!manDebtor.trim()||!manAmount.trim()) ? C.textL : "#fff", border:"none", borderRadius:11, cursor:(!manDebtor.trim()||!manAmount.trim()) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:(!manDebtor.trim()||!manAmount.trim()) ? "none" : "0 6px 22px rgba(185,28,28,0.4)", transition:"all 0.2s" }}
-                      >
-                        <span>🚨</span> Générer
-                      </button>
+                      {(() => {
+                        const manDisabled = manMode === "silence" ? !manDebtor.trim() : (!manDebtor.trim() || !manAmount.trim());
+                        return (
+                        <button
+                          onClick={generateManual}
+                          disabled={manDisabled}
+                          style={{ width:"100%", padding:"13px", background: manDisabled ? C.creamDD : (manMode === "silence" ? "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)"), color: manDisabled ? C.textL : "#fff", border:"none", borderRadius:11, cursor: manDisabled ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: manDisabled ? "none" : (manMode === "silence" ? "0 6px 22px rgba(37,99,235,0.4)" : "0 6px 22px rgba(185,28,28,0.4)"), transition:"all 0.2s" }}
+                        >
+                          <span>{manMode === "silence" ? "💬" : "🚨"}</span> Générer
+                        </button>
+                        );
+                      })()}
                     </>
                   )}
                   {manStep === "loading" && <LoadingScreen dots={manDots} type={manLetterType} />}
