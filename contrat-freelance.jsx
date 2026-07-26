@@ -375,6 +375,8 @@ const initialForm = {
   missionTitle: "", missionDescription: "", categorieMetier: "autre", startDate: "", endDate: "",
   price: "", paymentTerms: "Comptant", revisions: "2", latePaymentPenalty: true, acomptePourcentage: "0",
   clauseDedit: true,
+  clauseRespect: true,
+  clauseSuspension: true,
 };
 
 const validate = (step, form) => {
@@ -1643,6 +1645,8 @@ Conditions paiement: ${paymentTermsLabel}
 Révisions incluses : ${form.revisions} aller(s)-retour(s)
 Pénalités de retard: ${form.latePaymentPenalty ? "OUI (clause légale obligatoire Art. L441-10 C.com.)" : "NON"}
 Clause de dédommagement annulation: ${form.clauseDedit ? "OUI" : "NON"}
+Clause de bonne conduite / respect mutuel: ${form.clauseRespect ? "OUI" : "NON"}
+Clause de suspension en cas de retard de paiement: ${form.clauseSuspension ? "OUI" : "NON"}
 
 ══════════════════════════════════════════════
 STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
@@ -1679,6 +1683,7 @@ ${form.latePaymentPenalty
     : `- La clause légale de pénalités de retard réservée aux professionnels : "Conformément aux articles L441-10 et L441-11 du Code de commerce, toute somme non réglée à l'échéance portera de plein droit, sans mise en demeure préalable, des pénalités de retard calculées au taux directeur de la Banque Centrale Européenne (taux REFI) majoré de dix (10) points de pourcentage, appliqué au montant TTC de la facture impayée et courant dès le lendemain de la date d'échéance. En sus, une indemnité forfaitaire de quarante euros (40 €) pour frais de recouvrement sera exigible de plein droit (art. D441-5 C.com.). Si les frais de recouvrement effectivement engagés excèdent ce montant forfaitaire, le Prestataire se réserve le droit de réclamer une indemnisation complémentaire sur justificatifs."`)
   : `- Indique explicitement : "Pénalités de retard : Non stipulées."`}
 - Toutes les sommes sont exprimées hors taxes ; la TVA applicable, le cas échéant, sera ajoutée au taux en vigueur.
+${form.clauseSuspension ? `- Inclus OBLIGATOIREMENT la clause de suspension suivante : "En cas de retard de paiement de l'acompte ou du solde persistant plus de huit (8) jours après une mise en demeure adressée par lettre recommandée ou courrier électronique avec accusé de réception restée sans effet, le Prestataire se réserve le droit de suspendre immédiatement l'exécution de la mission jusqu'au complet règlement des sommes dues, sans que cette suspension puisse être considérée comme fautive de sa part, ni ouvrir droit à indemnité au profit du Client, ni entraîner de report de responsabilité sur les délais initialement convenus."` : ""}
 
 ARTICLE 5 — RÉVISIONS ET MODIFICATIONS DU PÉRIMÈTRE
 Nombre de révisions incluses : ${form.revisions}. Clause de gestion du "scope creep" : toute demande hors périmètre fait l'objet d'un avenant écrit et facturé au tarif horaire du Prestataire.
@@ -1703,6 +1708,7 @@ Rédige OBLIGATOIREMENT :
 ARTICLE 9 — RÉSILIATION
 Conditions de résiliation par l'une ou l'autre des parties. En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire. En cas de résiliation par le Prestataire pour faute du Client, les sommes dues pour les prestations réalisées sont immédiatement exigibles.
 ${form.clauseDedit ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après que le Prestataire a commencé l'exécution de la mission, une indemnité sera due au Prestataire au titre du travail déjà engagé et du temps réservé. Le montant de cette indemnité sera déterminé d'un commun accord entre les parties, en fonction de l'état d'avancement de la mission au jour de la résiliation. À défaut d'accord amiable, le Prestataire pourra réclamer une indemnisation proportionnelle au préjudice réellement subi. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due, sous réserve du maintien de l'acompte éventuellement déjà versé conformément au paragraphe précédent."` : ""}
+${form.clauseRespect ? `Inclus OBLIGATOIREMENT, en complément, la clause de bonne conduite suivante : "Le Client s'engage à faire preuve de respect et de courtoisie dans l'ensemble de ses échanges avec le Prestataire, quel qu'en soit le support (écrit, oral, téléphonique ou en personne). Tout comportement abusif, insultant, dégradant, menaçant ou constitutif de harcèlement de la part du Client à l'égard du Prestataire constitue un manquement grave aux obligations essentielles du présent contrat. En cas de survenance d'un tel comportement, le Prestataire pourra adresser au Client un avertissement écrit décrivant les faits reprochés. Si le comportement persiste après cet avertissement, le Prestataire pourra résilier le contrat de plein droit, aux torts exclusifs du Client, sans préavis ni indemnité de sa part, les sommes déjà dues au titre des prestations réalisées demeurant immédiatement exigibles."` : ""}
 
 ARTICLE 10 — FORCE MAJEURE
 Clause standard de force majeure conforme à l'art. 1218 du Code civil.
@@ -1957,7 +1963,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
       clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
       endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
-      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true,
+      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true,
       ...rawForm,
     };
     const pContract = overrideContract || contract;
@@ -3510,10 +3516,91 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 </div>
               </div>
 
+              {/* Clause de bonne conduite et respect mutuel */}
+              <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+                  <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE BONNE CONDUITE ET RESPECT MUTUEL</label>
+                  <LegalTooltip text="Si le client a un comportement irrespectueux, insultant ou abusif envers vous, cette clause vous permet — après un avertissement écrit — de résilier le contrat à ses torts, sans préavis ni indemnité de votre part." />
+                </div>
+                <div
+                  onClick={() => update("clauseRespect", !form.clauseRespect)}
+                  style={{
+                    display:"flex", alignItems:"flex-start", gap:14,
+                    padding:"16px 18px",
+                    background: form.clauseRespect ? "#F0FDF4" : C.white,
+                    border:`1.5px solid ${form.clauseRespect ? "#86EFAC" : C.border}`,
+                    borderRadius:10, cursor:"pointer",
+                    transition:"all 0.2s",
+                  }}
+                >
+                  <div style={{
+                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    background: form.clauseRespect ? "#16A34A" : C.creamDD,
+                    position:"relative", transition:"background 0.2s",
+                  }}>
+                    <div style={{
+                      position:"absolute", top:3, left: form.clauseRespect ? 21 : 3,
+                      width:18, height:18, borderRadius:"50%", background:C.white,
+                      boxShadow:"0 1px 4px #00000030",
+                      transition:"left 0.2s",
+                    }}/>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: form.clauseRespect ? "#15803D" : C.textM, marginBottom:3 }}>
+                      {form.clauseRespect ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
+                    </div>
+                    <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseRespect ? "#16A34A" : C.textL, lineHeight:1.5 }}>
+                      Si le client a un comportement irrespectueux, insultant ou abusif envers vous, cette clause vous permet — après un avertissement écrit — de résilier le contrat à ses torts, sans préavis ni indemnité de votre part.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clause de suspension du travail en cas de retard de paiement */}
+              <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+                  <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE SUSPENSION EN CAS DE RETARD DE PAIEMENT</label>
+                  <LegalTooltip text="Si le client ne paie pas dans les temps (après mise en demeure restée sans effet 8 jours), cette clause vous autorise à arrêter le travail jusqu'au paiement, sans que ce soit considéré comme une faute de votre part." />
+                </div>
+                <div
+                  onClick={() => update("clauseSuspension", !form.clauseSuspension)}
+                  style={{
+                    display:"flex", alignItems:"flex-start", gap:14,
+                    padding:"16px 18px",
+                    background: form.clauseSuspension ? "#F0FDF4" : C.white,
+                    border:`1.5px solid ${form.clauseSuspension ? "#86EFAC" : C.border}`,
+                    borderRadius:10, cursor:"pointer",
+                    transition:"all 0.2s",
+                  }}
+                >
+                  <div style={{
+                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    background: form.clauseSuspension ? "#16A34A" : C.creamDD,
+                    position:"relative", transition:"background 0.2s",
+                  }}>
+                    <div style={{
+                      position:"absolute", top:3, left: form.clauseSuspension ? 21 : 3,
+                      width:18, height:18, borderRadius:"50%", background:C.white,
+                      boxShadow:"0 1px 4px #00000030",
+                      transition:"left 0.2s",
+                    }}/>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: form.clauseSuspension ? "#15803D" : C.textM, marginBottom:3 }}>
+                      {form.clauseSuspension ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
+                    </div>
+                    <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseSuspension ? "#16A34A" : C.textL, lineHeight:1.5 }}>
+                      Si le client ne paie pas dans les temps (après mise en demeure restée sans effet 8 jours), cette clause vous autorise à arrêter le travail jusqu'au paiement, sans que ce soit considéré comme une faute de votre part.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {apiError && (
                 <div style={{ padding:"12px 16px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, color:C.error, fontSize:13, fontFamily:T.body, marginTop:8 }}>
                   {apiError}
                 </div>
+
               )}
 
               {/* Auth gate reminder */}
