@@ -1729,64 +1729,87 @@ CONSIGNES DE RÉDACTION
 - Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").`;
 
       setStreamingText("");
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5",
-          max_tokens: 8000,
-          stream: true,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
 
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}: ${errBody}`);
-      }
-
-      // Lit le flux morceau par morceau — le texte s'affiche au fur et à mesure de sa rédaction,
-      // au lieu de faire attendre l'utilisateur devant un écran figé pendant toute la génération.
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      // ── Génération avec continuation automatique en cas de troncature ──
+      // Un contrat détaillé (longue mission, beaucoup d'exclusions/clauses) peut dépasser la limite
+      // de tokens en une seule réponse. Au lieu de sauvegarder un contrat coupé en plein milieu d'une
+      // phrase (bug constaté : Article 9.2 tronqué sur "...seront calcul"), on redemande la SUITE
+      // exacte du texte tant que la réponse n'est pas complète, jusqu'à 3 tentatives au total.
       let fullText = "";
       let stopReason = null;
+      const MAX_ATTEMPTS = 3;
+      const looksComplete = (t) => /ARTICLE 1[23]|voie électronique/i.test(t);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop(); // garde la ligne incomplète pour le prochain morceau
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const isFirst = attempt === 1;
+        const currentPrompt = isFirst ? prompt : `Voici un contrat de prestation de services en cours de rédaction, dont la génération a été interrompue avant la fin (limite de longueur atteinte) — la phrase ou l'article en cours n'est pas terminé.
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr || jsonStr === "[DONE]") continue;
-          let evt;
-          try { evt = JSON.parse(jsonStr); } catch(e) { continue; }
+TEXTE DÉJÀ RÉDIGÉ (ne le répète surtout pas, continue directement à la suite) :
+"""
+${fullText}
+"""
 
-          if (evt.type === "content_block_delta" && evt.delta?.text) {
-            fullText += evt.delta.text;
-            setStreamingText(fullText);
-          } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
-            stopReason = evt.delta.stop_reason;
-          } else if (evt.type === "error") {
-            throw new Error(evt.error?.message || "Erreur de streaming");
+Continue EXACTEMENT à partir d'où le texte s'arrête (y compris en terminant la phrase ou le mot en cours si besoin), jusqu'à la fin du contrat (Article 13 — Signatures inclus, avec la mention finale sur la signature électronique). Respecte strictement la même mise en forme, le même style et la même numérotation que le texte déjà rédigé. Réponds UNIQUEMENT avec la suite du texte, sans rien répéter de ce qui précède, sans introduction ni commentaire.`;
+
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-5",
+            max_tokens: 8000,
+            stream: true,
+            messages: [{ role: "user", content: currentPrompt }],
+          }),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status}: ${errBody}`);
+        }
+
+        // Lit le flux morceau par morceau — le texte s'affiche au fur et à mesure de sa rédaction,
+        // au lieu de faire attendre l'utilisateur devant un écran figé pendant toute la génération.
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop(); // garde la ligne incomplète pour le prochain morceau
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+            let evt;
+            try { evt = JSON.parse(jsonStr); } catch(e) { continue; }
+
+            if (evt.type === "content_block_delta" && evt.delta?.text) {
+              fullText += evt.delta.text;
+              setStreamingText(fullText);
+            } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
+              stopReason = evt.delta.stop_reason;
+            } else if (evt.type === "error") {
+              throw new Error(evt.error?.message || "Erreur de streaming");
+            }
           }
         }
+
+        if (looksComplete(fullText) && stopReason !== "max_tokens") break; // terminé, pas besoin de continuer
+        if (attempt < MAX_ATTEMPTS) console.warn(`[Freeley] Contrat tronqué, tentative de continuation ${attempt + 1}/${MAX_ATTEMPTS}…`);
       }
 
       const text = fullText.trim();
       if (!text) throw new Error("Réponse vide");
 
-      // Filet de sécurité : si la réponse a été coupée avant la fin (limite de longueur atteinte),
-      // le contrat est légalement incomplet — on prévient plutôt que de le faire passer pour complet.
-      const looksComplete = /ARTICLE 1[23]|voie électronique/i.test(text);
-      if (stopReason === "max_tokens" || !looksComplete) {
-        console.error("[Freeley] Contrat possiblement tronqué — stop_reason:", stopReason);
-        setApiError("Le contrat généré semble incomplet (trop long pour être terminé). Réessaie — si le problème persiste, réduis la description de la mission.");
+      // Filet de sécurité final : si malgré les tentatives de continuation le contrat reste incomplet,
+      // on prévient plutôt que de le faire passer pour complet.
+      if (stopReason === "max_tokens" || !looksComplete(text)) {
+        console.error("[Freeley] Contrat possiblement tronqué même après continuation — stop_reason:", stopReason);
+        setApiError("Le contrat généré semble incomplet malgré plusieurs tentatives (mission très détaillée). Réessaie, ou réduis la description de la mission.");
       }
 
       // Sauvegarder dans l'historique
