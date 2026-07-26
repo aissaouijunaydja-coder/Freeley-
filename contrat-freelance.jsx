@@ -8036,6 +8036,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         </div>
                       )}
                       {manMode === "paiement" && (
+                      <>
                       <div style={{ marginBottom:12 }}>
                         <label style={labelSt}>TYPE DE CLIENT</label>
                         <div style={{ display:"flex", gap:8 }}>
@@ -8072,6 +8073,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                           Dépassée ou à venir — Freeley choisit automatiquement le bon courrier : rappel préventif (pas encore due) ou mise en demeure (en retard).
                         </div>
                       </div>
+                      </>
                       )}
                       <div style={{ marginBottom:12, display:"flex", gap:10 }}>
                         <div style={{ flex:1 }}>
@@ -10301,6 +10303,10 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
+  const [showAssistantModal, setShowAssistantModal] = useState(false);
+  const [assistantQuestion, setAssistantQuestion] = useState("");
+  const [assistantAnswer, setAssistantAnswer] = useState("");
+  const [assistantLoading, setAssistantLoading] = useState(false);
 
   // Recharge les données fraîches à chaque ouverture de "Mes contrats" — une signature ou un avenant
   // fait ailleurs (tactile, à distance) ne met pas forcément à jour l'état déjà en mémoire.
@@ -10409,6 +10415,56 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     });
   };
 
+  // ── Assistant IA par contrat ── répond UNIQUEMENT à partir du texte de CE contrat précis,
+  // récupéré automatiquement (jamais de copier-coller par le freelance). Verrouillé sur le sujet :
+  // ne doit jamais devenir un chatbot généraliste, même si le freelance essaie de dévier.
+  const askContractAssistant = async () => {
+    if (!assistantQuestion.trim() || !historyView) return;
+    setAssistantLoading(true);
+    setAssistantAnswer("");
+    try {
+      const clauseDeditActive = historyView.form?.clauseDedit ? "OUI, activée sur ce contrat" : "NON, pas activée sur ce contrat";
+      const acomptePct = historyView.form?.acomptePourcentage || "0";
+      const prompt = `Tu es un assistant qui aide un freelance à comprendre CE contrat précis, un seul, celui fourni ci-dessous — pas un avocat généraliste, pas un chatbot de discussion libre.
+
+RÈGLE ABSOLUE, à respecter avant toute autre chose : tu réponds UNIQUEMENT aux questions concernant ce contrat précis et la situation du freelance avec ce client. Si la question posée sort de ce cadre (sujet hors contrat, discussion générale, question sans rapport avec ce contrat ou ce client), réponds simplement une phrase du type "Je suis là uniquement pour t'aider sur ce contrat précis — reformule ta question par rapport à ta situation avec ce client." et n'ajoute rien d'autre. Ne développe jamais un autre sujet, même si le freelance insiste ou reformule pour te faire dévier.
+
+TEXTE INTÉGRAL DU CONTRAT CONCERNÉ (client : ${historyView.clientName || "—"}) :
+"""
+${historyView.contract || "Non disponible"}
+"""
+
+INFORMATIONS COMPLÉMENTAIRES SUR CE CONTRAT (à utiliser si pertinent, ne pas recalculer) :
+- Acompte prévu : ${acomptePct}%
+- Statut du paiement : ${historyView.paymentStatus || "en attente"}
+- Clause de dédommagement en cas d'annulation : ${clauseDeditActive}
+- Pénalités de retard : ${historyView.form?.latePaymentPenalty ? "activées" : "non activées"}
+
+QUESTION DU FREELANCE : "${assistantQuestion}"
+
+Si la question concerne bien ce contrat/ce client, réponds en :
+1. Répondant clairement si le freelance est protégé ou non dans sa situation, en citant l'article ou la clause exacte du contrat qui s'applique (ou en disant clairement qu'aucune clause ne le couvre si c'est le cas)
+2. Donnant un conseil concret et actionnable pour cette situation précise
+3. Ajoutant un court paragraphe "Pour la prochaine fois" expliquant quelle fonctionnalité de Freeley (case à cocher, option) permettrait d'éviter ce problème sur un futur contrat
+4. Terminant par une courte phrase indiquant que cette analyse est indicative et qu'un avocat reste recommandé pour un désaccord persistant ou un montant important
+
+Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 150-250 mots maximum. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple, il sera affiché tel quel.`;
+
+      const res = await fetch("/api/generate", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:1200, messages:[{role:"user",content:prompt}] }),
+      });
+      const data = await res.json();
+      const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
+      setAssistantAnswer(text);
+    } catch {
+      setAssistantAnswer("Erreur de génération. Vérifie ta connexion et réessaie.");
+    } finally {
+      setAssistantLoading(false);
+    }
+  };
+
   /* ── Detail view ── */
   if (historyView) return (
     <div style={{ maxWidth:820, margin:"0 auto", padding:"24px 16px 80px" }}>
@@ -10442,6 +10498,10 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             border:`1px solid ${copied ? "#2D6A4F" : "#354F6E"}`,
             borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, transition:"all .2s",
           }}>{copied ? "✓ Copié" : "Copier le texte"}</button>
+          <button onClick={() => { setShowAssistantModal(true); setAssistantQuestion(""); setAssistantAnswer(""); }} style={{
+            padding:"10px 20px", background:"#1E3A8A", color:"#fff",
+            border:"1px solid #2563EB", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
+          }}>🤖 J'ai un problème</button>
           <button onClick={() => setConfirmDelete(historyView.id)} style={{
             padding:"10px 14px", background:"transparent", color:"#7A4A4A",
             border:"1px solid #5A3030", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body,
@@ -10647,6 +10707,61 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
           onConnectStripe={onConnectStripe}
           connectingStripe={connectingStripe}
         />
+      )}
+
+      {showAssistantModal && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) setShowAssistantModal(false); }}
+          style={{ position:"fixed", inset:0, background:"rgba(10,18,32,0.75)", zIndex:20000, display:"flex", alignItems:"center", justifyContent:"center", padding:"12px", backdropFilter:"blur(8px)" }}
+        >
+          <div style={{ background:C.white, borderRadius:16, padding:"24px 22px", maxWidth:520, width:"100%", maxHeight:"85vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+              <div style={{ width:36, height:36, background:"linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🤖</div>
+              <div style={{ fontFamily:T.display, fontSize:16, color:C.navyD, fontWeight:700 }}>Un problème avec ce contrat ?</div>
+            </div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, marginBottom:16, lineHeight:1.5 }}>
+              Décris ta situation avec <strong>{historyView.clientName}</strong> — la réponse se base uniquement sur ce contrat précis.
+            </div>
+
+            {!assistantAnswer && !assistantLoading && (
+              <>
+                <textarea
+                  value={assistantQuestion}
+                  onChange={e=>setAssistantQuestion(e.target.value)}
+                  placeholder="Ex : Mon client veut annuler la mission alors que j'ai déjà bien avancé, est-ce que je suis protégé ?"
+                  rows={4}
+                  style={{ width:"100%", padding:"12px 14px", border:`1.5px solid ${C.border}`, borderRadius:10, fontFamily:T.body, fontSize:13, resize:"vertical", lineHeight:1.6, minHeight:90, boxSizing:"border-box", marginBottom:14 }}
+                  onFocus={e=>e.target.style.borderColor="#2563EB"}
+                  onBlur={e=>e.target.style.borderColor=C.border}
+                />
+                <button
+                  onClick={askContractAssistant}
+                  disabled={!assistantQuestion.trim()}
+                  style={{ width:"100%", padding:"13px", background: !assistantQuestion.trim() ? C.creamDD : "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)", color: !assistantQuestion.trim() ? C.textL : "#fff", border:"none", borderRadius:11, cursor: !assistantQuestion.trim() ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}
+                >Poser la question</button>
+              </>
+            )}
+
+            {assistantLoading && (
+              <div style={{ textAlign:"center", padding:"30px 0" }}>
+                <div style={{ width:44, height:44, border:"3px solid #DBEAFE", borderTopColor:"#2563EB", borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 14px" }} />
+                <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>Analyse de ton contrat…</div>
+              </div>
+            )}
+
+            {assistantAnswer && !assistantLoading && (
+              <>
+                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"16px 18px", marginBottom:14 }}>
+                  <pre style={{ fontFamily:T.body, fontSize:12.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{assistantAnswer}</pre>
+                </div>
+                <div style={{ display:"flex", gap:10 }}>
+                  <button onClick={() => { setAssistantAnswer(""); setAssistantQuestion(""); }} style={{ flex:1, padding:"11px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }}>← Nouvelle question</button>
+                  <button onClick={() => setShowAssistantModal(false)} style={{ flex:1, padding:"11px", background:"#1E3A8A", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff" }}>Fermer</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* 🕒 Historique du contrat — Timeline des modifications */}
