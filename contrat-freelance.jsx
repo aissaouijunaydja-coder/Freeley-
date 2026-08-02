@@ -3938,224 +3938,225 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
-// Génère une vraie facture pour l'ajustement de prix d'un avenant — même style que la facture d'acompte du contrat principal
-const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser, contractId) => {
-  if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
-  try {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-    const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREY = [107, 114, 128];
-    const today = new Date().toLocaleDateString("fr-FR");
-    // Numéro réel, séquentiel, partagé avec les factures du contrat principal — jamais un horodatage
-    const year = new Date().getFullYear();
-    let invoiceNum = `FA-${year}-····`;
+// ═══════════════════════════════════════════════════════════════════════
+// FACTURATION — moteur unique, partagé par facture d'acompte, facture de
+// solde, facture d'avenant et facture libre. Avant, ces 3 cas avaient chacun
+// leur propre code de dessin PDF quasi identique (copié-collé) et leur
+// propre logique de numérotation — risque de divergence si une mention
+// légale doit changer un jour, et de bug si une correction n'est faite que
+// dans un des trois. Maintenant : un seul moteur de rendu (renderInvoicePDF)
+// et une seule logique de numérotation (getOrReserveInvoiceNumber).
+// ═══════════════════════════════════════════════════════════════════════
 
-    // Réutilise le numéro déjà attribué à cet avenant précis, s'il en a déjà un
-    let existingContent = null, existingStatus = null, avenantsArr = null, avenantIdx = -1;
-    if (contractId) {
-      try {
-        const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
-        if (existing) {
-          existingContent = parseContent(existing.content);
-          existingStatus = existing.status;
+// Récupère le numéro de facture déjà attribué à cette vente précise (acompte, solde ou avenant),
+// ou en réserve un nouveau si c'est la première fois — jamais un nouveau numéro à chaque re-téléchargement
+// (obligation légale de continuité). `key` vaut "acompteInvoiceNumber", "soldeInvoiceNumber", ou "avenant".
+const getOrReserveInvoiceNumber = async ({ authUser, contractId, key, avenantNum }) => {
+  const year = new Date().getFullYear();
+  let invoiceNum = `FA-${year}-····`;
+  let existingContent = null, existingStatus = null, avenantsArr = null, avenantIdx = -1;
+
+  if (contractId) {
+    try {
+      const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+      if (existing) {
+        existingContent = parseContent(existing.content);
+        existingStatus = existing.status;
+        if (key === "avenant") {
           avenantsArr = Array.isArray(existingContent.avenants) ? existingContent.avenants : [];
           avenantIdx = avenantsArr.findIndex(a => String(a.num) === String(avenantNum));
           if (avenantIdx !== -1 && avenantsArr[avenantIdx].invoiceNumber) invoiceNum = avenantsArr[avenantIdx].invoiceNumber;
+        } else if (existingContent[key]) {
+          invoiceNum = existingContent[key];
         }
-      } catch(e) { console.error("Erreur lecture numéro de facture existant (avenant):", e); }
-    }
+      }
+    } catch(e) { console.error("Erreur lecture numéro de facture existant:", e); }
+  }
 
-    if (invoiceNum === `FA-${year}-····` && authUser?.id) {
-      const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
-      if (error) console.error("Erreur réservation numéro de facture (avenant):", error);
-      else {
-        invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
-        if (contractId && avenantsArr && avenantIdx !== -1) {
-          try {
+  if (invoiceNum === `FA-${year}-····` && authUser?.id) {
+    const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
+    if (error) { console.error("Erreur réservation numéro de facture:", error); }
+    else {
+      invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
+      if (contractId && existingContent) {
+        try {
+          if (key === "avenant" && avenantsArr && avenantIdx !== -1) {
             avenantsArr[avenantIdx] = { ...avenantsArr[avenantIdx], invoiceNumber: invoiceNum };
             await supabase.rpc("update_contract_content", {
               p_contract_id: contractId,
               p_new_content: JSON.stringify({ ...existingContent, avenants: avenantsArr }),
               p_new_status: existingStatus,
             });
-          } catch(e) { console.error("Erreur sauvegarde numéro de facture (avenant):", e); }
-        }
+          } else if (key !== "avenant") {
+            await supabase.rpc("update_contract_content", {
+              p_contract_id: contractId,
+              p_new_content: JSON.stringify({ ...existingContent, [key]: invoiceNum }),
+              p_new_status: existingStatus,
+            });
+          }
+        } catch(e) { console.error("Erreur sauvegarde numéro de facture:", e); }
       }
     }
+  }
+  return invoiceNum;
+};
 
-    doc.setFont("helvetica", "bold"); doc.setFontSize(24); doc.setTextColor(...NAVY);
-    doc.text("FACTURE", PW - MR, 22, { align: "right" });
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
-    doc.text(`N° ${invoiceNum}`, PW - MR, 30, { align: "right" });
-    doc.text(`Date d'émission : ${today}`, PW - MR, 35, { align: "right" });
-    doc.text(`Échéance : ${today} (à réception)`, PW - MR, 40, { align: "right" });
-    doc.setDrawColor(...GOLD); doc.setLineWidth(0.8); doc.line(ML, 48, PW - MR, 48);
+// Dessine et télécharge le PDF d'une facture. Reçoit toutes les infos déjà prêtes — ne gère ni la
+// numérotation ni la récupération du lien de paiement, pour rester simple et réutilisable partout.
+function renderInvoicePDF({
+  invoiceNum, designation, missionTitle, montant,
+  freelanceName, freelanceSiret, freelanceEmail,
+  clientName, clientCompany, clientAddress, clientEmail,
+  profile, typeClient, qrBase64, footNote, filename,
+}) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const PW = 210, ML = 20, MR = 20, cw = PW - ML - MR;
+  const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80], GREY = [110, 110, 110];
+  const p = profile || {};
+  const today = new Date().toLocaleDateString("fr-FR");
+  const fmt = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits:2, maximumFractionDigits:2 }).replace(/[\u202F\u00A0]/g, " ");
+  let y = 18;
 
-    let y = 60;
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-    doc.text("ÉMETTEUR", ML, y);
-    doc.text("CLIENT", ML + cw/2, y);
-    y += 6;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
-    doc.text(freelanceName || "Prestataire", ML, y);
-    doc.text(clientName || "Client", ML + cw/2, y);
-    y += 5;
-    if (freelanceSiret) { doc.setFontSize(9); doc.setTextColor(...GREY); doc.text(`SIRET : ${freelanceSiret}`, ML, y); }
-    doc.setFontSize(9); doc.setTextColor(...GREY);
-    if (clientEmail) doc.text(clientEmail, ML + cw/2, y);
-    y += 5;
-    if (freelanceEmail) doc.text(freelanceEmail, ML, y);
-    y += 15;
+  if (p.logo) { try { doc.addImage(p.logo, "PNG", ML, y, 26, 26); } catch(e) {} }
+  doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(...NAVY);
+  doc.text("FACTURE", PW - MR, y + 8, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
+  doc.text(`N° ${invoiceNum}`, PW - MR, y + 15, { align: "right" });
+  doc.text(`Date d'émission : ${today}`, PW - MR, y + 20, { align: "right" });
+  doc.text(`Date d'échéance : ${today} (paiement à réception)`, PW - MR, y + 25, { align: "right" });
+  y += 39;
 
-    // Tableau
-    doc.setFillColor(...NAVY); doc.rect(ML, y, cw, 9, "F");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255,255,255);
-    doc.text("DÉSIGNATION", ML + 4, y + 6);
-    doc.text("MONTANT", PW - MR - 4, y + 6, { align: "right" });
-    y += 9;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
-    doc.setDrawColor(230,230,230); doc.setLineWidth(0.3); doc.line(ML, y+10, PW-MR, y+10);
-    doc.text(`Avenant n°${avenantNum} — ${missionTitle || "mission"}`, ML + 4, y + 7);
-    doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y + 7, { align: "right" });
-    y += 18;
+  doc.setDrawColor(...GOLD); doc.setLineWidth(0.6); doc.line(ML, y, PW - MR, y);
+  y += 10;
 
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-    doc.text("Total HT", ML + cw - 60, y); doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y, { align:"right" });
-    y += 6;
+  // Émetteur (freelance) et Client — deux colonnes
+  const colW = cw / 2 - 4;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+  doc.text("ÉMETTEUR", ML, y);
+  doc.text("CLIENT", ML + colW + 8, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...DARK);
+  let yL = y + 6, yR = y + 6;
+  const line = (txt, x, yy) => { if (txt) { const ls = doc.splitTextToSize(String(txt), colW); doc.text(ls, x, yy); return ls.length * 4.6; } return 0; };
+  yL += line(p.companyName || freelanceName, ML, yL);
+  yL += line(p.legalStatus, ML, yL);
+  yL += line(p.address, ML, yL);
+  yL += line(freelanceSiret ? "SIRET : " + freelanceSiret : (p.siret ? "SIRET : " + p.siret : ""), ML, yL);
+  yL += line(freelanceEmail, ML, yL);
+  yL += line(p.tvaNumber ? "TVA : " + p.tvaNumber : "", ML, yL);
+  const cx = ML + colW + 8;
+  yR += line(clientName, cx, yR);
+  yR += line(clientCompany, cx, yR);
+  yR += line(clientAddress, cx, yR);
+  yR += line(clientEmail, cx, yR);
+  y = Math.max(yL, yR) + 8;
+
+  // Tableau prestation
+  doc.setFillColor(...NAVY); doc.rect(ML, y, cw, 9, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255,255,255);
+  doc.text("DÉSIGNATION", ML + 3, y + 6);
+  doc.text("MONTANT", PW - MR - 3, y + 6, { align: "right" });
+  y += 9;
+
+  const desc = `${designation} — ${missionTitle || "Prestation de services"}`;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...DARK);
+  const descLines = doc.splitTextToSize(desc, cw - 45);
+  doc.text(descLines, ML + 3, y + 6);
+  doc.text(`${fmt(montant)} €`, PW - MR - 3, y + 6, { align: "right" });
+  const rowH = Math.max(10, descLines.length * 4.6 + 4);
+  doc.setDrawColor(225,225,225); doc.line(ML, y + rowH, PW - MR, y + rowH);
+  y += rowH + 6;
+
+  // Totaux — la TVA s'applique réellement si le profil a un numéro de TVA renseigné,
+  // jamais un "non applicable" écrit en dur (ça doit refléter la vraie situation du freelance)
+  const tvaApplicable = !!(p.tvaNumber && p.tvaNumber.trim());
+  const tvaAmount = tvaApplicable ? montant * 0.2 : 0;
+  const ttcAmount = montant + tvaAmount;
+  const totalsX = PW - MR - 70;
+  const val = (lbl, amount, bold) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setFontSize(bold ? 11 : 9.5);
+    doc.setTextColor(...(bold ? NAVY : DARK));
+    doc.text(lbl, totalsX, y);
+    doc.text(`${fmt(amount)} €`, PW - MR, y, { align: "right" });
+    y += bold ? 8 : 6;
+  };
+  val("Total HT", montant, false);
+  if (tvaApplicable) { val("TVA 20%", tvaAmount, false); val("Total TTC", ttcAmount, true); }
+  else {
     doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(...GREY);
-    doc.text("TVA non applicable, art. 293 B du CGI", ML + cw - 60, y);
-    y += 7;
-    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...NAVY);
-    doc.text("Total à payer", ML + cw - 60, y); doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y, { align:"right" });
-    y += 18;
+    doc.text("TVA non applicable, art. 293 B du CGI", totalsX, y); y += 6;
+    val("Total à payer", montant, true);
+  }
+  y += 8;
 
-    if (profile?.iban) {
-      doc.setFillColor(248, 247, 244); doc.rect(ML, y, cw, 30, "F");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-      doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 8);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(40,40,40);
-      doc.text(`IBAN : ${profile.iban}`, ML + 4, y + 15);
-      if (profile.bic) doc.text(`BIC : ${profile.bic}`, ML + 4, y + 20);
-      if (profile.bankName) doc.text(`Banque : ${profile.bankName}`, ML + 4, y + 25);
-      y += 38;
-    }
+  // Coordonnées de paiement (IBAN) + QR Stripe si un lien de paiement a été fourni
+  const payBoxH = p.iban ? 30 : 20;
+  const ibanBoxW = qrBase64 ? cw * 0.62 : cw;
+  doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, ibanBoxW, payBoxH, 2, 2, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+  doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 7);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
+  if (p.iban) {
+    doc.text(`IBAN : ${p.iban}`, ML + 4, y + 14);
+    if (p.bic) doc.text(`BIC : ${p.bic}`, ML + 4, y + 20);
+    if (p.bankName) doc.text(`Banque : ${p.bankName}`, ML + 4, y + 26);
+  } else {
+    doc.setTextColor(...GREY);
+    doc.text("Ajoute ton IBAN dans ton profil (onglet Facturation) pour l'afficher ici.", ML + 4, y + 14);
+  }
+  if (qrBase64) {
+    const qrBoxX = ML + ibanBoxW + 4;
+    const qrBoxW = cw - ibanBoxW - 4;
+    doc.setFillColor(248, 246, 240); doc.roundedRect(qrBoxX, y, qrBoxW, payBoxH, 2, 2, "F");
+    try { doc.addImage(qrBase64, "PNG", qrBoxX + (qrBoxW - payBoxH) / 2 + 2, y + 2, payBoxH - 4, payBoxH - 4); } catch(e) {}
+  }
+  y += payBoxH + 6;
+  if (qrBase64) {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+    doc.text("Paiement par carte : scanner le code ci-dessus", ML, y);
+    y += 4;
+  }
+  y += 4;
 
-    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
-    const legalLines = doc.splitTextToSize("Pénalités de retard : taux BCE + 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.\nPas d'escompte pour paiement anticipé.", cw);
-    legalLines.forEach(l => { doc.text(l, ML, y); y += 4; });
+  // Pied de page
+  doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
+  doc.text(doc.splitTextToSize(footNote || "Règlement à réception de facture.", cw), ML, y);
+  y += 9;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+  const penaltyMention = typeClient === "particulier"
+    ? "Pénalités de retard : en cas de paiement au-delà de la date d'échéance, des pénalités calculées au taux d'intérêt légal en vigueur applicable aux consommateurs seront appliquées de plein droit."
+    : "Pénalités de retard : taux BCE majoré de 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.";
+  doc.text(doc.splitTextToSize(penaltyMention, cw), ML, y);
+  y += (typeClient === "particulier" ? 10 : 14);
+  doc.text("Pas d'escompte pour paiement anticipé.", ML, y);
 
-    doc.save(`Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`);
+  doc.save(filename);
+}
+
+// Génère une vraie facture pour l'ajustement de prix d'un avenant — passe par le moteur commun
+const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser, contractId) => {
+  if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+  try {
+    const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: "avenant", avenantNum });
+    renderInvoicePDF({
+      invoiceNum, designation: `Avenant n°${avenantNum}`, missionTitle, montant,
+      freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile,
+      filename: `Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
+    });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
-// Facture pour un acompte ou un solde — même structure légale que la facture d'avenant, juste un libellé différent
+// Facture pour un acompte ou un solde — passe par le moteur commun
 const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser, contractId, invoiceType) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-    const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREY = [107, 114, 128];
-    const today = new Date().toLocaleDateString("fr-FR");
-    const year = new Date().getFullYear();
     const invoiceKey = invoiceType === "solde" ? "soldeInvoiceNumber" : "acompteInvoiceNumber";
-    let invoiceNum = `FA-${year}-····`;
-
-    // Réutilise le numéro déjà attribué à cette facture précise s'il existe — un re-téléchargement
-    // ne doit jamais consommer un nouveau numéro pour la même vente (obligation légale de continuité).
-    let existingContent = null;
-    let existingStatus = null;
-    if (contractId) {
-      try {
-        const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
-        if (existing) {
-          existingContent = parseContent(existing.content);
-          existingStatus = existing.status;
-          if (existingContent[invoiceKey]) invoiceNum = existingContent[invoiceKey];
-        }
-      } catch(e) { console.error("Erreur lecture numéro de facture existant:", e); }
-    }
-
-    if (invoiceNum === `FA-${year}-····` && authUser?.id) {
-      const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
-      if (error) console.error("Erreur réservation numéro de facture (paiement):", error);
-      else {
-        invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
-        // Retient ce numéro pour la prochaine fois
-        if (contractId && existingContent) {
-          try {
-            await supabase.rpc("update_contract_content", {
-              p_contract_id: contractId,
-              p_new_content: JSON.stringify({ ...existingContent, [invoiceKey]: invoiceNum }),
-              p_new_status: existingStatus,
-            });
-          } catch(e) { console.error("Erreur sauvegarde numéro de facture:", e); }
-        }
-      }
-    }
-
-    doc.setFont("helvetica", "bold"); doc.setFontSize(24); doc.setTextColor(...NAVY);
-    doc.text("FACTURE", PW - MR, 22, { align: "right" });
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
-    doc.text(`N° ${invoiceNum}`, PW - MR, 30, { align: "right" });
-    doc.text(`Date d'émission : ${today}`, PW - MR, 35, { align: "right" });
-    doc.text(`Échéance : ${today} (à réception)`, PW - MR, 40, { align: "right" });
-    doc.setDrawColor(...GOLD); doc.setLineWidth(0.8); doc.line(ML, 48, PW - MR, 48);
-
-    let y = 60;
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-    doc.text("ÉMETTEUR", ML, y);
-    doc.text("CLIENT", ML + cw/2, y);
-    y += 6;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
-    doc.text(freelanceName || "Prestataire", ML, y);
-    doc.text(clientName || "Client", ML + cw/2, y);
-    y += 5;
-    if (freelanceSiret) { doc.setFontSize(9); doc.setTextColor(...GREY); doc.text(`SIRET : ${freelanceSiret}`, ML, y); }
-    doc.setFontSize(9); doc.setTextColor(...GREY);
-    if (clientEmail) doc.text(clientEmail, ML + cw/2, y);
-    y += 5;
-    if (freelanceEmail) doc.text(freelanceEmail, ML, y);
-    y += 15;
-
-    doc.setFillColor(...NAVY); doc.rect(ML, y, cw, 9, "F");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255,255,255);
-    doc.text("DÉSIGNATION", ML + 4, y + 6);
-    doc.text("MONTANT", PW - MR - 4, y + 6, { align: "right" });
-    y += 9;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
-    doc.setDrawColor(230,230,230); doc.setLineWidth(0.3); doc.line(ML, y+10, PW-MR, y+10);
-    doc.text(`${designation} — ${missionTitle || "mission"}`, ML + 4, y + 7);
-    doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y + 7, { align: "right" });
-    y += 18;
-
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-    doc.text("Total HT", ML + cw - 60, y); doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y, { align:"right" });
-    y += 6;
-    doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(...GREY);
-    doc.text("TVA non applicable, art. 293 B du CGI", ML + cw - 60, y);
-    y += 7;
-    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...NAVY);
-    doc.text("Total à payer", ML + cw - 60, y); doc.text(`${montant.toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g," ")} €`, PW - MR - 4, y, { align:"right" });
-    y += 18;
-
-    if (profile?.iban) {
-      doc.setFillColor(248, 247, 244); doc.rect(ML, y, cw, 30, "F");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-      doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 8);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(40,40,40);
-      doc.text(`IBAN : ${profile.iban}`, ML + 4, y + 15);
-      if (profile.bic) doc.text(`BIC : ${profile.bic}`, ML + 4, y + 20);
-      if (profile.bankName) doc.text(`Banque : ${profile.bankName}`, ML + 4, y + 25);
-      y += 38;
-    }
-
-    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
-    const legalLines = doc.splitTextToSize("Pénalités de retard : taux BCE + 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.\nPas d'escompte pour paiement anticipé.", cw);
-    legalLines.forEach(l => { doc.text(l, ML, y); y += 4; });
-
-    doc.save(`Facture_${designation.replace(/[^a-zA-Z0-9]/g,"_")}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`);
+    const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: invoiceKey });
+    renderInvoicePDF({
+      invoiceNum, designation, missionTitle, montant,
+      freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile,
+      filename: `Facture_${designation.replace(/[^a-zA-Z0-9]/g,"_")}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
+    });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
@@ -11374,131 +11375,28 @@ ${freelanceName}`;
         } catch(e) { qrBase64 = null; /* Pas grave, le PDF s'en passe */ }
       }
 
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: "mm", format: "a4" });
-      const PW = 210, ML = 20, MR = 20, cw = PW - ML - MR;
-      const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80], GREY = [110, 110, 110];
-      const p = profile || {};
-      let y = 18;
-
-      // En-tête : logo + titre facture
-      if (p.logo) {
-        try { doc.addImage(p.logo, "PNG", ML, y, 26, 26); } catch(e) {}
-      }
-      doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(...NAVY);
-      doc.text("FACTURE", PW - MR, y + 8, { align: "right" });
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
-      doc.text(`N° ${invoiceNum}`, PW - MR, y + 15, { align: "right" });
-      doc.text(`Date d'émission : ${today}`, PW - MR, y + 20, { align: "right" });
-      doc.text(`Date d'échéance : ${today} (paiement à réception)`, PW - MR, y + 25, { align: "right" });
-      y += 39;
-
-      doc.setDrawColor(...GOLD); doc.setLineWidth(0.6); doc.line(ML, y, PW - MR, y);
-      y += 10;
-
-      // Émetteur (freelance) et Client — deux colonnes
-      const colW = cw / 2 - 4;
-      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-      doc.text("ÉMETTEUR", ML, y);
-      doc.text("CLIENT", ML + colW + 8, y);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...DARK);
-      let yL = y + 6, yR = y + 6;
-      const line = (txt, x, yy) => { if (txt) { const ls = doc.splitTextToSize(String(txt), colW); doc.text(ls, x, yy); return ls.length * 4.6; } return 0; };
-      yL += line(p.companyName || form.freelanceName, ML, yL);
-      yL += line(p.legalStatus, ML, yL);
-      yL += line(p.address || form.freelanceAddress, ML, yL);
-      yL += line(form.freelanceSiret ? "SIRET : " + form.freelanceSiret : (p.siret ? "SIRET : " + p.siret : ""), ML, yL);
-      yL += line(form.freelanceEmail, ML, yL);
-      yL += line(p.tvaNumber ? "TVA : " + p.tvaNumber : "", ML, yL);
-      const cx = ML + colW + 8;
-      yR += line(form.clientName, cx, yR);
-      yR += line(form.clientCompany, cx, yR);
-      yR += line(form.clientAddress, cx, yR);
-      yR += line(form.clientEmail, cx, yR);
-      y = Math.max(yL, yR) + 8;
-
-      // Tableau prestation
-      doc.setFillColor(...NAVY); doc.rect(ML, y, cw, 9, "F");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255,255,255);
-      doc.text("DÉSIGNATION", ML + 3, y + 6);
-      doc.text("MONTANT", PW - MR - 3, y + 6, { align: "right" });
-      y += 9;
-
-      const label = isComptant ? "Paiement comptant" : `Acompte ${depositPct}%`;
-      const desc = `${label} — ${form.missionTitle || "Prestation de services"}`;
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...DARK);
-      const descLines = doc.splitTextToSize(desc, cw - 45);
-      doc.text(descLines, ML + 3, y + 6);
-      doc.text(`${fmt(acompte)} €`, PW - MR - 3, y + 6, { align: "right" });
-      const rowH = Math.max(10, descLines.length * 4.6 + 4);
-      doc.setDrawColor(225,225,225); doc.line(ML, y + rowH, PW - MR, y + rowH);
-      y += rowH + 6;
-
-      // Totaux
-      const tvaApplicable = !!(p.tvaNumber && p.tvaNumber.trim());
-      const totalsX = PW - MR - 70;
-      const val = (lbl, amount, bold) => {
-        doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setFontSize(bold ? 11 : 9.5);
-        doc.setTextColor(...(bold ? NAVY : DARK));
-        doc.text(lbl, totalsX, y);
-        doc.text(`${fmt(amount)} €`, PW - MR, y, { align: "right" });
-        y += bold ? 8 : 6;
-      };
-      val("Total HT", acompte, false);
-      if (tvaApplicable) { val("TVA 20%", tva, false); val("Total TTC", ttc, true); }
-      else {
-        doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(...GREY);
-        doc.text("TVA non applicable, art. 293 B du CGI", totalsX, y); y += 6;
-        val("Total à payer", acompte, true);
-      }
-      y += 8;
-
-      // Coordonnées de paiement (IBAN) + QR Stripe si disponible
-      const payBoxH = p.iban ? 30 : 20;
-      const ibanBoxW = qrBase64 ? cw * 0.62 : cw;
-      doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, ibanBoxW, payBoxH, 2, 2, "F");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-      doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 7);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
-      if (p.iban) {
-        doc.text(`IBAN : ${p.iban}`, ML + 4, y + 14);
-        if (p.bic) doc.text(`BIC : ${p.bic}`, ML + 4, y + 20);
-        if (p.bankName) doc.text(`Banque : ${p.bankName}`, ML + 4, y + 26);
-      } else {
-        doc.setTextColor(...GREY);
-        doc.text("Ajoute ton IBAN dans ton profil (onglet Facturation) pour l'afficher ici.", ML + 4, y + 14);
-      }
-      // Bloc QR Stripe (paiement par carte), à droite de l'IBAN
-      if (qrBase64) {
-        const qrBoxX = ML + ibanBoxW + 4;
-        const qrBoxW = cw - ibanBoxW - 4;
-        doc.setFillColor(248, 246, 240); doc.roundedRect(qrBoxX, y, qrBoxW, payBoxH, 2, 2, "F");
-        try { doc.addImage(qrBase64, "PNG", qrBoxX + (qrBoxW - payBoxH) / 2 + 2, y + 2, payBoxH - 4, payBoxH - 4); } catch(e) {}
-      }
-      y += payBoxH + 6;
-      if (qrBase64) {
-        doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
-        doc.text("Paiement par carte : scanner le code ci-dessus", ML, y);
-        y += 4;
-      }
-      y += 4;
-
-      // Pied de page
-      doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
       const foot = isComptant
         ? "Règlement à réception de facture. Ce paiement conditionne le démarrage de la mission."
         : `Acompte de ${depositPct}% conditionnant le démarrage de la mission. Le solde sera facturé à la livraison.`;
-      doc.text(doc.splitTextToSize(foot, cw), ML, y);
-      y += 9;
-      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
-      const penaltyMention = form.typeClient === "particulier"
-        ? "Pénalités de retard : en cas de paiement au-delà de la date d'échéance, des pénalités calculées au taux d'intérêt légal en vigueur applicable aux consommateurs seront appliquées de plein droit."
-        : "Pénalités de retard : taux BCE majoré de 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.";
-      doc.text(doc.splitTextToSize(penaltyMention, cw), ML, y);
-      y += (form.typeClient === "particulier" ? 10 : 14);
-      doc.text("Pas d'escompte pour paiement anticipé.", ML, y);
 
-      doc.save(`Facture_${invoiceNum}.pdf`);
+      renderInvoicePDF({
+        invoiceNum,
+        designation: isComptant ? "Paiement comptant" : `Acompte ${depositPct}%`,
+        missionTitle: form.missionTitle,
+        montant: acompte,
+        freelanceName: form.freelanceName,
+        freelanceSiret: form.freelanceSiret,
+        freelanceEmail: form.freelanceEmail,
+        clientName: form.clientName,
+        clientCompany: form.clientCompany,
+        clientAddress: form.clientAddress,
+        clientEmail: form.clientEmail,
+        profile,
+        typeClient: form.typeClient,
+        qrBase64,
+        footNote: foot,
+        filename: `Facture_${invoiceNum}.pdf`,
+      });
       // Sauvegarde une fiche minimaliste pour pouvoir retrouver cette facture plus tard — uniquement
       // si elle n'est liée à AUCUN contrat réel (sinon elle est déjà bien suivie ailleurs).
       // Réutilise la même fiche si on re-télécharge plusieurs fois dans la même session, pour éviter les doublons.
