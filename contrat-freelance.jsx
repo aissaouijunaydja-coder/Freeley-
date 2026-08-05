@@ -1039,8 +1039,23 @@ class ErrorBoundary extends React.Component {
 }
 
 /* ══════════════════════════════════════════════════════════ APP ══ */
+// Lit un brouillon transporté dans l'URL de retour (après une connexion Google) — prioritaire sur
+// le localStorage, qui peut avoir été effacé pendant l'aller-retour par la protection anti-tracking
+// de Chrome (surtout lors d'une toute première visite du site, sans historique d'interaction).
+const readUrlDraft = () => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const encoded = params.get("draft");
+    if (!encoded) return null;
+    const raw = decodeURIComponent(escape(atob(decodeURIComponent(encoded))));
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+};
+
 function AppInner() {
   const [step, setStep]           = useState(() => {
+    const urlDraft = readUrlDraft();
+    if (urlDraft && typeof urlDraft.step === "number") return urlDraft.step;
     try {
       const draft = JSON.parse(localStorage.getItem("freeley_current_draft") || "null");
       if (draft && typeof draft.step === "number") return draft.step;
@@ -1048,7 +1063,10 @@ function AppInner() {
     return 0;
   });
   const [form, setForm]           = useState(() => {
-    // Restaurer le brouillon en cours (survit au rafraîchissement de page)
+    // Restaurer le brouillon en cours (survit au rafraîchissement de page, et à la connexion Google
+    // via l'URL de retour si le localStorage a été effacé entre-temps)
+    const urlDraft = readUrlDraft();
+    if (urlDraft && urlDraft.form) return { ...initialForm, ...urlDraft.form };
     try {
       const draft = JSON.parse(localStorage.getItem("freeley_current_draft") || "null");
       if (draft && draft.form) return { ...initialForm, ...draft.form };
@@ -1056,6 +1074,20 @@ function AppInner() {
     return initialForm;
   });
   const [errors, setErrors]       = useState({});
+
+  // Nettoie l'URL une fois le brouillon récupéré, pour ne pas la laisser traîner (partage de lien,
+  // rafraîchissement manuel, etc.) — et la ré-écrit aussi dans le localStorage pour la suite.
+  useEffect(() => {
+    if (window.location.search.includes("draft=")) {
+      const urlDraft = readUrlDraft();
+      if (urlDraft) {
+        try { localStorage.setItem("freeley_current_draft", JSON.stringify({ ...urlDraft, savedAt: Date.now() })); } catch(e) {}
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.delete("draft");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
 
   // Auto-sauvegarde du brouillon en cours (survit au rafraîchissement de page)
   useEffect(() => {
@@ -8332,10 +8364,22 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const handleOAuth = async (provider) => {
     setOauthLoading(provider);
     try {
+      // Le brouillon en cours voyage dans l'URL de retour, pas seulement dans le localStorage —
+      // sur une première visite (aucun historique d'interaction avec le site), Chrome peut effacer
+      // le localStorage pendant l'aller-retour vers Google (protection anti-tracking). L'URL, elle,
+      // survit toujours au trajet complet.
+      let redirectTo = window.location.origin;
+      try {
+        const rawDraft = localStorage.getItem("freeley_current_draft");
+        if (rawDraft) {
+          const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(rawDraft))));
+          if (encoded.length < 6000) redirectTo = `${window.location.origin}?draft=${encoded}`;
+        }
+      } catch(e) {}
       const { error } = await supabase.auth.signInWithOAuth({
         provider: provider === "linkedin" ? "linkedin_oidc" : provider,
         options: {
-          redirectTo: window.location.origin,
+          redirectTo,
         },
       });
       if (error) { setError(error.message); setOauthLoading(""); }
@@ -9064,63 +9108,20 @@ function PricingCard({ icon, title, price, sub, features, color, cta, recommende
 
 /* ══════════════════════════════════════════ CONTRACT TIMELINE ══ */
 function ContractTimeline({ entry }) {
-  const clientName = entry?.clientName || "le client";
-
-  /* Données — système events + notes client depuis store partagé */
-  const systemEvents = [
+  /* Événements réels du contrat — pour l'instant uniquement sa création. Le suivi enrichi (notes
+     client, etc.) n'existe pas encore comme vraie fonctionnalité connectée — on n'affiche donc que
+     ce qui s'est vraiment passé, jamais un événement simulé ou du texte codé en dur. */
+  const events = [
     {
       id: 1,
       date: entry?.date || new Date().toLocaleDateString("fr-FR"),
-      time: "",
       icon: "🟢",
       iconBg: "#DCFCE7",
       iconColor: "#15803D",
       label: "Contrat initial créé",
       detail: `Par le freelance · ${Number(entry?.price || 0).toLocaleString("fr-FR")} € HT`,
-      status: "done",
-      type: "system",
     },
   ];
-
-  const [events, setEvents] = React.useState(systemEvents);
-
-  const handleAccept = (eventId) => {
-    setEvents(prev => [
-      ...prev.map(e => e.id === eventId ? { ...e, status: "accepted" } : e),
-      {
-        id: Date.now(),
-        date: new Date().toLocaleDateString("fr-FR"),
-        time: new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }),
-        icon: "✅",
-        iconBg: "#DCFCE7",
-        iconColor: "#15803D",
-        label: "Note acceptée — contrat mis à jour",
-        detail: "Paiement en 2 fois ajouté à l'Article 3 par le freelance",
-        status: "done",
-        type: "system",
-      },
-    ]);
-  };
-
-  const handleRefuse = (eventId) => {
-    setEvents(prev => [
-      ...prev.map(e => e.id === eventId ? { ...e, status: "refused" } : e),
-      {
-        id: Date.now(),
-        date: new Date().toLocaleDateString("fr-FR"),
-        time: new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }),
-        icon: "🚫",
-        iconBg: "#FEE2E2",
-        iconColor: "#DC2626",
-        label: "Note refusée — contrat inchangé",
-        detail: "Le freelance maintient les conditions de paiement initiales",
-        status: "done",
-        type: "system",
-      },
-    ]);
-  };
-
-  const hasPending = events.some(e => e.status === "pending");
 
   return (
     <div className="fade-up fade-up-3" style={{
@@ -9135,19 +9136,6 @@ function ContractTimeline({ entry }) {
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:22 }}>
         <span style={{ fontSize:16 }}>🕒</span>
         <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.16em", fontWeight:700, color:C.textL }}>HISTORIQUE DU CONTRAT</div>
-        {hasPending && (
-          <span style={{
-            marginLeft:"auto",
-            fontFamily:T.body, fontSize:9, fontWeight:700, letterSpacing:"0.08em",
-            background:"#FEF3C7", color:"#92400E",
-            padding:"3px 10px", borderRadius:20,
-            border:"1px solid #FDE68A",
-            display:"flex", alignItems:"center", gap:5,
-          }}>
-            <span style={{ display:"inline-block", width:6, height:6, borderRadius:"50%", background:"#F59E0B", animation:"shimmer 1.4s infinite" }} />
-            NOTE CLIENT EN ATTENTE
-          </span>
-        )}
       </div>
 
       {/* Timeline */}
@@ -9162,11 +9150,6 @@ function ContractTimeline({ entry }) {
         <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
           {events.map((ev, idx) => {
             const isLast = idx === events.length - 1;
-            const isPending = ev.status === "pending";
-            const isAccepted = ev.status === "accepted";
-            const isRefused = ev.status === "refused";
-            const isClientComment = ev.type === "client_comment";
-
             return (
               <div key={ev.id} style={{
                 display:"flex", gap:16, alignItems:"flex-start",
@@ -9176,187 +9159,31 @@ function ContractTimeline({ entry }) {
                 {/* Dot */}
                 <div style={{
                   width:32, height:32, borderRadius:"50%", flexShrink:0,
-                  background: isAccepted ? "#DCFCE7" : isRefused ? "#FEE2E2" : ev.iconBg,
-                  border:`2px solid ${isAccepted ? "#15803D22" : isRefused ? "#DC262622" : ev.iconColor + "22"}`,
+                  background: ev.iconBg,
+                  border:`2px solid ${ev.iconColor}22`,
                   display:"flex", alignItems:"center", justifyContent:"center",
                   fontSize:13, zIndex:1,
-                  boxShadow: isPending ? `0 0 0 5px ${ev.iconColor}15` : "none",
-                  transition:"all 0.3s",
                 }}>
-                  {isAccepted ? "✅" : isRefused ? "🚫" : ev.icon}
+                  {ev.icon}
                 </div>
 
                 {/* Content */}
                 <div style={{ flex:1, paddingTop:4 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:4 }}>
-                    {/* Timestamp */}
-                    <span style={{
-                      fontFamily:T.body, fontSize:11, fontWeight:600,
-                      color:C.textL, letterSpacing:"0.04em",
-                    }}>
-                      {ev.date} · {ev.time}
-                    </span>
-                    {isClientComment && !isAccepted && !isRefused && (
-                      <span style={{
-                        fontFamily:T.body, fontSize:9, fontWeight:700,
-                        color:"#6D28D9", background:"#F5F3FF",
-                        padding:"2px 7px", borderRadius:10,
-                        border:"1px solid #DDD6FE",
-                      }}>VIA LIEN MAGIQUE</span>
-                    )}
-                    {isPending && (
-                      <span style={{
-                        fontFamily:T.body, fontSize:9, fontWeight:700,
-                        color:"#D97706", background:"#FFFBEB",
-                        padding:"2px 7px", borderRadius:10,
-                        border:"1px solid #FDE68A",
-                      }}>EN ATTENTE DE DÉCISION</span>
-                    )}
-                    {isAccepted && (
-                      <span style={{
-                        fontFamily:T.body, fontSize:9, fontWeight:700,
-                        color:"#15803D", background:"#DCFCE7",
-                        padding:"2px 7px", borderRadius:10,
-                        border:"1px solid #86EFAC",
-                      }}>ACCEPTÉE ✓</span>
-                    )}
-                    {isRefused && (
-                      <span style={{
-                        fontFamily:T.body, fontSize:9, fontWeight:700,
-                        color:"#DC2626", background:"#FEE2E2",
-                        padding:"2px 7px", borderRadius:10,
-                        border:"1px solid #FECACA",
-                      }}>REFUSÉE ✕</span>
-                    )}
+                  <div style={{
+                    fontFamily:T.body, fontSize:11, fontWeight:600,
+                    color:C.textL, letterSpacing:"0.04em", marginBottom:4,
+                  }}>
+                    {ev.date}
                   </div>
-
-                  {/* Action label */}
                   <div style={{
                     fontFamily:T.body, fontSize:13, fontWeight:700,
-                    color: isPending ? C.navy : isAccepted ? "#15803D" : isRefused ? "#DC2626" : C.text,
-                    marginBottom: isClientComment ? 10 : 2,
+                    color:C.text, marginBottom:2,
                   }}>
-                    {isClientComment && (
-                      <span style={{
-                        display:"inline-flex", alignItems:"center", gap:5,
-                        background:"#EDE9FE", color:"#6D28D9",
-                        fontFamily:T.body, fontSize:10, fontWeight:700,
-                        padding:"2px 9px", borderRadius:20,
-                        border:"1px solid #DDD6FE",
-                        marginRight:8,
-                        letterSpacing:"0.04em",
-                      }}>
-                        📎 {ev.clauseTag}
-                      </span>
-                    )}
                     {ev.label}
                   </div>
-
-                  {/* Client comment bubble (Google Docs style) */}
-                  {isClientComment && (
-                    <div style={{
-                      background: isPending ? "#FFFBEB" : isAccepted ? "#F0FDF4" : "#FEF2F2",
-                      border: `1.5px solid ${isPending ? "#FDE68A" : isAccepted ? "#86EFAC" : "#FECACA"}`,
-                      borderRadius:12,
-                      borderTopLeftRadius:4,
-                      padding:"12px 14px",
-                      marginBottom: isPending ? 12 : 4,
-                      transition:"all 0.3s",
-                    }}>
-                      {/* Author row */}
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                        <div style={{
-                          width:24, height:24, borderRadius:"50%",
-                          background: ev.authorColor,
-                          display:"flex", alignItems:"center", justifyContent:"center",
-                          fontFamily:T.body, fontSize:10, fontWeight:800, color:"#fff",
-                          flexShrink:0,
-                        }}>{ev.authorInitials}</div>
-                        <span style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:C.navy }}>
-                          {ev.author}
-                        </span>
-                        <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>a commenté</span>
-                      </div>
-
-                      {/* Quote */}
-                      <div style={{
-                        fontFamily:T.body, fontSize:13, color:C.text,
-                        lineHeight:1.6,
-                        fontStyle:"italic",
-                        borderLeft:`3px solid ${isPending ? "#F59E0B" : isAccepted ? "#22C55E" : "#EF4444"}`,
-                        paddingLeft:10,
-                        opacity: (isAccepted || isRefused) ? 0.7 : 1,
-                        transition:"opacity 0.3s",
-                      }}>
-                        « {ev.comment} »
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Regular detail for non-comment events */}
-                  {!isClientComment && ev.detail && (
-                    <div style={{
-                      fontFamily:T.body, fontSize:12, color:C.textM,
-                      lineHeight:1.55,
-                    }}>
+                  {ev.detail && (
+                    <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.55 }}>
                       {ev.detail}
-                    </div>
-                  )}
-
-                  {/* ── ACTION BUTTONS — décision ultra-rapide du freelance ── */}
-                  {isPending && isClientComment && (
-                    <div style={{
-                      display:"flex", gap:8, marginTop:2,
-                      padding:"10px 12px",
-                      background:"#F8F7FF",
-                      border:"1px solid #E5E7EB",
-                      borderRadius:10,
-                    }}>
-                      {/* Context hint */}
-                      <div style={{ width:"100%", marginBottom:8, display:"flex", alignItems:"center", gap:5 }}>
-                        <span style={{ fontSize:11 }}>⚡</span>
-                        <span style={{ fontFamily:T.body, fontSize:10, fontWeight:700, color:C.textL, letterSpacing:"0.08em" }}>
-                          DÉCISION RAPIDE
-                        </span>
-                      </div>
-                      <div style={{ display:"flex", gap:8, width:"100%", flexWrap:"wrap" }}>
-                        <button
-                          onClick={() => handleAccept(ev.id)}
-                          style={{
-                            flex:1, minWidth:140,
-                            display:"flex", alignItems:"center", justifyContent:"center", gap:7,
-                            padding:"11px 18px",
-                            background:"linear-gradient(135deg, #166534 0%, #15803D 100%)",
-                            color:"#DCFCE7", border:"none",
-                            borderRadius:9, cursor:"pointer",
-                            fontFamily:T.body, fontSize:13, fontWeight:700,
-                            boxShadow:"0 4px 14px #15803D35",
-                            transition:"all 0.18s",
-                          }}
-                          onMouseOver={e=>{ e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow="0 8px 20px #15803D45"; }}
-                          onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 4px 14px #15803D35"; }}
-                        >
-                          <span style={{ fontSize:15 }}>✓</span> Accepter et mettre à jour
-                        </button>
-                        <button
-                          onClick={() => handleRefuse(ev.id)}
-                          style={{
-                            flex:1, minWidth:140,
-                            display:"flex", alignItems:"center", justifyContent:"center", gap:7,
-                            padding:"11px 18px",
-                            background:"linear-gradient(135deg, #991B1B 0%, #DC2626 100%)",
-                            color:"#FEE2E2", border:"none",
-                            borderRadius:9, cursor:"pointer",
-                            fontFamily:T.body, fontSize:13, fontWeight:700,
-                            boxShadow:"0 4px 14px #DC262630",
-                            transition:"all 0.18s",
-                          }}
-                          onMouseOver={e=>{ e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow="0 8px 20px #DC262640"; }}
-                          onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 4px 14px #DC262630"; }}
-                        >
-                          <span style={{ fontSize:15 }}>❌</span> Refuser / Laisser en l'état
-                        </button>
-                      </div>
                     </div>
                   )}
                 </div>
@@ -9411,6 +9238,9 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   const [soldeStripeLinkUrl, setSoldeStripeLinkUrl] = useState("");
   const [soldeLinkGenerating, setSoldeLinkGenerating] = useState(false);
   const [soldeRelanceSent, setSoldeRelanceSent] = useState(false);
+
+  // Un contrat sans prix n'a rien à encaisser — ne rien afficher plutôt qu'un bloc acompte à 0€
+  if (!rawPrice || rawPrice <= 0) return null;
 
   const ensureSoldePaymentLink = async () => {
     if (soldeStripeLinkUrl) return soldeStripeLinkUrl;
@@ -9689,6 +9519,15 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "acompte")}
                 style={{ marginTop:10, padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
               >🧾 Télécharger la facture ({paymentWordCap.toLowerCase()})</button>
+              <SendElectronicInvoiceButton
+                contractId={entry?.id} invoiceKey="acompteInvoiceNumber"
+                designation={paymentWordCap} montant={depositAmt} missionTitle={entry?.missionTitle}
+                freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
+                freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
+                tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
+                clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress}
+                clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
+              />
             </div>
           )}
         </div>}
@@ -9711,6 +9550,15 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "solde")}
                   style={{ padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
                 >🧾 Télécharger la facture (solde)</button>
+                <SendElectronicInvoiceButton
+                  contractId={entry?.id} invoiceKey="soldeInvoiceNumber"
+                  designation="Solde" montant={soldeAmt} missionTitle={entry?.missionTitle}
+                  freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
+                  freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
+                  tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
+                  clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress}
+                  clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
+                />
               </div>
             ) : (
               <>
@@ -9734,6 +9582,15 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                     style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
                   >🧾 Télécharger la facture</button>
                 </div>
+                <SendElectronicInvoiceButton
+                  contractId={entry?.id} invoiceKey="soldeInvoiceNumber"
+                  designation="Solde" montant={soldeAmt} missionTitle={entry?.missionTitle}
+                  freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
+                  freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
+                  tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
+                  clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress}
+                  clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
+                />
               </>
             )}
           </div>
@@ -9819,6 +9676,17 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 fontFamily:T.body, fontSize:13, fontWeight:700,
               }}
             ><span>🧾</span> Télécharger la facture</button>
+            <div style={{ flexBasis:"100%" }}>
+              <SendElectronicInvoiceButton
+                contractId={entry?.id} invoiceKey="acompteInvoiceNumber"
+                designation={paymentWordCap} montant={depositAmt} missionTitle={entry?.missionTitle}
+                freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
+                freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
+                tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
+                clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress}
+                clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
+              />
+            </div>
 
             {/* QR code réel — utile en présentiel, le client scanne pour payer */}
             {stripeLinkUrl && (
@@ -10249,6 +10117,15 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                             onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
                             style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Télécharger la facture</button>
+                          <SendElectronicInvoiceButton compact
+                            contractId={entry.id} invoiceKey="acompteInvoiceNumber"
+                            designation="Facture" montant={Number(entry.price) || 0} missionTitle={entry.missionTitle}
+                            freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
+                            freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
+                            tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
+                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress}
+                            clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
+                          />
                           {entry.paymentStatus === "paid" ? (
                             <span style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, fontFamily:T.body }}>✓ Payée</span>
                           ) : (
@@ -10265,23 +10142,55 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       >⬇ PDF du contrat</button>
                       )}
                       {!entry.isStandaloneInvoice && acompteAmtA > 0 && (
-                        <button
-                          onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
-                          style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                        >🧾 Facture {isComptantA ? "paiement" : "acompte"}</button>
+                        <>
+                          <button
+                            onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
+                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                          >🧾 Facture {isComptantA ? "paiement" : "acompte"}</button>
+                          <SendElectronicInvoiceButton compact
+                            contractId={entry.id} invoiceKey="acompteInvoiceNumber"
+                            designation={isComptantA ? "Paiement" : "Acompte"} montant={acompteAmtA} missionTitle={entry.missionTitle}
+                            freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
+                            freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
+                            tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
+                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress}
+                            clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
+                          />
+                        </>
                       )}
                       {!entry.isStandaloneInvoice && hasSoldeA && (
-                        <button
-                          onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "solde")}
-                          style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                        >🧾 Facture solde</button>
+                        <>
+                          <button
+                            onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "solde")}
+                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                          >🧾 Facture solde</button>
+                          <SendElectronicInvoiceButton compact
+                            contractId={entry.id} invoiceKey="soldeInvoiceNumber"
+                            designation="Solde" montant={soldeAmtA} missionTitle={entry.missionTitle}
+                            freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
+                            freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
+                            tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
+                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress}
+                            clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
+                          />
+                        </>
                       )}
                       {!entry.isStandaloneInvoice && Array.isArray(entry.avenants) && entry.avenants.map(av => (
-                        <button
-                          key={av.num}
-                          onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id)}
-                          style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                        >🧾 Facture avenant n°{av.num}</button>
+                        <React.Fragment key={av.num}>
+                          <button
+                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id)}
+                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                          >🧾 Facture avenant n°{av.num}</button>
+                          <SendElectronicInvoiceButton compact
+                            contractId={entry.id} invoiceKey="avenant" avenantNum={av.num}
+                            designation={`Avenant n°${av.num}`} montant={av.ajustementMontant} missionTitle={entry.missionTitle}
+                            freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
+                            freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
+                            tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
+                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress}
+                            clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
+                          />
+                        </React.Fragment>
                       ))}
                       {!entry.isStandaloneInvoice && (
                         <button
@@ -10759,6 +10668,15 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                       )}
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                         <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientEmail, profile, authUser, historyView.id)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
+                        <SendElectronicInvoiceButton compact
+                          contractId={historyView.id} invoiceKey="avenant" avenantNum={av.num}
+                          designation={`Avenant n°${av.num}`} montant={av.ajustementMontant} missionTitle={historyView.missionTitle}
+                          freelanceName={historyView.form?.freelanceName} freelanceSiret={historyView.form?.freelanceSiret}
+                          freelanceEmail={historyView.form?.freelanceEmail} freelanceAddress={historyView.form?.freelanceAddress}
+                          tvaNumber={profile?.tvaNumber} clientName={historyView.form?.clientName}
+                          clientCompany={historyView.form?.clientCompany} clientAddress={historyView.form?.clientAddress}
+                          clientEmail={historyView.form?.clientEmail} typeClient={historyView.form?.typeClient} authUser={authUser}
+                        />
                         {!av.paymentReceived && (
                           <button onClick={() => markAvenantPaid(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #86EFAC", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534" }}>✓ Marquer comme reçu</button>
                         )}
@@ -11147,6 +11065,103 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 }
 
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
+// Bouton d'envoi en facturation électronique — réutilisé sur TOUTES les factures de l'app
+// (facture libre, acompte, solde, avenant), pour que la loi B2B soit proposée de façon cohérente
+// partout, peu importe le type de facture. Un seul endroit à corriger si jamais un détail change.
+function SendElectronicInvoiceButton({
+  contractId, invoiceKey, avenantNum, designation, montant, missionTitle,
+  freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
+  clientName, clientCompany, clientAddress, clientEmail, typeClient, authUser,
+  compact,
+}) {
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  if (typeClient !== "professionnel") {
+    if (compact) return null;
+    return (
+      <p style={{ fontSize:12, color:C.textL, fontFamily:T.body, margin:"10px 0 0", lineHeight:1.5 }}>
+        Client particulier — la facturation électronique ne le concerne pas, le PDF suffit.
+      </p>
+    );
+  }
+
+  const handleSend = async () => {
+    setSending(true);
+    setResult(null);
+    try {
+      const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: invoiceKey, avenantNum });
+      const res = await fetch("/api/generate-ubl-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          send: true, invoiceNum, designation, missionTitle, montant,
+          freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
+          clientName, clientCompany, clientAddress, clientEmail, typeClient,
+        }),
+      });
+      const data = await res.json();
+      if (data.sendResult?.success) {
+        setResult({ success: true, invoice_id: data.sendResult.invoice_id });
+      } else {
+        setResult({ error: data.sendResult?.error || data.error || "Erreur inconnue" });
+      }
+    } catch(err) {
+      console.error(err);
+      setResult({ error: err.message || "Erreur inconnue" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (compact) {
+    return (
+      <button onClick={handleSend} disabled={sending} title={result?.error || "Envoyer via facturation électronique (bêta)"} style={{
+        padding:"8px 14px",
+        background: result?.success ? "#16A34A" : "#fff",
+        border: `1px solid ${result?.success ? "#16A34A" : C.border}`,
+        borderRadius:8, cursor: sending ? "wait" : "pointer",
+        fontSize:12, fontFamily:T.body, fontWeight:700,
+        color: result?.success ? C.white : (result?.error ? C.error : C.textM),
+      }}>
+        {sending ? "⏳ Envoi…" : result?.success ? "✓ Envoyée" : result?.error ? "⚠ Échec — réessayer" : "📤 Facturation électronique"}
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop:10 }}>
+      <p style={{ fontSize:12, color:C.textL, fontFamily:T.body, margin:"0 0 8px", lineHeight:1.5 }}>
+        Client professionnel — la loi impose progressivement la facturation électronique pour ce
+        type de client. À partir du 1er septembre 2027, ce sera obligatoire pour toutes les
+        micro-entreprises — autant prendre l'habitude dès maintenant, tranquillement.
+      </p>
+      <button onClick={handleSend} disabled={sending} style={{
+        width:"100%", padding:"10px",
+        background: result?.success ? "#16A34A" : "transparent",
+        border: `1px solid ${result?.success ? "#16A34A" : C.borderL}`,
+        borderRadius:8, cursor: sending ? "wait" : "pointer",
+        fontSize:12.5, fontFamily:T.body, fontWeight:700,
+        color: result?.success ? C.white : C.textM,
+        display:"flex", alignItems:"center", justifyContent:"center", gap:7,
+        opacity: sending ? 0.7 : 1,
+      }}>
+        {sending
+          ? <><span style={{fontSize:14}}>⏳</span> Envoi en cours…</>
+          : result?.success
+          ? <><span style={{fontSize:14}}>✓</span> Envoyée électroniquement</>
+          : <><span style={{fontSize:14}}>📤</span> Envoyer via facturation électronique (bêta)</>
+        }
+      </button>
+      {result?.error && (
+        <div style={{ marginTop:6, fontSize:11.5, color:C.error, fontFamily:T.body }}>
+          {result.error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser, contractId }) {
   const [downloaded, setDownloaded] = useState(false);
   const [standaloneEntryId, setStandaloneEntryId] = useState(null);
@@ -11427,6 +11442,9 @@ ${freelanceName}`;
       setPdfGenerating(false);
     }
   };
+
+  // Envoi de la facture au client via Super PDP — remplacé par le composant réutilisable
+  // SendElectronicInvoiceButton, utilisé directement dans le JSX ci-dessous.
 
   return (
     <div
@@ -11865,6 +11883,28 @@ ${freelanceName}`;
               : <><span style={{fontSize:15}}>⬇</span> Télécharger la facture PDF</>
             }
           </button>
+        </div>
+
+        {/* Envoi via facturation électronique (bêta) — composant réutilisé partout dans l'app */}
+        <div style={{ padding:"0 24px 20px" }}>
+          <SendElectronicInvoiceButton
+            contractId={contractId || standaloneEntryId}
+            invoiceKey="acompteInvoiceNumber"
+            designation={isComptant ? "Paiement comptant" : `Acompte ${depositPct}%`}
+            missionTitle={form.missionTitle}
+            montant={acompte}
+            freelanceName={form.freelanceName}
+            freelanceSiret={form.freelanceSiret}
+            freelanceEmail={form.freelanceEmail}
+            freelanceAddress={form.freelanceAddress}
+            tvaNumber={profile?.tvaNumber}
+            clientName={form.clientName}
+            clientCompany={form.clientCompany}
+            clientAddress={form.clientAddress}
+            clientEmail={form.clientEmail}
+            typeClient={form.typeClient}
+            authUser={authUser}
+          />
         </div>
 
         {/* ══ ENVOYER LA FACTURE (premier envoi) ══ */}
