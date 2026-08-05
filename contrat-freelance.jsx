@@ -8634,6 +8634,12 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
             ))}
           </div>
         )}
+
+        {/* ── Liens légaux ── */}
+        <div style={{ textAlign:"center", padding:"14px 0 4px" }}>
+          <a href="/?legal=mentions" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none", marginRight:14 }}>Mentions légales</a>
+          <a href="/?legal=confidentialite" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none" }}>Politique de confidentialité</a>
+        </div>
       </div>
     </div>
   );
@@ -14812,6 +14818,115 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
   );
 }
 
+/* ══════════════════════════════════════════ PAGES LÉGALES ══ */
+function LegalPageLayout({ title, children }) {
+  return (
+    <div style={{ minHeight:"100vh", background:C.cream, padding:"40px 20px" }}>
+      <div style={{ maxWidth:720, margin:"0 auto", background:C.white, borderRadius:16, padding:"40px 32px", boxShadow:"0 2px 20px #1B2E4B10" }}>
+        <a href="/" style={{ fontFamily:T.body, fontSize:13, color:C.gold, textDecoration:"none", fontWeight:700 }}>← Retour à Freeley</a>
+        <h1 style={{ fontFamily:T.display, fontSize:28, color:C.navy, margin:"20px 0 24px" }}>{title}</h1>
+        <div style={{ fontFamily:T.body, fontSize:14, color:C.textM, lineHeight:1.75 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MentionsLegalesPage() {
+  return (
+    <LegalPageLayout title="Mentions légales">
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Éditeur du site</h3>
+      <p>
+        Ce site est édité à titre non professionnel, conformément à l'article 1-1 de la loi
+        n° 2004-575 du 21 juin 2004 pour la confiance dans l'économie numérique. L'éditeur a
+        communiqué son identité complète à l'hébergeur.
+      </p>
+
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Hébergement</h3>
+      <p>
+        Vercel Inc.<br/>
+        340 S Lemon Ave #4133, Walnut, CA 91789, États-Unis<br/>
+        https://vercel.com
+      </p>
+
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Contact</h3>
+      <p>
+        Pour toute question concernant le site ou son fonctionnement :{" "}
+        <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>
+      </p>
+
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Propriété intellectuelle</h3>
+      <p>
+        L'ensemble des éléments composant ce site (textes, graphismes, logo) est protégé par le
+        droit d'auteur. Toute reproduction non autorisée est interdite.
+      </p>
+    </LegalPageLayout>
+  );
+}
+
+function PolitiqueConfidentialitePage() {
+  const Section = ({ title, children }) => (
+    <>
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
+      {children}
+    </>
+  );
+  return (
+    <LegalPageLayout title="Politique de confidentialité">
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : août 2026</p>
+
+      <Section title="Quelles données sont collectées">
+        <p>Selon ton usage de Freeley, les données suivantes peuvent être traitées :</p>
+        <ul style={{ paddingLeft:20 }}>
+          <li>Compte : email, nom (via connexion classique ou Google)</li>
+          <li>Profil freelance : nom, activité, SIRET, adresse, numéro de TVA, coordonnées bancaires (IBAN/BIC), logo</li>
+          <li>Contrats : informations sur toi et ton client (nom, email, adresse), détails de la mission, montants</li>
+          <li>Signatures électroniques (image de la signature dessinée)</li>
+          <li>Paiements : traités directement par Stripe — Freeley ne stocke jamais de numéro de carte bancaire</li>
+        </ul>
+      </Section>
+
+      <Section title="Pourquoi ces données sont collectées">
+        <p>
+          Uniquement pour permettre à Freeley de fonctionner : générer tes contrats et factures,
+          te permettre de recevoir des paiements, t'envoyer les emails nécessaires (confirmation de
+          compte, réinitialisation de mot de passe). Aucune donnée n'est vendue ni utilisée à des
+          fins publicitaires.
+        </p>
+      </Section>
+
+      <Section title="Avec qui ces données sont partagées">
+        <p>Freeley s'appuie sur les prestataires suivants pour fonctionner, chacun ne recevant que les données nécessaires à son rôle :</p>
+        <ul style={{ paddingLeft:20 }}>
+          <li><strong>Supabase</strong> — hébergement de la base de données et des comptes</li>
+          <li><strong>Vercel</strong> — hébergement du site</li>
+          <li><strong>Stripe</strong> — traitement des paiements</li>
+          <li><strong>Resend</strong> — envoi des emails automatiques</li>
+          <li><strong>Anthropic (Claude)</strong> — génération et analyse de tes contrats à partir des informations que tu fournis</li>
+          <li><strong>Super PDP</strong> — transmission des factures électroniques, uniquement si tu utilises cette option et pour un client professionnel</li>
+        </ul>
+      </Section>
+
+      <Section title="Combien de temps ces données sont conservées">
+        <p>
+          Tes données sont conservées tant que ton compte Freeley existe. Si tu supprimes ton
+          compte, tes données personnelles sont supprimées, sous réserve des obligations légales
+          de conservation qui pourraient s'appliquer à certains documents (factures notamment).
+        </p>
+      </Section>
+
+      <Section title="Tes droits">
+        <p>
+          Conformément au RGPD, tu disposes d'un droit d'accès, de rectification, d'effacement et
+          de portabilité de tes données. Tu peux exercer ces droits en écrivant à{" "}
+          <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.
+        </p>
+      </Section>
+    </LegalPageLayout>
+  );
+}
+
 export default function App() {
   // Page admin (privée) : ?admin=feedback
   const adminParam = new URLSearchParams(window.location.search).get("admin");
@@ -14847,6 +14962,22 @@ export default function App() {
     return (
       <ErrorBoundary>
         <AvenantSignaturePage contractId={aContractId} avenantNum={Number(aNumStr)} />
+      </ErrorBoundary>
+    );
+  }
+  // Pages légales : ?legal=mentions ou ?legal=confidentialite
+  const legalParam = new URLSearchParams(window.location.search).get("legal");
+  if (legalParam === "mentions") {
+    return (
+      <ErrorBoundary>
+        <MentionsLegalesPage />
+      </ErrorBoundary>
+    );
+  }
+  if (legalParam === "confidentialite") {
+    return (
+      <ErrorBoundary>
+        <PolitiqueConfidentialitePage />
       </ErrorBoundary>
     );
   }
