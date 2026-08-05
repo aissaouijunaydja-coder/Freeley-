@@ -309,13 +309,10 @@ const createSignatureRequest = async (entry, form, freelanceSignature) => {
 
 // Le client (sans compte) charge le contrat à signer via l'id public
 const getContractForSigning = async (contractId) => {
-  const { data, error } = await supabase
-    .from("contracts")
-    .select("id, title, content, status")
-    .eq("id", contractId)
-    .single();
-  if (error) { console.error("getContractForSigning error:", error); return null; }
-  return { ...data, content: parseContent(data.content) };
+  const { data, error } = await supabase.rpc("get_contract_for_signing", { p_contract_id: contractId });
+  if (error || !data || !data[0]) { console.error("getContractForSigning error:", error); return null; }
+  const row = data[0];
+  return { ...row, content: parseContent(row.content) };
 };
 
 // Le client signe : on enregistre sa signature et on passe le statut à "signed"
@@ -338,13 +335,9 @@ const submitClientSignature = async (contractId, clientSignature) => {
 
 // Le client (sans compte) charge le NDA à signer via son id public
 const getNdaForSigning = async (ndaId) => {
-  const { data, error } = await supabase
-    .from("ndas")
-    .select("id, partie_a, partie_b, content, status")
-    .eq("id", ndaId)
-    .single();
-  if (error) { console.error("getNdaForSigning error:", error); return null; }
-  return data;
+  const { data, error } = await supabase.rpc("get_nda_for_signing", { p_nda_id: ndaId });
+  if (error || !data || !data[0]) { console.error("getNdaForSigning error:", error); return null; }
+  return data[0];
 };
 
 // Le client signe le NDA : on enregistre sa signature et on passe le statut à "signed"
