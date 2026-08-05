@@ -2948,6 +2948,25 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         onGoToProfileTva={goToProfileFacturation}
         onConnectStripe={handleConnectStripe}
         connectingStripe={connectingStripe}
+        setForm={setForm}
+        signingContractId={signingContractId}
+        setSigningContractId={setSigningContractId}
+        setShowTactileSign={setShowTactileSign}
+        remoteSignLink={remoteSignLink}
+        setRemoteSignLink={setRemoteSignLink}
+        showRemoteSignPad={showRemoteSignPad}
+        setShowRemoteSignPad={setShowRemoteSignPad}
+        remoteSigHasStrokes={remoteSigHasStrokes}
+        setRemoteSigHasStrokes={setRemoteSigHasStrokes}
+        remoteSignLoading={remoteSignLoading}
+        remoteSignCopied={remoteSignCopied}
+        setRemoteSignCopied={setRemoteSignCopied}
+        remoteSigCanvasRef={remoteSigCanvasRef}
+        startRemoteSigDraw={startRemoteSigDraw}
+        drawRemoteSig={drawRemoteSig}
+        endRemoteSigDraw={endRemoteSigDraw}
+        clearRemoteSig={clearRemoteSig}
+        handleRemoteSign={handleRemoteSign}
       />
       {ratingModal && (
         <ClientRatingModal
@@ -10345,7 +10364,7 @@ function CGUPage({ onBack }) {
   );
 }
 
-function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe }) {
+function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe, setForm, signingContractId, setSigningContractId, setShowTactileSign, remoteSignLink, setRemoteSignLink, showRemoteSignPad, setShowRemoteSignPad, remoteSigHasStrokes, setRemoteSigHasStrokes, remoteSignLoading, remoteSignCopied, setRemoteSignCopied, remoteSigCanvasRef, startRemoteSigDraw, drawRemoteSig, endRemoteSigDraw, clearRemoteSig, handleRemoteSign }) {
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
