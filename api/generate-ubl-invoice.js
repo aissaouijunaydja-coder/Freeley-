@@ -2,6 +2,10 @@
 // (le format XML structuré exigé par la réforme), puis la fait VALIDER par Super PDP avant
 // tout envoi réel. Rien n'est transmis à un vrai client ici — on vérifie juste que le document
 // qu'on fabrique est correct, pour pouvoir corriger si besoin avant de passer à l'étape 3 (envoi réel).
+//
+// Corrigé après un premier test réel de validation (voir historique) : ordre des balises XML,
+// SIREN du vendeur obligatoire même sans TVA, mentions légales obligatoires (pénalités,
+// recouvrement, escompte), et code de "cadre de facturation" français.
 
 // Échappe les caractères spéciaux XML (obligatoire pour tout texte libre injecté dans le XML,
 // comme le nom d'un client ou une désignation de mission)
@@ -11,6 +15,12 @@ const esc = (s) =>
   }[c]));
 
 const fmt2 = (n) => Number(n || 0).toFixed(2);
+
+// Extrait le SIREN (9 premiers chiffres) à partir d'un SIRET (14 chiffres)
+const toSiren = (siret) => {
+  const digits = String(siret || "").replace(/\D/g, "");
+  return digits.length >= 9 ? digits.slice(0, 9) : digits;
+};
 
 // Sépare une adresse en une seule ligne (ex: "12 rue de la Paix, 75002 Paris") en
 // rue / code postal / ville — le format UBL exige ces informations séparément.
@@ -26,15 +36,16 @@ function splitAddress(raw) {
   return { street, zone: match[1], city: after || "Non renseigné" };
 }
 
-function buildPartyXml({ name, siret, address, email, tvaNumber, isSupplier }) {
+function buildPartyXml({ name, siret, address, email, tvaNumber }) {
   const { street, zone, city } = splitAddress(address);
-  const legalId = siret && siret.replace(/\s/g, "").length === 14
-    ? siret.replace(/\s/g, "")
-    : (siret || "").replace(/\s/g, "");
+  const siren = toSiren(siret);
+  // Identifiant fiscal obligatoire dès que la facture mentionne une exonération de TVA (BR-E-02) —
+  // on utilise le numéro de TVA s'il existe, sinon le SIREN sert d'identifiant fiscal de repli.
   const taxScheme = tvaNumber
     ? `<cac:PartyTaxScheme><cbc:CompanyID>${esc(tvaNumber)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>`
-    : "";
+    : (siren ? `<cac:PartyTaxScheme><cbc:CompanyID>${esc(siren)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : "");
   return `<cac:Party>
+      ${siren ? `<cbc:EndpointID schemeID="0009">${esc(siren)}</cbc:EndpointID>` : ""}
       <cac:PartyName><cbc:Name>${esc(name)}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
         <cbc:StreetName>${esc(street)}</cbc:StreetName>
@@ -45,18 +56,19 @@ function buildPartyXml({ name, siret, address, email, tvaNumber, isSupplier }) {
       ${taxScheme}
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>${esc(name)}</cbc:RegistrationName>
-        ${legalId ? `<cbc:CompanyID schemeID="0009">${esc(legalId)}</cbc:CompanyID>` : ""}
+        ${siren ? `<cbc:CompanyID schemeID="0002">${esc(siren)}</cbc:CompanyID>` : ""}
       </cac:PartyLegalEntity>
       ${email ? `<cac:Contact><cbc:ElectronicMail>${esc(email)}</cbc:ElectronicMail></cac:Contact>` : ""}
     </cac:Party>`;
 }
 
-// Construit le XML UBL complet d'une facture, conforme au socle EN16931.
+// Construit le XML UBL complet d'une facture, conforme au socle EN16931 + règles françaises (CIUS France).
 function buildUblInvoice(data) {
   const {
     invoiceNum, designation, missionTitle, montant,
     freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
     clientName, clientCompany, clientAddress, clientEmail, clientSiret,
+    typeClient,
   } = data;
 
   const today = new Date().toISOString().slice(0, 10);
@@ -72,24 +84,39 @@ function buildUblInvoice(data) {
 
   const supplier = buildPartyXml({
     name: freelanceName, siret: freelanceSiret, address: freelanceAddress,
-    email: freelanceEmail, tvaNumber, isSupplier: true,
+    email: freelanceEmail, tvaNumber,
   });
   const customer = buildPartyXml({
     name: clientCompany || clientName, siret: clientSiret, address: clientAddress,
-    email: clientEmail, tvaNumber: null, isSupplier: false,
+    email: clientEmail, tvaNumber: null,
   });
+
+  // Mentions obligatoires françaises (BR-FR-05), avec leur code entre # # exigé par le validateur,
+  // en plus du texte lisible — mêmes mentions que celles déjà affichées sur le PDF de la facture.
+  const penaltyNote = typeClient === "particulier"
+    ? "#PMD# Pénalités de retard : en cas de paiement au-delà de la date d'échéance, des pénalités calculées au taux d'intérêt légal en vigueur applicable aux consommateurs seront appliquées de plein droit."
+    : "#PMD# Pénalités de retard : taux BCE majoré de 10 points, applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.).";
+  const recoveryNote = "#PMT# Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.";
+  const discountNote = "#AAB# Pas d'escompte pour paiement anticipé.";
+  const notes = [
+    `${esc(designation)} — ${esc(missionTitle || "Prestation de services")}`,
+    esc(penaltyNote),
+    esc(recoveryNote),
+    esc(discountNote),
+  ].map((n) => `<cbc:Note>${n}</cbc:Note>`).join("\n  ");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
          xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
   <cbc:CustomizationID>urn:cen.eu:en16931:2017</cbc:CustomizationID>
+  <cbc:ProfileID>S1</cbc:ProfileID>
   <cbc:ID>${esc(invoiceNum)}</cbc:ID>
   <cbc:IssueDate>${today}</cbc:IssueDate>
   <cbc:DueDate>${today}</cbc:DueDate>
   <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+  ${notes}
   <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
-  <cbc:Note>${esc(designation)} — ${esc(missionTitle || "Prestation de services")}</cbc:Note>
   <cac:AccountingSupplierParty>${supplier}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>${customer}</cac:AccountingCustomerParty>
   <cac:PaymentTerms><cbc:Note>Paiement à réception de facture</cbc:Note></cac:PaymentTerms>
