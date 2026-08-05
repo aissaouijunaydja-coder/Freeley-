@@ -282,9 +282,27 @@ const upgradePlan = async (plan) => {};
 // ─── Signature à distance ───
 
 // Le freelance signe et prépare l'envoi au client : sauvegarde le contrat + sa signature, retourne l'id public
-const createSignatureRequest = async (entry, form, freelanceSignature) => {
+const createSignatureRequest = async (entry, form, freelanceSignature, existingContractId) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
+  // Contrat déjà existant (signature tardive depuis "Mes contrats") — on met à jour au lieu de dupliquer
+  if (existingContractId) {
+    try {
+      const { data: existing, error: e1 } = await supabase.from("contracts").select("content").eq("id", existingContractId).single();
+      if (e1) throw e1;
+      const newContent = { ...parseContent(existing.content), freelanceSignature, clientSignature: null, signedByFreelanceAt: new Date().toISOString() };
+      const { error: e2 } = await supabase.rpc("update_contract_content", {
+        p_contract_id: existingContractId,
+        p_new_content: JSON.stringify(newContent),
+        p_new_status: "pending_client",
+      });
+      if (e2) throw e2;
+      return { id: existingContractId };
+    } catch (e) {
+      console.error("createSignatureRequest (update) error:", e);
+      return null;
+    }
+  }
   const { data, error } = await supabase
     .from("contracts")
     .insert({
@@ -1233,6 +1251,9 @@ function AppInner() {
 
   // Tactile signature modal state
   const [showTactileSign, setShowTactileSign] = useState(false);
+  // Quel contrat précis on est en train de signer — par défaut le plus récent (juste généré),
+  // mais peut être n'importe quel contrat existant repris depuis "Mes contrats" pour signature tardive.
+  const [signingContractId, setSigningContractId] = useState(null);
   const [remoteSignLoading, setRemoteSignLoading] = useState(false);
   const [remoteSignLink, setRemoteSignLink] = useState("");
   const [showRemoteSignPad, setShowRemoteSignPad] = useState(false);
@@ -1886,7 +1907,7 @@ Continue EXACTEMENT à partir d'où le texte s'arrête (y compris en terminant l
     setRemoteSignLoading(true);
     try {
       const freelanceSig = remoteSigCanvasRef.current?.toDataURL("image/png") || null;
-      const entry = {
+      const entry = signingContractId ? historyView : {
         contract,
         missionTitle: form.missionTitle,
         clientName: form.clientName,
@@ -1895,7 +1916,7 @@ Continue EXACTEMENT à partir d'où le texte s'arrête (y compris en terminant l
         startDate: form.startDate,
         endDate: form.endDate,
       };
-      const saved = await createSignatureRequest(entry, form, freelanceSig);
+      const saved = await createSignatureRequest(entry, form, freelanceSig, signingContractId);
       if (!saved || !saved.id) {
         alert("Impossible de créer le lien de signature. Vérifie ta connexion.");
         setRemoteSignLoading(false);
@@ -3074,12 +3095,18 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           profile={profile}
           setProfile={setProfile}
           depositPct={invoiceDepositPct}
-          contractId={history[0]?.id}
-          onClose={() => setShowTactileSign(false)}
+          contractId={signingContractId || history[0]?.id}
+          onClose={() => { setShowTactileSign(false); setSigningContractId(null); }}
           onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
           onGoToProfileTva={goToProfileFacturation}
           authUser={authUser}
-          onGoToHistory={() => { if (history[0]) setHistoryView(history[0]); goToScreen("history"); }}
+          onGoToHistory={() => {
+            const targetId = signingContractId || history[0]?.id;
+            const target = history.find(h => h.id === targetId) || history[0];
+            if (target) setHistoryView(target);
+            setSigningContractId(null);
+            goToScreen("history");
+          }}
           stripeConnectAccountId={stripeConnectAccountId}
           stripeConnectReady={stripeConnectReady}
           onConnectStripe={handleConnectStripe}
@@ -10597,6 +10624,79 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 
       {/* 🛡️ Garant d'Acompte Automatique */}
       <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} profile={profile} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} onGoToProfile={onGoToProfile} onGoToProfileTva={onGoToProfileTva} onConnectStripe={onConnectStripe} connectingStripe={connectingStripe} />
+
+      {/* Signature tardive — pour un contrat généré mais jamais signé (fermé avant de signer) */}
+      {!historyView.freelanceSignature && (
+        <div className="fade-up fade-up-2" style={{
+          margin:"20px 0", padding:"16px 18px",
+          background:"linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%)",
+          border:"1.5px solid #C7D2FE", borderRadius:12,
+        }}>
+          <div style={{ fontFamily:T.body, fontSize:13, color:"#3730A3", fontWeight:600, marginBottom:14 }}>
+            Ce contrat n'est pas encore signé — le lien pour ton client n'existe pas tant que tu n'as pas signé en premier.
+          </div>
+
+          {signingContractId === historyView.id && remoteSignLink ? (
+            <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
+              <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:8 }}>✓ Lien de signature prêt !</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:12 }}>
+                Envoie ce lien à ton client (SMS, email, WhatsApp). Il pourra lire et signer le contrat depuis son téléphone.
+              </div>
+              <button
+                onClick={() => { navigator.clipboard.writeText(remoteSignLink); setRemoteSignCopied(true); setTimeout(()=>setRemoteSignCopied(false), 2500); }}
+                style={{ width:"100%", padding:"10px", background: remoteSignCopied ? "#15803D" : "#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:8, cursor:"pointer", fontSize:12.5, fontWeight:600 }}
+              >{remoteSignCopied ? "✓ Copié !" : "📋 Copier le lien"}</button>
+            </div>
+          ) : signingContractId === historyView.id && showRemoteSignPad ? (
+            <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
+              <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:4 }}>Signe d'abord ta part avant d'envoyer le lien au client</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginBottom:10 }}>Le client signera ensuite de son côté, sur son propre appareil.</div>
+              <canvas
+                ref={remoteSigCanvasRef}
+                width={420} height={120}
+                onMouseDown={startRemoteSigDraw} onMouseMove={drawRemoteSig} onMouseUp={endRemoteSigDraw} onMouseLeave={endRemoteSigDraw}
+                onTouchStart={startRemoteSigDraw} onTouchMove={drawRemoteSig} onTouchEnd={endRemoteSigDraw}
+                style={{ width:"100%", height:110, border:"2px dashed #22C55E", borderRadius:8, background:"#FFFDF9", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
+              />
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={clearRemoteSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"transparent", border:"1.5px solid #2A4167", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#8BA3C0" }}>Effacer</button>
+                <button
+                  onClick={handleRemoteSign}
+                  disabled={!remoteSigHasStrokes || remoteSignLoading}
+                  style={{
+                    flex:1, padding:"10px",
+                    background: (remoteSigHasStrokes && !remoteSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#2A4167",
+                    color: (remoteSigHasStrokes && !remoteSignLoading) ? "#fff" : "#8BA3C0",
+                    border:"none", borderRadius:8, cursor: (remoteSigHasStrokes && !remoteSignLoading) ? "pointer" : "not-allowed",
+                    fontFamily:T.body, fontSize:13, fontWeight:700,
+                  }}
+                >{remoteSignLoading ? "Création du lien…" : "✅ Valider ma signature et créer le lien"}</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <button
+                onClick={() => { setForm(historyView.form); setSigningContractId(historyView.id); setShowTactileSign(true); }}
+                style={{
+                  flex:1, minWidth:200, padding:"11px 16px",
+                  background:"linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)",
+                  color:"#fff", border:"none", borderRadius:8, cursor:"pointer",
+                  fontSize:13, fontFamily:T.body, fontWeight:700,
+                }}
+              >✍️ Signer maintenant avec le client</button>
+              <button
+                onClick={() => { setForm(historyView.form); setSigningContractId(historyView.id); setRemoteSignLink(""); setRemoteSigHasStrokes(false); setShowRemoteSignPad(true); }}
+                style={{
+                  flex:1, minWidth:200, padding:"11px 16px",
+                  background:"linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
+                  color:"#fff", border:"none", borderRadius:8, cursor:"pointer",
+                  fontSize:13, fontFamily:T.body, fontWeight:700,
+                }}
+              >📲 Envoyer au client à distance</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
