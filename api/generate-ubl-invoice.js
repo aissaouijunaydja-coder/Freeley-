@@ -43,7 +43,7 @@ function buildPartyXml({ name, siret, address, email, tvaNumber }) {
   // on utilise le numéro de TVA s'il existe, sinon le SIREN sert d'identifiant fiscal de repli.
   const taxScheme = tvaNumber
     ? `<cac:PartyTaxScheme><cbc:CompanyID>${esc(tvaNumber)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>`
-    : (siren ? `<cac:PartyTaxScheme><cbc:CompanyID>${esc(siren)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : "");
+    : (siren ? `<cac:PartyTaxScheme><cbc:CompanyID>${esc(siren)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>OTH</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : "");
   return `<cac:Party>
       ${siren ? `<cbc:EndpointID schemeID="0009">${esc(siren)}</cbc:EndpointID>` : ""}
       <cac:PartyName><cbc:Name>${esc(name)}</cbc:Name></cac:PartyName>
