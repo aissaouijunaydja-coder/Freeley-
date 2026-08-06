@@ -1357,6 +1357,8 @@ function AppInner() {
     companyName: row.company_name || "", legalStatus: row.legal_status || "", tvaNumber: row.tva_number || "",
     address: row.address || "", iban: row.iban || "", bic: row.bic || "", bankName: row.bank_name || "",
     logo: row.logo || null,
+    // Le client_secret n'est jamais renvoyé au navigateur après sauvegarde, seulement un indicateur
+    superPdpConnected: !!(row.super_pdp_client_id && row.super_pdp_client_secret),
   });
 
   // Récupère le profil réel depuis Supabase (appelée depuis loadUserData à la connexion)
@@ -2551,6 +2553,45 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     }
   };
 
+  // Connecte l'entreprise du freelance à Super PDP (facturation électronique) — chaque freelance
+  // utilise ses propres identifiants (créés sur superpdp.tech), jamais le compte de développement
+  // partagé. Sauvegarde séparée du reste du profil, comme pour Stripe, pour ne jamais écraser ces
+  // identifiants par erreur lors d'une modification d'un autre champ du profil.
+  const [connectingSuperPdp, setConnectingSuperPdp] = useState(false);
+  const handleConnectSuperPdp = async (clientId, clientSecret) => {
+    if (!clientId?.trim() || !clientSecret?.trim()) {
+      alert("Merci de renseigner les deux identifiants.");
+      return;
+    }
+    setConnectingSuperPdp(true);
+    try {
+      const { error } = await supabase.from("profiles").update({
+        super_pdp_client_id: clientId.trim(),
+        super_pdp_client_secret: clientSecret.trim(),
+      }).eq("id", authUser.id);
+      if (error) throw error;
+      setProfile(p => ({ ...p, superPdpConnected: true }));
+    } catch(e) {
+      console.error("Erreur connexion Super PDP:", e);
+      alert("Erreur lors de la sauvegarde. Vérifie ta connexion et réessaie.");
+    } finally {
+      setConnectingSuperPdp(false);
+    }
+  };
+  const handleDisconnectSuperPdp = async () => {
+    if (!window.confirm("Déconnecter ton entreprise de la facturation électronique ?")) return;
+    try {
+      const { error } = await supabase.from("profiles").update({
+        super_pdp_client_id: null, super_pdp_client_secret: null,
+      }).eq("id", authUser.id);
+      if (error) throw error;
+      setProfile(p => ({ ...p, superPdpConnected: false }));
+    } catch(e) {
+      console.error("Erreur déconnexion Super PDP:", e);
+      alert("Erreur lors de la déconnexion. Réessaie.");
+    }
+  };
+
   // Vérifie si le compte Stripe est bien prêt, au retour du formulaire d'inscription Stripe
   useEffect(() => {
     if (!authUser?.id || !stripeConnectAccountId) return;
@@ -2721,6 +2762,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         stripeConnectReady={stripeConnectReady}
         onConnectStripe={handleConnectStripe}
         connectingStripe={connectingStripe}
+        onConnectSuperPdp={handleConnectSuperPdp}
+        onDisconnectSuperPdp={handleDisconnectSuperPdp}
+        connectingSuperPdp={connectingSuperPdp}
       />
     </Shell>
   );
@@ -11209,9 +11253,13 @@ function SendElectronicInvoiceButton({
     setResult(null);
     try {
       const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: invoiceKey, avenantNum });
+      const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch("/api/generate-ubl-invoice", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({
           send: true, invoiceNum, designation, missionTitle, montant,
           freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
@@ -13940,7 +13988,7 @@ function MiniPlanCard({ icon, title, price, sub, color, recommended, onSelect })
 }
 
 /* ══════════════════════════════════════════ PROFILE PAGE ══ */
-function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, stripeConnectReady, onConnectStripe, connectingStripe }) {
+function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, stripeConnectReady, onConnectStripe, connectingStripe, onConnectSuperPdp, onDisconnectSuperPdp, connectingSuperPdp }) {
   const [newSkill, setNewSkill] = useState("");
   const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState(initialSection || "identity");
@@ -13951,6 +13999,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const logoInputRef = useRef(null);
 
   const [uploadError, setUploadError] = useState("");
+  const [superPdpClientIdInput, setSuperPdpClientIdInput] = useState("");
+  const [superPdpClientSecretInput, setSuperPdpClientSecretInput] = useState("");
 
   const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
@@ -14371,6 +14421,44 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 ⚠️ C'est à toi de vérifier ton statut réel et de tenir ce champ à jour — Freeley ne peut pas le déterminer à ta place.
               </div>
             </div>
+          </div>
+
+          {/* Facturation électronique — connexion Super PDP */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>FACTURATION ÉLECTRONIQUE</div>
+            {profile.superPdpConnected ? (
+              <div>
+                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:10, marginBottom:12 }}>
+                  <span style={{ fontSize:18 }}>✅</span>
+                  <div style={{ fontFamily:T.body, fontSize:12.5, color:"#166534", fontWeight:600 }}>Ton entreprise est connectée à la facturation électronique.</div>
+                </div>
+                <button onClick={onDisconnectSuperPdp} style={{ padding:"9px 14px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontFamily:T.body, cursor:"pointer" }}>Déconnecter</button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.6, marginBottom:14 }}>
+                  Pour envoyer tes factures via la facturation électronique (obligatoire pour tes clients professionnels à partir de 2027), connecte ta propre entreprise :
+                  <ol style={{ margin:"8px 0 0", paddingLeft:18 }}>
+                    <li>Va sur <a href="https://www.superpdp.tech" target="_blank" rel="noopener noreferrer" style={{ color:C.gold }}>superpdp.tech</a> et crée un compte en tant que <strong>représentant légal</strong> de ton entreprise (avec ton SIRET)</li>
+                    <li>Dans ton espace, va dans <strong>Applications</strong> → <strong>Nouvelle application</strong></li>
+                    <li>Choisis le type <strong>Confidentielle</strong>, puis copie l'identifiant et le secret générés ci-dessous</li>
+                  </ol>
+                </div>
+                <div style={{ marginBottom:10 }}>
+                  <label style={labelStyle}>IDENTIFIANT (CLIENT_ID)</label>
+                  <input style={inputStyle} value={superPdpClientIdInput} onChange={e => setSuperPdpClientIdInput(e.target.value)} placeholder="ex : 019fce57-244f-77cd-987f-8777b6a88dc2" onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+                </div>
+                <div style={{ marginBottom:14 }}>
+                  <label style={labelStyle}>SECRET (CLIENT_SECRET)</label>
+                  <input style={inputStyle} type="password" value={superPdpClientSecretInput} onChange={e => setSuperPdpClientSecretInput(e.target.value)} placeholder="Affiché une seule fois par Super PDP — colle-le ici" onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+                </div>
+                <button
+                  onClick={() => onConnectSuperPdp(superPdpClientIdInput, superPdpClientSecretInput)}
+                  disabled={connectingSuperPdp}
+                  style={{ padding:"10px 18px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor: connectingSuperPdp ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:600, opacity: connectingSuperPdp ? 0.7 : 1 }}
+                >{connectingSuperPdp ? "Connexion…" : "Connecter mon entreprise"}</button>
+              </div>
+            )}
           </div>
 
           {/* Logo entreprise */}
