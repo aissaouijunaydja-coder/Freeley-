@@ -5769,15 +5769,15 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
     {
       id: "invoice",
       icon: "📄",
-      label: "Facture d'acompte",
+      label: "Facture",
       accent: C.gold,
       accentLight: "#FFFBEB",
       accentBorder: "#FDE68A",
       accentText: "#92400E",
       onClick: onInvoice,
       title: "Facture PDF automatique",
-      description: "Générez un PDF de facture d'acompte propre dès la signature.",
-      example: "Bloquez le démarrage de production avec une facture d'acompte professionnelle générée en un clic.",
+      description: "Générez un PDF de facture propre (comptant ou acompte) dès la signature.",
+      example: "Bloquez le démarrage de production avec une facture professionnelle générée en un clic.",
     },
     {
       id: "profile",
