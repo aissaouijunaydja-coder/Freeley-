@@ -1192,7 +1192,7 @@ function AppInner() {
 
   // Invoice modal state
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
-  const [invoiceDepositPct, setInvoiceDepositPct] = useState(30);
+  const [invoiceDepositPct, setInvoiceDepositPct] = useState(100);
 
   // Scanner modal state
   const [showScannerModal, setShowScannerModal] = useState(false);
