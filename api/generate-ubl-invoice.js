@@ -2,6 +2,10 @@
 // (le format XML structuré exigé par la réforme), puis la fait VALIDER par Super PDP avant
 // tout envoi réel. Rien n'est transmis à un vrai client ici — on vérifie juste que le document
 // qu'on fabrique est correct, pour pouvoir corriger si besoin avant de passer à l'étape 3 (envoi réel).
+//
+// Corrigé après un premier test réel de validation (voir historique) : ordre des balises XML,
+// SIREN du vendeur obligatoire même sans TVA, mentions légales obligatoires (pénalités,
+// recouvrement, escompte), et code de "cadre de facturation" français.
 
 // Échappe les caractères spéciaux XML (obligatoire pour tout texte libre injecté dans le XML,
 // comme le nom d'un client ou une désignation de mission)
@@ -11,6 +15,12 @@ const esc = (s) =>
   }[c]));
 
 const fmt2 = (n) => Number(n || 0).toFixed(2);
+
+// Extrait le SIREN (9 premiers chiffres) à partir d'un SIRET (14 chiffres)
+const toSiren = (siret) => {
+  const digits = String(siret || "").replace(/\D/g, "");
+  return digits.length >= 9 ? digits.slice(0, 9) : digits;
+};
 
 // Sépare une adresse en une seule ligne (ex: "12 rue de la Paix, 75002 Paris") en
 // rue / code postal / ville — le format UBL exige ces informations séparément.
@@ -26,15 +36,20 @@ function splitAddress(raw) {
   return { street, zone: match[1], city: after || "Non renseigné" };
 }
 
-function buildPartyXml({ name, siret, address, email, tvaNumber, isSupplier }) {
+function buildPartyXml({ name, siret, address, email, tvaNumber }) {
   const { street, zone, city } = splitAddress(address);
-  const legalId = siret && siret.replace(/\s/g, "").length === 14
-    ? siret.replace(/\s/g, "")
-    : (siret || "").replace(/\s/g, "");
+  const siren = toSiren(siret);
+  // Identifiant fiscal obligatoire dès que la facture mentionne une exonération de TVA (BR-E-02) —
+  // on utilise le numéro de TVA s'il existe, sinon le SIREN sert d'identifiant fiscal de repli.
+  // Numéro de TVA réel (BT-31) -> scheme "VAT", doit être au format FRxx+SIREN.
+  // Pas de numéro de TVA (freelance en franchise en base) -> on donne quand même un identifiant
+  // fiscal de repli (BT-32) en utilisant le SIREN, mais SANS le déclarer comme "VAT" pour ne pas
+  // qu'il soit validé comme s'il s'agissait d'un vrai numéro de TVA (qui a un format précis).
   const taxScheme = tvaNumber
     ? `<cac:PartyTaxScheme><cbc:CompanyID>${esc(tvaNumber)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>`
-    : "";
+    : (siren ? `<cac:PartyTaxScheme><cbc:CompanyID>${esc(siren)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>OTH</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : "");
   return `<cac:Party>
+      ${siren ? `<cbc:EndpointID schemeID="0009">${esc(siren)}</cbc:EndpointID>` : ""}
       <cac:PartyName><cbc:Name>${esc(name)}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
         <cbc:StreetName>${esc(street)}</cbc:StreetName>
@@ -45,18 +60,19 @@ function buildPartyXml({ name, siret, address, email, tvaNumber, isSupplier }) {
       ${taxScheme}
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>${esc(name)}</cbc:RegistrationName>
-        ${legalId ? `<cbc:CompanyID schemeID="0009">${esc(legalId)}</cbc:CompanyID>` : ""}
+        ${siren ? `<cbc:CompanyID schemeID="0002">${esc(siren)}</cbc:CompanyID>` : ""}
       </cac:PartyLegalEntity>
       ${email ? `<cac:Contact><cbc:ElectronicMail>${esc(email)}</cbc:ElectronicMail></cac:Contact>` : ""}
     </cac:Party>`;
 }
 
-// Construit le XML UBL complet d'une facture, conforme au socle EN16931.
+// Construit le XML UBL complet d'une facture, conforme au socle EN16931 + règles françaises (CIUS France).
 function buildUblInvoice(data) {
   const {
     invoiceNum, designation, missionTitle, montant,
     freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
     clientName, clientCompany, clientAddress, clientEmail, clientSiret,
+    typeClient,
   } = data;
 
   const today = new Date().toISOString().slice(0, 10);
@@ -72,24 +88,39 @@ function buildUblInvoice(data) {
 
   const supplier = buildPartyXml({
     name: freelanceName, siret: freelanceSiret, address: freelanceAddress,
-    email: freelanceEmail, tvaNumber, isSupplier: true,
+    email: freelanceEmail, tvaNumber,
   });
   const customer = buildPartyXml({
     name: clientCompany || clientName, siret: clientSiret, address: clientAddress,
-    email: clientEmail, tvaNumber: null, isSupplier: false,
+    email: clientEmail, tvaNumber: null,
   });
+
+  // Mentions obligatoires françaises (BR-FR-05), avec leur code entre # # exigé par le validateur,
+  // en plus du texte lisible — mêmes mentions que celles déjà affichées sur le PDF de la facture.
+  const penaltyNote = typeClient === "particulier"
+    ? "#PMD# Pénalités de retard : en cas de paiement au-delà de la date d'échéance, des pénalités calculées au taux d'intérêt légal en vigueur applicable aux consommateurs seront appliquées de plein droit."
+    : "#PMD# Pénalités de retard : taux BCE majoré de 10 points, applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.).";
+  const recoveryNote = "#PMT# Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.";
+  const discountNote = "#AAB# Pas d'escompte pour paiement anticipé.";
+  const notes = [
+    `${esc(designation)} — ${esc(missionTitle || "Prestation de services")}`,
+    esc(penaltyNote),
+    esc(recoveryNote),
+    esc(discountNote),
+  ].map((n) => `<cbc:Note>${n}</cbc:Note>`).join("\n  ");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
          xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
   <cbc:CustomizationID>urn:cen.eu:en16931:2017</cbc:CustomizationID>
+  <cbc:ProfileID>S1</cbc:ProfileID>
   <cbc:ID>${esc(invoiceNum)}</cbc:ID>
   <cbc:IssueDate>${today}</cbc:IssueDate>
   <cbc:DueDate>${today}</cbc:DueDate>
   <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+  ${notes}
   <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
-  <cbc:Note>${esc(designation)} — ${esc(missionTitle || "Prestation de services")}</cbc:Note>
   <cac:AccountingSupplierParty>${supplier}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>${customer}</cac:AccountingCustomerParty>
   <cac:PaymentTerms><cbc:Note>Paiement à réception de facture</cbc:Note></cac:PaymentTerms>
@@ -129,6 +160,35 @@ function buildUblInvoice(data) {
 </Invoice>`;
 }
 
+// Vérifie qui appelle (via son token de connexion Supabase) et récupère SES PROPRES identifiants
+// Super PDP, enregistrés dans son profil — jamais les identifiants partagés d'un autre.
+async function getUserSuperPdpCredentials(req) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "");
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!token) return { error: "Tu dois être connecté pour envoyer une facture électronique." };
+  if (!supabaseUrl || !serviceRoleKey) return { error: "Configuration serveur incomplète." };
+
+  const userResp = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { Authorization: `Bearer ${token}`, apikey: serviceRoleKey },
+  });
+  if (!userResp.ok) return { error: "Session expirée, reconnecte-toi et réessaie." };
+  const user = await userResp.json();
+
+  const profileResp = await fetch(
+    `${supabaseUrl}/rest/v1/profiles?id=eq.${user.id}&select=super_pdp_client_id,super_pdp_client_secret`,
+    { headers: { Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey } }
+  );
+  if (!profileResp.ok) return { error: "Impossible de récupérer ton profil." };
+  const rows = await profileResp.json();
+  const row = rows?.[0];
+  if (!row?.super_pdp_client_id || !row?.super_pdp_client_secret) {
+    return { error: "Connecte d'abord ton entreprise à la facturation électronique, dans ton profil." };
+  }
+  return { clientId: row.super_pdp_client_id, clientSecret: row.super_pdp_client_secret };
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -138,26 +198,63 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    const xml = buildUblInvoice(req.body || {});
+    const { send, ...invoiceData } = req.body || {};
+    const xml = buildUblInvoice(invoiceData);
 
-    // Validation automatique auprès de Super PDP — ne nécessite pas d'authentification,
-    // c'est un service public de vérification.
-    const form = new FormData();
-    form.append("file", new Blob([xml], { type: "application/xml" }), "facture.xml");
-
+    // Validation auprès de Super PDP — ne nécessite pas d'authentification, service public.
+    const validationForm = new FormData();
+    validationForm.append("file", new Blob([xml], { type: "application/xml" }), "facture.xml");
     const validationResp = await fetch("https://api.superpdp.tech/v1.beta/validation_reports", {
       method: "POST",
-      body: form,
+      body: validationForm,
     });
-
     let validation = null;
     if (validationResp.ok) {
       validation = await validationResp.json();
     } else {
       validation = { error: `HTTP ${validationResp.status}`, details: await validationResp.text() };
     }
+    const isValid = !!validation?.data?.[0]?.is_valid;
 
-    return res.status(200).json({ xml, validation });
+    // Envoi réel : seulement si demandé ET si la facture est valide — jamais de facture
+    // invalide envoyée à un vrai client, même par erreur.
+    let sendResult = null;
+    if (send && isValid) {
+      const { clientId, clientSecret, error: credError } = await getUserSuperPdpCredentials(req);
+      if (credError) {
+        sendResult = { error: credError };
+      } else {
+        const tokenResp = await fetch("https://api.superpdp.tech/oauth2/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "client_credentials",
+            client_id: clientId,
+            client_secret: clientSecret,
+          }).toString(),
+        });
+        if (!tokenResp.ok) {
+          sendResult = { error: `Authentification Super PDP échouée (HTTP ${tokenResp.status})` };
+        } else {
+          const { access_token } = await tokenResp.json();
+          const sendResp = await fetch("https://api.superpdp.tech/v1.beta/invoices", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${access_token}` },
+            body: xml,
+          });
+          if (sendResp.ok) {
+            const sent = await sendResp.json();
+            sendResult = { success: true, invoice_id: sent.id };
+          } else {
+            sendResult = { error: `Envoi refusé (HTTP ${sendResp.status})`, details: await sendResp.text() };
+          }
+        }
+      }
+    } else if (send && !isValid) {
+      sendResult = { error: "Facture invalide — envoi bloqué. Corrige les erreurs de validation d'abord." };
+    }
+
+    return res.status(200).json({ xml, validation, sendResult });
   } catch (err) {
     console.error("[generate-ubl-invoice] Erreur:", err);
     return res.status(500).json({ error: err.message });
