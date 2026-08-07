@@ -11301,7 +11301,10 @@ function SendElectronicInvoiceButton({
       if (data.sendResult?.success) {
         setResult({ success: true, invoice_id: data.sendResult.invoice_id });
       } else {
-        setResult({ error: data.sendResult?.error || data.error || "Erreur inconnue" });
+        setResult({
+          error: data.sendResult?.error || data.error || "Erreur inconnue",
+          details: data.sendResult?.details || null,
+        });
       }
     } catch(err) {
       console.error(err);
@@ -11313,16 +11316,28 @@ function SendElectronicInvoiceButton({
 
   if (compact) {
     return (
-      <button onClick={handleSend} disabled={sending} title={result?.error || "Envoyer via facturation électronique (bêta)"} style={{
-        padding:"8px 14px",
-        background: result?.success ? "#16A34A" : "#fff",
-        border: `1px solid ${result?.success ? "#16A34A" : C.border}`,
-        borderRadius:8, cursor: sending ? "wait" : "pointer",
-        fontSize:12, fontFamily:T.body, fontWeight:700,
-        color: result?.success ? C.white : (result?.error ? C.error : C.textM),
-      }}>
-        {sending ? "⏳ Envoi…" : result?.success ? "✓ Envoyée" : result?.error ? "⚠ Échec — réessayer" : "📤 Facturation électronique"}
-      </button>
+      <div style={{ display:"inline-block" }}>
+        <button onClick={handleSend} disabled={sending} title={result?.error || "Envoyer via facturation électronique (bêta)"} style={{
+          padding:"8px 14px",
+          background: result?.success ? "#16A34A" : "#fff",
+          border: `1px solid ${result?.success ? "#16A34A" : C.border}`,
+          borderRadius:8, cursor: sending ? "wait" : "pointer",
+          fontSize:12, fontFamily:T.body, fontWeight:700,
+          color: result?.success ? C.white : (result?.error ? C.error : C.textM),
+        }}>
+          {sending ? "⏳ Envoi…" : result?.success ? "✓ Envoyée" : result?.error ? "⚠ Échec — réessayer" : "📤 Facturation électronique"}
+        </button>
+        {result?.details && (
+          <div style={{
+            marginTop:6, padding:"8px 10px", background:"#FEF2F2", border:"1px solid #FECACA",
+            borderRadius:6, fontSize:10, color:"#7F1D1D", fontFamily:"monospace",
+            maxHeight:160, overflowY:"auto", whiteSpace:"pre-wrap", wordBreak:"break-word",
+            userSelect:"text", maxWidth:320,
+          }}>
+            {typeof result.details === "string" ? result.details : JSON.stringify(result.details, null, 2)}
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -11353,6 +11368,16 @@ function SendElectronicInvoiceButton({
       {result?.error && (
         <div style={{ marginTop:6, fontSize:11.5, color:C.error, fontFamily:T.body }}>
           {result.error}
+        </div>
+      )}
+      {result?.details && (
+        <div style={{
+          marginTop:6, padding:"8px 10px", background:"#FEF2F2", border:"1px solid #FECACA",
+          borderRadius:6, fontSize:10, color:"#7F1D1D", fontFamily:"monospace",
+          maxHeight:160, overflowY:"auto", whiteSpace:"pre-wrap", wordBreak:"break-word",
+          userSelect:"text",
+        }}>
+          {typeof result.details === "string" ? result.details : JSON.stringify(result.details, null, 2)}
         </div>
       )}
     </div>
