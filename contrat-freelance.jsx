@@ -10504,6 +10504,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
   };
   const [deletingId, setDeletingId] = useState(null);
   const [filter, setFilter] = useState("tous"); // "tous" | "pending" | "signed"
+  const [searchQuery, setSearchQuery] = useState("");
   const [avenantLinkCopiedNum, setAvenantLinkCopiedNum] = useState(null);
 
   // Relance : reconstruit le lien de signature de l'avenant (pas besoin de le stocker, il est déterministe)
@@ -11020,8 +11021,32 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
         </div>
       )}
 
-      {/* Filter badges */}
+      {/* Barre de recherche — nom du client, entreprise, ou SIRET, cherche partout (y compris archivés) */}
       {history.length > 0 && (
+        <div className="fade-up" style={{ marginBottom:14, position:"relative" }}>
+          <input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="🔍 Rechercher par client, entreprise ou SIRET…"
+            style={{
+              width:"100%", padding:"12px 40px 12px 16px", borderRadius:10,
+              border:`1.5px solid ${C.border}`, background:C.white,
+              fontFamily:T.body, fontSize:14, color:C.text, outline:"none",
+            }}
+            onFocus={e=>e.target.style.borderColor=C.navy}
+            onBlur={e=>e.target.style.borderColor=C.border}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", fontSize:16, color:C.textL, padding:4 }}
+            >✕</button>
+          )}
+        </div>
+      )}
+
+      {/* Filter badges */}
+      {history.length > 0 && !searchQuery && (
         <div className="fade-up" style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
           {[
             { id:"tous", label:"Tous", emoji:"📄" },
@@ -11064,7 +11089,18 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 
       {/* Contract list */}
       {history.length > 0 && (() => {
-        const filtered = history.filter(entry => {
+        const q = searchQuery.trim().toLowerCase();
+        // Une recherche active regarde partout (y compris archivés/factures libres, peu importe le
+        // statut) — sinon on garde le comportement habituel (liste active + filtre de statut).
+        const base = q ? history.filter(entry => !entry.deleted) : history;
+        const filtered = base.filter(entry => {
+          if (q) {
+            const haystack = [
+              entry.clientName, entry.form?.clientCompany, entry.form?.clientSiret,
+              entry.missionTitle,
+            ].filter(Boolean).join(" ").toLowerCase();
+            return haystack.includes(q);
+          }
           if (entry.deleted || entry.isStandaloneInvoice) return false;
           if (filter === "pending") return entry.signatureStatus === "pending_client" || entry.signatureStatus === "none" || !entry.signatureStatus;
           if (filter === "signed") return entry.signatureStatus === "signed";
@@ -11072,7 +11108,12 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
         });
         return (
         <div className="fade-up fade-up-2" style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {filtered.length === 0 && filter !== "tous" && (
+          {filtered.length === 0 && q && (
+            <div style={{ textAlign:"center", padding:"40px 24px", fontFamily:T.body, fontSize:13, color:C.textL, background:C.white, border:`1px solid ${C.border}`, borderRadius:12 }}>
+              Aucun résultat pour "{searchQuery}".
+            </div>
+          )}
+          {filtered.length === 0 && !q && filter !== "tous" && (
             <div style={{ textAlign:"center", padding:"40px 24px", fontFamily:T.body, fontSize:13, color:C.textL, background:C.white, border:`1px solid ${C.border}`, borderRadius:12 }}>
               Aucun contrat dans cette catégorie.
             </div>
