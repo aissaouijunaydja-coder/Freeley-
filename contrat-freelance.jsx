@@ -382,7 +382,7 @@ const submitAvenantSignature = async (contractId, avenantNum, clientSignature) =
 const initialForm = {
   freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
   freelanceEmail: "",
-  clientName: "", clientCompany: "", clientAddress: "", clientEmail: "", clientPhone: "", typeClient: "professionnel",
+  clientName: "", clientCompany: "", clientAddress: "", clientSiret: "", clientEmail: "", clientPhone: "", typeClient: "professionnel",
   missionTitle: "", missionDescription: "", categorieMetier: "autre", startDate: "", endDate: "",
   price: "", paymentTerms: "Comptant", revisions: "2", latePaymentPenalty: true, acomptePourcentage: "0",
   clauseDedit: true,
@@ -3466,6 +3466,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 onChange={v=>update("typeClient",v)}
                 tooltip="Détermine les clauses légales applicables : indemnité de recouvrement et taux BCE pour les professionnels, taux d'intérêt légal pour les particuliers."
               />
+              {form.typeClient === "professionnel" && (
+                <Field label="SIRET du client (optionnel)" value={form.clientSiret} onChange={v=>update("clientSiret",v)} placeholder="123 456 789 00012" delay={4} />
+              )}
             </div>
           )}
 
@@ -9614,7 +9617,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                 freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                 tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
-                clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress}
+                clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress} clientSiret={entry?.form?.clientSiret}
                 clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
               />
             </div>
@@ -9645,7 +9648,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                   freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                   tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
-                  clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress}
+                  clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress} clientSiret={entry?.form?.clientSiret}
                   clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
                 />
               </div>
@@ -9677,7 +9680,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                   freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                   tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
-                  clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress}
+                  clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress} clientSiret={entry?.form?.clientSiret}
                   clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
                 />
               </>
@@ -9772,7 +9775,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                 freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                 tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
-                clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress}
+                clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress} clientSiret={entry?.form?.clientSiret}
                 clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
               />
             </div>
@@ -10212,7 +10215,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                             freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
                             freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
                             tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
-                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress}
+                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress} clientSiret={entry.form?.clientSiret}
                             clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
                           />
                           {entry.paymentStatus === "paid" ? (
@@ -10242,7 +10245,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                             freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
                             freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
                             tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
-                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress}
+                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress} clientSiret={entry.form?.clientSiret}
                             clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
                           />
                         </>
@@ -10259,7 +10262,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                             freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
                             freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
                             tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
-                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress}
+                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress} clientSiret={entry.form?.clientSiret}
                             clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
                           />
                         </>
@@ -10276,7 +10279,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                             freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
                             freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
                             tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
-                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress}
+                            clientCompany={entry.form?.clientCompany} clientAddress={entry.form?.clientAddress} clientSiret={entry.form?.clientSiret}
                             clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
                           />
                         </React.Fragment>
@@ -10836,7 +10839,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                           freelanceName={historyView.form?.freelanceName} freelanceSiret={historyView.form?.freelanceSiret}
                           freelanceEmail={historyView.form?.freelanceEmail} freelanceAddress={historyView.form?.freelanceAddress}
                           tvaNumber={profile?.tvaNumber} clientName={historyView.form?.clientName}
-                          clientCompany={historyView.form?.clientCompany} clientAddress={historyView.form?.clientAddress}
+                          clientCompany={historyView.form?.clientCompany} clientAddress={historyView.form?.clientAddress} clientSiret={historyView.form?.clientSiret}
                           clientEmail={historyView.form?.clientEmail} typeClient={historyView.form?.typeClient} authUser={authUser}
                         />
                         {!av.paymentReceived && (
@@ -11233,7 +11236,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 function SendElectronicInvoiceButton({
   contractId, invoiceKey, avenantNum, designation, montant, missionTitle,
   freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
-  clientName, clientCompany, clientAddress, clientEmail, typeClient, authUser,
+  clientName, clientCompany, clientAddress, clientSiret, clientEmail, typeClient, authUser,
   compact,
 }) {
   const [sending, setSending] = useState(false);
@@ -11263,7 +11266,7 @@ function SendElectronicInvoiceButton({
         body: JSON.stringify({
           send: true, invoiceNum, designation, missionTitle, montant,
           freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
-          clientName, clientCompany, clientAddress, clientEmail, typeClient,
+          clientName, clientCompany, clientAddress, clientSiret, clientEmail, typeClient,
         }),
       });
       const data = await res.json();
@@ -12067,6 +12070,7 @@ ${freelanceName}`;
             clientName={form.clientName}
             clientCompany={form.clientCompany}
             clientAddress={form.clientAddress}
+            clientSiret={form.clientSiret}
             clientEmail={form.clientEmail}
             typeClient={form.typeClient}
             authUser={authUser}
