@@ -3150,7 +3150,21 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onScanSaved={() => setHasScanResults(true)}
         />
       )}
-      {showRadarModal && <RadarClientModal onClose={() => setShowRadarModal(false)} />}
+      {showRadarModal && (
+        <RadarClientModal
+          onClose={() => setShowRadarModal(false)}
+          onSelectCompany={(c) => {
+            setForm(f => ({
+              ...f,
+              clientName: c.nom_complet || f.clientName,
+              clientCompany: c.nom_complet || f.clientCompany,
+              clientAddress: c.siege?.adresse || f.clientAddress,
+              clientSiret: c.siege?.siret || c.siren || f.clientSiret,
+              typeClient: "professionnel",
+            }));
+          }}
+        />
+      )}
       {showTactileSign && (
         <TactileSignatureModal
           form={form}
@@ -3423,6 +3437,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <Field label="Numéro SIRET" value={form.freelanceSiret} onChange={v=>update("freelanceSiret",v)} placeholder="123 456 789 00012 (optionnel)" delay={5} />
               <Field label="Adresse complète *" value={form.freelanceAddress} onChange={v=>update("freelanceAddress",v)} placeholder="12 rue de la Paix, 75001 Paris" error={errors.freelanceAddress} delay={5} />
               <SectionDivider label="Informations client" />
+              <button
+                onClick={() => setShowRadarModal(true)}
+                style={{ fontFamily:T.body, fontSize:11, fontWeight:700, color:"#7C3AED", background:"none", border:"none", cursor:"pointer", padding:0, marginBottom:10, display:"block" }}
+              >🛡️ Chercher via Radar Client (pré-remplir depuis une vraie entreprise)</button>
               <Field label="Nom du client *" value={form.clientName} onChange={v=>update("clientName",v)} placeholder="Marie Martin" error={errors.clientName} delay={2} />
               <Field label="Entreprise" value={form.clientCompany} onChange={v=>update("clientCompany",v)} placeholder="Startup SAS (optionnel)" delay={3} />
               <Field label="Email du client *" value={form.clientEmail} onChange={v=>update("clientEmail",v)} placeholder="marie@startup.com" type="email" error={errors.clientEmail} delay={4} />
@@ -6176,7 +6194,7 @@ function FeedbackBubble() {
 /* ══════════════════════════════════════════════════════════ RADAR CLIENT ══ */
 // Vérifie l'existence et le statut d'une entreprise via l'API publique gratuite
 // de l'État (recherche-entreprises.api.gouv.fr) — aucune clé requise.
-function RadarClientModal({ onClose }) {
+function RadarClientModal({ onClose, onSelectCompany }) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
@@ -6348,6 +6366,16 @@ function RadarClientModal({ onClose }) {
                   color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer",
                 }}
               >{copied ? "✅ Copié !" : "📋 Copier les infos"}</button>
+              {onSelectCompany && (
+                <button
+                  onClick={() => { onSelectCompany(selected); onClose(); }}
+                  style={{
+                    width:"100%", padding:"12px 0", borderRadius:10, border:"none",
+                    background:"#059669", marginTop:8,
+                    color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer",
+                  }}
+                >✅ Utiliser cette entreprise pour la facture</button>
+              )}
             </div>
           );
         })()}
@@ -11337,6 +11365,7 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
   const [resumeCandidate, setResumeCandidate] = useState(null);
   const [resumeDismissed, setResumeDismissed] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [showRadarPicker, setShowRadarPicker] = useState(false);
 
   // Cherche une facture libre récente et pas encore payée, pour proposer de la reprendre
   // plutôt que d'en recréer une nouvelle (et donc un nouveau numéro) sans le vouloir.
@@ -11724,7 +11753,15 @@ ${freelanceName}`;
               )}
             </div>
             <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
-              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>CLIENT</div>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+                <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLIENT</div>
+                {!contractId && (
+                  <button
+                    onClick={() => setShowRadarPicker(true)}
+                    style={{ fontFamily:T.body, fontSize:10, fontWeight:700, color:"#7C3AED", background:"none", border:"none", cursor:"pointer", padding:0 }}
+                  >🛡️ Chercher via Radar Client</button>
+                )}
+              </div>
               <input
                 value={form.clientName}
                 onChange={e => setForm(f => ({ ...f, clientName: e.target.value }))}
@@ -11733,8 +11770,30 @@ ${freelanceName}`;
                 onFocus={e=>e.target.style.borderBottomColor=C.navy}
                 onBlur={e=>e.target.style.borderBottomColor=C.border}
               />
-              {form.clientCompany && <div style={{ fontFamily:T.body, fontSize:11, color:C.textM }}>{form.clientCompany}</div>}
-              {form.clientEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>{form.clientEmail}</div>}
+              <input
+                value={form.clientCompany}
+                onChange={e => setForm(f => ({ ...f, clientCompany: e.target.value }))}
+                placeholder="Entreprise (si applicable)"
+                style={{ fontFamily:T.body, fontSize:11, color:C.textM, marginTop:2, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                onFocus={e=>e.target.style.borderBottomColor=C.navy}
+                onBlur={e=>e.target.style.borderBottomColor=C.border}
+              />
+              <input
+                value={form.clientAddress}
+                onChange={e => setForm(f => ({ ...f, clientAddress: e.target.value }))}
+                placeholder="Adresse du client"
+                style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:4, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                onFocus={e=>e.target.style.borderBottomColor=C.navy}
+                onBlur={e=>e.target.style.borderBottomColor=C.border}
+              />
+              <input
+                value={form.clientEmail}
+                onChange={e => setForm(f => ({ ...f, clientEmail: e.target.value }))}
+                placeholder="Email du client"
+                style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                onFocus={e=>e.target.style.borderBottomColor=C.navy}
+                onBlur={e=>e.target.style.borderBottomColor=C.border}
+              />
               <div style={{ display:"flex", gap:6, marginTop:8 }}>
                 {[
                   { key:"professionnel", label:"Pro (B2B)" },
@@ -11753,6 +11812,16 @@ ${freelanceName}`;
                   >{o.label}</button>
                 ))}
               </div>
+              {form.typeClient === "professionnel" && (
+                <input
+                  value={form.clientSiret}
+                  onChange={e => setForm(f => ({ ...f, clientSiret: e.target.value }))}
+                  placeholder="SIRET du client (optionnel, pour la facturation électronique)"
+                  style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:8, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                  onFocus={e=>e.target.style.borderBottomColor=C.navy}
+                  onBlur={e=>e.target.style.borderBottomColor=C.border}
+                />
+              )}
             </div>
           </div>
 
@@ -12123,6 +12192,21 @@ ${freelanceName}`;
         </div>
 
       </div>
+      {showRadarPicker && (
+        <RadarClientModal
+          onClose={() => setShowRadarPicker(false)}
+          onSelectCompany={(c) => {
+            setForm(f => ({
+              ...f,
+              clientName: c.nom_complet || f.clientName,
+              clientCompany: c.nom_complet || f.clientCompany,
+              clientAddress: c.siege?.adresse || f.clientAddress,
+              clientSiret: c.siege?.siret || c.siren || f.clientSiret,
+              typeClient: "professionnel",
+            }));
+          }}
+        />
+      )}
     </div>
   );
 }
