@@ -1184,6 +1184,11 @@ function AppInner() {
   const [authUser, setAuthUser]   = useState(null);   // supabase user object
   const [authReady, setAuthReady] = useState(false);  // true once session checked
   const [showAuthModal, setShowAuthModal] = useState(false);
+  // Vitrine : par défaut, on l'affiche avant l'inscription. Un lien avec ?app=1 (utilisé sur
+  // Product Hunt, où le visiteur sait déjà ce qu'est Freeley) saute directement à l'inscription.
+  const [showLanding, setShowLanding] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("app") !== "1"; } catch(e) { return true; }
+  });
   const [authMode, setAuthMode]   = useState("login"); // "login" | "signup"
   const [contractsUsed, setContractsUsed] = useState(0);
 
@@ -2633,7 +2638,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   /* ── Attente session ── */
   // Forcer connexion au démarrage — sauf pendant la réinitialisation du mot de passe,
   // où l'utilisateur n'est pas censé être "connecté" normalement à ce stade précis.
-  if (authReady && !authUser && !showAuthModal && screen !== "reset-password") {
+  if (authReady && !authUser && !showAuthModal && !showLanding && screen !== "reset-password") {
     setTimeout(() => { setShowAuthModal(true); setAuthMode("login"); }, 100);
   }
 
@@ -2647,6 +2652,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       </div>
     </Shell>
   );
+
+  if (authReady && !authUser && showLanding) {
+    return <LandingPage onStart={() => { setShowLanding(false); setShowAuthModal(true); setAuthMode("signup"); }} />;
+  }
 
   const AuthModalEl = showAuthModal
     ? <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuthModal(false)} onSuccess={handleAuthSuccess} />
@@ -15181,6 +15190,61 @@ function LegalPageLayout({ title, children }) {
         <h1 style={{ fontFamily:T.display, fontSize:28, color:C.navy, margin:"20px 0 24px" }}>{title}</h1>
         <div style={{ fontFamily:T.body, fontSize:14, color:C.textM, lineHeight:1.75 }}>
           {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════ VITRINE (LANDING) ══ */
+function LandingPage({ onStart }) {
+  const features = [
+    { icon: "📝", title: "Contrats en 2 minutes", text: "Décris ta mission, l'IA rédige un contrat complet et juridiquement solide." },
+    { icon: "✍️", title: "Signature électronique", text: "Toi et ton client signez directement depuis votre téléphone, sans papier." },
+    { icon: "💳", title: "Paiements sécurisés", text: "Lien de paiement automatique, suivi des acomptes et des soldes." },
+    { icon: "🛡️", title: "Vérification client", text: "Vérifie en 30 secondes qu'une entreprise existe vraiment, avant de signer." },
+    { icon: "🧾", title: "Facturation électronique", text: "Déjà prête pour l'obligation de 2027, incluse gratuitement." },
+  ];
+  return (
+    <div style={{ minHeight:"100vh", background:C.cream }}>
+      <div style={{ maxWidth:640, margin:"0 auto", padding:"48px 24px 40px" }}>
+        <div style={{ textAlign:"center", marginBottom:36 }}>
+          <div style={{ fontFamily:T.display, fontSize:34, color:C.navy, fontWeight:700, marginBottom:10 }}>Freeley</div>
+          <div style={{ fontFamily:T.body, fontSize:16, color:C.textM, lineHeight:1.5 }}>
+            L'outil gratuit qui gère tes contrats freelance, tes signatures, et tes factures — du début à la fin.
+          </div>
+        </div>
+
+        <button onClick={onStart} style={{
+          display:"block", width:"100%", padding:"16px", marginBottom:36,
+          background:C.navy, color:C.white, border:"none", borderRadius:12,
+          fontFamily:T.body, fontSize:16, fontWeight:700, cursor:"pointer",
+        }}>Commencer gratuitement</button>
+
+        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+          {features.map((f, i) => (
+            <div key={i} style={{
+              background:C.white, border:`1px solid ${C.border}`, borderRadius:14,
+              padding:"18px 20px", display:"flex", gap:14, alignItems:"flex-start",
+            }}>
+              <div style={{ fontSize:26 }}>{f.icon}</div>
+              <div>
+                <div style={{ fontFamily:T.body, fontSize:14.5, fontWeight:700, color:C.navy, marginBottom:3 }}>{f.title}</div>
+                <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.5 }}>{f.text}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={onStart} style={{
+          display:"block", width:"100%", padding:"16px", marginTop:36,
+          background:C.navy, color:C.white, border:"none", borderRadius:12,
+          fontFamily:T.body, fontSize:16, fontWeight:700, cursor:"pointer",
+        }}>Commencer gratuitement</button>
+
+        <div style={{ textAlign:"center", marginTop:28 }}>
+          <a href="/?legal=mentions" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none", marginRight:14 }}>Mentions légales</a>
+          <a href="/?legal=confidentialite" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none" }}>Politique de confidentialité</a>
         </div>
       </div>
     </div>
