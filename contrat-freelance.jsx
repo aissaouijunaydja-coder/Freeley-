@@ -388,6 +388,7 @@ const initialForm = {
   clauseDedit: true,
   clauseRespect: true,
   clauseSuspension: true,
+  clauseSecurite: true,
 };
 
 const validate = (step, form) => {
@@ -399,7 +400,6 @@ const validate = (step, form) => {
     if (!form.freelanceEmail.trim()) e.freelanceEmail = "Ton email est obligatoire";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.freelanceEmail)) e.freelanceEmail = "Email invalide";
     if (!form.clientName.trim()) e.clientName = "Le nom du client est obligatoire";
-    if (!form.clientAddress.trim()) e.clientAddress = "L'adresse du client est obligatoire";
     if (!form.clientEmail.trim()) e.clientEmail = "L'email du client est obligatoire";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.clientEmail)) e.clientEmail = "Email invalide";
   }
@@ -1686,7 +1686,7 @@ Email Prestataire  : ${form.freelanceEmail || "—"}
 
 Client             : ${form.clientName}${form.clientCompany ? " — " + form.clientCompany : ""}
 Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}
-Adresse Client     : ${form.clientAddress}
+Adresse Client     : ${form.clientAddress || "Non communiquée"}
 Email Client       : ${form.clientEmail || "—"}
 
 Titre de la mission: ${form.missionTitle}
@@ -1700,6 +1700,7 @@ Pénalités de retard: ${form.latePaymentPenalty ? "OUI (clause légale obligato
 Clause de dédommagement annulation: ${form.clauseDedit ? "OUI" : "NON"}
 Clause de bonne conduite / respect mutuel: ${form.clauseRespect ? "OUI" : "NON"}
 Clause de suspension en cas de retard de paiement: ${form.clauseSuspension ? "OUI" : "NON"}
+Clause de sécurité et assurance professionnelle: ${form.clauseSecurite ? "OUI" : "NON"}
 
 ══════════════════════════════════════════════
 STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
@@ -1757,6 +1758,7 @@ Clause de confidentialité réciproque pendant la mission et 3 ans après. Claus
 ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE — OBLIGATION DE MOYENS ET PLAFONNEMENT
 Rédige OBLIGATOIREMENT :
 "Le Prestataire est soumis à une OBLIGATION DE MOYENS au sens du droit civil français : il s'engage à mettre en œuvre tous les moyens raisonnables et les compétences professionnelles requises pour atteindre les objectifs de la mission, sans garantir un résultat déterminé. La responsabilité du Prestataire ne pourra être engagée qu'en cas de faute prouvée par le Client. En tout état de cause, la responsabilité totale et cumulée du Prestataire au titre du présent contrat est PLAFONNÉE au montant total des honoraires effectivement perçus par le Prestataire pour la mission considérée, à l'exclusion de tout préjudice indirect, perte de chiffre d'affaires, perte de données ou préjudice commercial."
+${form.clauseSecurite ? `Inclus OBLIGATOIREMENT, en complément, la clause de sécurité et assurance suivante : "Le Prestataire déclare être couvert par une assurance responsabilité civile professionnelle en cours de validité et, le cas échéant, par la garantie décennale requise pour les travaux de construction concernés. Le Client s'engage à signaler par écrit au Prestataire, avant le début de la mission, tout risque, danger ou anomalie connu du lieu d'intervention, notamment toute installation défectueuse, présence de matériaux dangereux ou structure instable. Le Client demeure responsable de tout dommage résultant d'un manquement à cette obligation d'information."` : ""}
 
 ARTICLE 9 — RÉSILIATION
 Conditions de résiliation par l'une ou l'autre des parties. En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire. En cas de résiliation par le Prestataire pour faute du Client, les sommes dues pour les prestations réalisées sont immédiatement exigibles.
@@ -2016,7 +2018,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
       clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
       endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
-      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true,
+      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true,
       ...rawForm,
     };
     const pContract = overrideContract || contract;
@@ -2175,7 +2177,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
       if (pForm.clientCompany) { doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.text(pForm.clientCompany, cx2 + 4, cy + 24); }
       doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
-      const addrLines2 = doc.splitTextToSize(pForm.clientAddress, blockW - 8);
+      const addrLines2 = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", blockW - 8);
       addrLines2.forEach((l,i) => doc.text(l, cx2 + 4, cy + (pForm.clientCompany ? 31 : 24) + i*4.5));
       if (pForm.clientEmail) { doc.setTextColor(...NAVYL); const emailOffY = cy + (pForm.clientCompany ? 31 : 24) + addrLines2.length*4.5 + 2; doc.text(pForm.clientEmail, cx2 + 4, emailOffY); }
 
@@ -2445,7 +2447,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         doc.text(pForm.clientCompany, cx3 + 4, y + 23);
       }
       doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
-      const addrSig = doc.splitTextToSize(pForm.clientAddress, bw - 8);
+      const addrSig = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", bw - 8);
       addrSig.forEach((l,i) => doc.text(l, cx3 + 4, y + (pForm.clientCompany ? 30 : 24) + i*4.5));
       // Signature réelle si disponible, sinon ligne à remplir à la main
       if (pClientSig) {
@@ -3484,7 +3486,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                   </div>
                 );
               })()}
-              <Field label="Adresse du client *" value={form.clientAddress} onChange={v=>update("clientAddress",v)} placeholder="5 avenue Victor Hugo, 69001 Lyon" error={errors.clientAddress} delay={4} />
+              <Field label="Adresse du client (optionnel)" value={form.clientAddress} onChange={v=>update("clientAddress",v)} placeholder="5 avenue Victor Hugo, 69001 Lyon" error={errors.clientAddress} delay={4} />
               <ToggleGroup
                 label="Type de client *"
                 options={["professionnel","particulier"]}
@@ -3736,6 +3738,46 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseSuspension ? "#16A34A" : C.textL, lineHeight:1.5 }}>
                       Si le client ne paie pas dans les temps (après mise en demeure restée sans effet 8 jours), cette clause vous autorise à arrêter le travail jusqu'au paiement, sans que ce soit considéré comme une faute de votre part.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clause de sécurité et assurance professionnelle */}
+              <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+                  <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE SÉCURITÉ ET ASSURANCE PROFESSIONNELLE</label>
+                  <LegalTooltip text="Le client doit signaler par écrit tout danger connu du lieu d'intervention (installation défectueuse, matériaux dangereux, accès instable...), et vous confirmez être couvert par votre assurance professionnelle. Recommandé pour les métiers manuels et les interventions sur site." />
+                </div>
+                <div
+                  onClick={() => update("clauseSecurite", !form.clauseSecurite)}
+                  style={{
+                    display:"flex", alignItems:"flex-start", gap:14,
+                    padding:"16px 18px",
+                    background: form.clauseSecurite ? "#F0FDF4" : C.white,
+                    border:`1.5px solid ${form.clauseSecurite ? "#86EFAC" : C.border}`,
+                    borderRadius:10, cursor:"pointer",
+                    transition:"all 0.2s",
+                  }}
+                >
+                  <div style={{
+                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    background: form.clauseSecurite ? "#16A34A" : C.creamDD,
+                    position:"relative", transition:"background 0.2s",
+                  }}>
+                    <div style={{
+                      position:"absolute", top:3, left: form.clauseSecurite ? 21 : 3,
+                      width:18, height:18, borderRadius:"50%", background:C.white,
+                      boxShadow:"0 1px 4px #00000030",
+                      transition:"left 0.2s",
+                    }}/>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: form.clauseSecurite ? "#15803D" : C.textM, marginBottom:3 }}>
+                      {form.clauseSecurite ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
+                    </div>
+                    <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseSecurite ? "#16A34A" : C.textL, lineHeight:1.5 }}>
+                      Le client doit signaler par écrit tout danger connu du lieu d'intervention (installation défectueuse, matériaux dangereux, accès instable...), et vous confirmez être couvert par votre assurance professionnelle. Recommandé pour les métiers manuels et les interventions sur site.
                     </div>
                   </div>
                 </div>
@@ -10595,7 +10637,7 @@ QUESTION DU FREELANCE : "${assistantQuestion}"
 Si la question concerne bien ce contrat/ce client, réponds en :
 1. Répondant clairement si le freelance est protégé ou non dans sa situation, en citant l'article ou la clause exacte du contrat qui s'applique (ou en disant clairement qu'aucune clause ne le couvre si c'est le cas)
 2. Donnant un conseil concret et actionnable pour cette situation précise
-3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client). N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
+3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client), (j) clause de bonne conduite et respect mutuel en cas de comportement abusif du client, (k) clause de suspension du travail en cas de retard de paiement persistant, (l) clause de sécurité et assurance professionnelle pour les interventions sur site à risque. N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
 4. Terminant par une courte phrase indiquant que cette analyse est indicative et qu'un avocat reste recommandé pour un désaccord persistant ou un montant important
 
 Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 150-250 mots maximum. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple, il sera affiché tel quel.`;
