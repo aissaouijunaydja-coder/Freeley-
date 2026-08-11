@@ -389,6 +389,7 @@ const initialForm = {
   clauseRespect: true,
   clauseSuspension: true,
   clauseSecurite: true,
+  clauseInterlocuteur: true,
 };
 
 const validate = (step, form) => {
@@ -1701,6 +1702,7 @@ Clause de dédommagement annulation: ${form.clauseDedit ? "OUI" : "NON"}
 Clause de bonne conduite / respect mutuel: ${form.clauseRespect ? "OUI" : "NON"}
 Clause de suspension en cas de retard de paiement: ${form.clauseSuspension ? "OUI" : "NON"}
 Clause de sécurité et assurance professionnelle: ${form.clauseSecurite ? "OUI" : "NON"}
+Clause d'interlocuteur unique côté client: ${form.clauseInterlocuteur ? "OUI" : "NON"}
 
 ══════════════════════════════════════════════
 STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
@@ -1723,6 +1725,7 @@ Objet général + description détaillée de la mission et des livrables attendu
 ARTICLE 3 — DÉLAIS, PLANNING ET PROCÉDURE DE VALIDATION (RECETTE)
 Rédige les dates de début/fin. Puis inclus OBLIGATOIREMENT cette clause de recette :
 "À compter de la livraison de chaque livrable, le Client dispose d'un délai de SEPT (7) JOURS OUVRÉS pour formuler par écrit (email avec accusé de réception) ses observations ou réserves motivées et circonstanciées. À l'expiration de ce délai sans retour écrit du Client, la prestation est réputée définitivement acceptée sans réserve, valant recette tacite et ouvrant droit à la facturation du solde correspondant. Les retours oraux ou non circonstanciés ne seront pas pris en compte."
+${form.clauseInterlocuteur ? `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Le Client désigne un interlocuteur unique, dûment habilité, chargé de la validation des livrables et de la transmission des instructions au Prestataire dans le cadre de la présente mission. Le Prestataire n'est tenu de prendre en compte que les observations, validations ou demandes de modification émanant de cet interlocuteur désigné, ou expressément confirmées par écrit par ce dernier. Toute instruction contradictoire émanant d'une autre personne au sein de l'organisation du Client ne saurait engager le Prestataire ni justifier un dépassement du périmètre ou des délais convenus. En cas de changement d'interlocuteur en cours de mission, le Client s'engage à en informer le Prestataire par écrit dans les meilleurs délais."` : ""}
 
 ARTICLE 4 — HONORAIRES, MODALITÉS DE PAIEMENT ET ACOMPTE
 Montant total HT : ${form.price} €
@@ -2018,7 +2021,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
       clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
       endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
-      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true,
+      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true, clauseInterlocuteur: true,
       ...rawForm,
     };
     const pContract = overrideContract || contract;
@@ -3778,6 +3781,46 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseSecurite ? "#16A34A" : C.textL, lineHeight:1.5 }}>
                       Le client doit signaler par écrit tout danger connu du lieu d'intervention (installation défectueuse, matériaux dangereux, accès instable...), et vous confirmez être couvert par votre assurance professionnelle. Recommandé pour les métiers manuels et les interventions sur site.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clause d'interlocuteur unique côté client */}
+              <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+                  <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE D'INTERLOCUTEUR UNIQUE CÔTÉ CLIENT</label>
+                  <LegalTooltip text="Le client désigne une seule personne habilitée à valider les livrables et donner des instructions. Vous n'êtes pas tenu de suivre des consignes contradictoires venant de quelqu'un d'autre chez le client." />
+                </div>
+                <div
+                  onClick={() => update("clauseInterlocuteur", !form.clauseInterlocuteur)}
+                  style={{
+                    display:"flex", alignItems:"flex-start", gap:14,
+                    padding:"16px 18px",
+                    background: form.clauseInterlocuteur ? "#F0FDF4" : C.white,
+                    border:`1.5px solid ${form.clauseInterlocuteur ? "#86EFAC" : C.border}`,
+                    borderRadius:10, cursor:"pointer",
+                    transition:"all 0.2s",
+                  }}
+                >
+                  <div style={{
+                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    background: form.clauseInterlocuteur ? "#16A34A" : C.creamDD,
+                    position:"relative", transition:"background 0.2s",
+                  }}>
+                    <div style={{
+                      position:"absolute", top:3, left: form.clauseInterlocuteur ? 21 : 3,
+                      width:18, height:18, borderRadius:"50%", background:C.white,
+                      boxShadow:"0 1px 4px #00000030",
+                      transition:"left 0.2s",
+                    }}/>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: form.clauseInterlocuteur ? "#15803D" : C.textM, marginBottom:3 }}>
+                      {form.clauseInterlocuteur ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
+                    </div>
+                    <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseInterlocuteur ? "#16A34A" : C.textL, lineHeight:1.5 }}>
+                      Le client désigne une seule personne habilitée à valider les livrables et donner des instructions. Vous n'êtes pas tenu de suivre des consignes contradictoires venant de quelqu'un d'autre chez le client.
                     </div>
                   </div>
                 </div>
@@ -10637,7 +10680,7 @@ QUESTION DU FREELANCE : "${assistantQuestion}"
 Si la question concerne bien ce contrat/ce client, réponds en :
 1. Répondant clairement si le freelance est protégé ou non dans sa situation, en citant l'article ou la clause exacte du contrat qui s'applique (ou en disant clairement qu'aucune clause ne le couvre si c'est le cas)
 2. Donnant un conseil concret et actionnable pour cette situation précise
-3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client), (j) clause de bonne conduite et respect mutuel en cas de comportement abusif du client, (k) clause de suspension du travail en cas de retard de paiement persistant, (l) clause de sécurité et assurance professionnelle pour les interventions sur site à risque. N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
+3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client), (j) clause de bonne conduite et respect mutuel en cas de comportement abusif du client, (k) clause de suspension du travail en cas de retard de paiement persistant, (l) clause de sécurité et assurance professionnelle pour les interventions sur site à risque, (m) clause d'interlocuteur unique désigné côté client. N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
 4. Terminant par une courte phrase indiquant que cette analyse est indicative et qu'un avocat reste recommandé pour un désaccord persistant ou un montant important
 
 Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 150-250 mots maximum. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple, il sera affiché tel quel.`;
