@@ -4364,27 +4364,27 @@ function renderInvoicePDF({
 }
 
 // Génère une vraie facture pour l'ajustement de prix d'un avenant — passe par le moteur commun
-const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser, contractId) => {
+const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: "avenant", avenantNum });
     renderInvoicePDF({
       invoiceNum, designation: `Avenant n°${avenantNum}`, missionTitle, montant,
-      freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile,
+      freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
       filename: `Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
 // Facture pour un acompte ou un solde — passe par le moteur commun
-const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile, authUser, contractId, invoiceType) => {
+const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, invoiceType) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const invoiceKey = invoiceType === "solde" ? "soldeInvoiceNumber" : "acompteInvoiceNumber";
     const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: invoiceKey });
     renderInvoicePDF({
       invoiceNum, designation, missionTitle, montant,
-      freelanceName, freelanceSiret, freelanceEmail, clientName, clientEmail, profile,
+      freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
       filename: `Facture_${designation.replace(/[^a-zA-Z0-9]/g,"_")}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
@@ -9730,7 +9730,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 {paymentWordCap} reçu · Production démarrée
               </div>
               <button
-                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "acompte")}
+                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte")}
                 style={{ marginTop:10, padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
               >🧾 Télécharger la facture ({paymentWordCap.toLowerCase()})</button>
               <SendElectronicInvoiceButton
@@ -9761,7 +9761,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   ✓ Solde également réglé — contrat entièrement payé
                 </div>
                 <button
-                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "solde")}
+                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde")}
                   style={{ padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
                 >🧾 Télécharger la facture (solde)</button>
                 <SendElectronicInvoiceButton
@@ -9792,7 +9792,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                     cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534",
                   }}>✓ Marquer le solde comme reçu</button>
                   <button
-                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "solde")}
+                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde")}
                     style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
                   >🧾 Télécharger la facture</button>
                 </div>
@@ -9879,7 +9879,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 
             {/* Télécharger la facture — pour la réclamer, même avant paiement */}
             <button
-              onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientEmail, profile, authUser, entry?.id, "acompte")}
+              onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte")}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -10328,7 +10328,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {entry.isStandaloneInvoice ? (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
+                            onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte")}
                             style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Télécharger la facture</button>
                           <SendElectronicInvoiceButton compact
@@ -10358,7 +10358,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && acompteAmtA > 0 && (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "acompte")}
+                            onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte")}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture {isComptantA ? "paiement" : "acompte"}</button>
                           <SendElectronicInvoiceButton compact
@@ -10375,7 +10375,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && hasSoldeA && (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id, "solde")}
+                            onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "solde")}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture solde</button>
                           <SendElectronicInvoiceButton compact
@@ -10392,7 +10392,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && Array.isArray(entry.avenants) && entry.avenants.map(av => (
                         <React.Fragment key={av.num}>
                           <button
-                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientEmail, profile, authUser, entry.id)}
+                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id)}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture avenant n°{av.num}</button>
                           <SendElectronicInvoiceButton compact
@@ -10955,7 +10955,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                         </div>
                       )}
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientEmail, profile, authUser, historyView.id)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
+                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
                         <SendElectronicInvoiceButton compact
                           contractId={historyView.id} invoiceKey="avenant" avenantNum={av.num}
                           designation={`Avenant n°${av.num}`} montant={av.ajustementMontant} missionTitle={historyView.missionTitle}
