@@ -15302,6 +15302,16 @@ function LegalPageLayout({ title, children }) {
 
 /* ══════════════════════════════════════════ VITRINE (LANDING) ══ */
 function LandingPage({ onStart }) {
+  useEffect(() => {
+    document.title = "Freeley — Générateur de contrats freelance et facturation électronique gratuit";
+    let meta = document.querySelector('meta[name="description"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "description");
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute("content", "Freeley génère tes contrats freelance, factures et NDA. Signature électronique, vérification d'entreprise, facturation électronique. Gratuit.");
+  }, []);
   const features = [
     { icon: "📝", title: "Contrats en 2 minutes", text: "Décris ta mission, l'IA rédige un contrat complet et juridiquement solide." },
     { icon: "✍️", title: "Signature électronique", text: "Toi et ton client signez directement depuis votre téléphone, sans papier." },
