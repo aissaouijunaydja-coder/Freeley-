@@ -390,6 +390,8 @@ const initialForm = {
   clauseSuspension: true,
   clauseSecurite: true,
   clauseInterlocuteur: true,
+  clausePreavis: true,
+  preavisJours: "30",
 };
 
 const validate = (step, form) => {
@@ -1703,6 +1705,7 @@ Clause de bonne conduite / respect mutuel: ${form.clauseRespect ? "OUI" : "NON"}
 Clause de suspension en cas de retard de paiement: ${form.clauseSuspension ? "OUI" : "NON"}
 Clause de sécurité et assurance professionnelle: ${form.clauseSecurite ? "OUI" : "NON"}
 Clause d'interlocuteur unique côté client: ${form.clauseInterlocuteur ? "OUI" : "NON"}
+Clause de préavis pour mission récurrente: ${form.clausePreavis ? `OUI (${form.preavisJours} jours)` : "NON"}
 
 ══════════════════════════════════════════════
 STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
@@ -1767,6 +1770,7 @@ ARTICLE 9 — RÉSILIATION
 Conditions de résiliation par l'une ou l'autre des parties. En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire. En cas de résiliation par le Prestataire pour faute du Client, les sommes dues pour les prestations réalisées sont immédiatement exigibles.
 ${form.clauseDedit ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après que le Prestataire a commencé l'exécution de la mission, une indemnité sera due au Prestataire au titre du travail déjà engagé et du temps réservé. Le montant de cette indemnité sera déterminé d'un commun accord entre les parties, en fonction de l'état d'avancement de la mission au jour de la résiliation. À défaut d'accord amiable, le Prestataire pourra réclamer une indemnisation proportionnelle au préjudice réellement subi. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due, sous réserve du maintien de l'acompte éventuellement déjà versé conformément au paragraphe précédent."` : ""}
 ${form.clauseRespect ? `Inclus OBLIGATOIREMENT, en complément, la clause de bonne conduite suivante : "Le Client s'engage à faire preuve de respect et de courtoisie dans l'ensemble de ses échanges avec le Prestataire, quel qu'en soit le support (écrit, oral, téléphonique ou en personne). Tout comportement abusif, insultant, dégradant, menaçant ou constitutif de harcèlement de la part du Client à l'égard du Prestataire constitue un manquement grave aux obligations essentielles du présent contrat. En cas de survenance d'un tel comportement, le Prestataire pourra adresser au Client un avertissement écrit décrivant les faits reprochés. Si le comportement persiste après cet avertissement, le Prestataire pourra résilier le contrat de plein droit, aux torts exclusifs du Client, sans préavis ni indemnité de sa part, les sommes déjà dues au titre des prestations réalisées demeurant immédiatement exigibles."` : ""}
+${form.clausePreavis ? `Inclus OBLIGATOIREMENT, en complément, la clause de préavis suivante : "Lorsque la mission présente un caractère récurrent ou reconduit régulièrement (mission au forfait mensuel, abonnement de prestations, ou toute collaboration continue), chacune des Parties s'engage à respecter un délai de préavis minimum de ${({"15":"quinze (15)","30":"trente (30)","45":"quarante-cinq (45)","60":"soixante (60)"})[form.preavisJours] || form.preavisJours} jours calendaires avant toute décision de mettre fin à la collaboration, notifié par écrit (courrier électronique avec accusé de réception ou lettre recommandée avec avis de réception). Pendant toute la durée du préavis, les prestations convenues se poursuivent normalement et restent dues dans les conditions habituelles. Ce délai de préavis ne s'applique pas en cas de résiliation pour faute grave de l'une des Parties, ni en cas de mise en œuvre de la clause de bonne conduite prévue au présent article."` : ""}
 
 ARTICLE 10 — FORCE MAJEURE
 Clause standard de force majeure conforme à l'art. 1218 du Code civil.
@@ -2021,7 +2025,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
       clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
       endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
-      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true, clauseInterlocuteur: true,
+      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true, clauseInterlocuteur: true, clausePreavis: true, preavisJours: "30",
       ...rawForm,
     };
     const pContract = overrideContract || contract;
@@ -3824,6 +3828,51 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Clause de préavis pour mission récurrente */}
+              <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+                  <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE PRÉAVIS POUR MISSION RÉCURRENTE</label>
+                  <LegalTooltip text={`Pour une mission récurrente (forfait mensuel, abonnement), impose un préavis minimum de ${form.preavisJours} jours avant que le client puisse arrêter la collaboration. Les prestations continuent normalement pendant ce délai.`} />
+                </div>
+                <div
+                  onClick={() => update("clausePreavis", !form.clausePreavis)}
+                  style={{
+                    display:"flex", alignItems:"flex-start", gap:14,
+                    padding:"16px 18px",
+                    background: form.clausePreavis ? "#F0FDF4" : C.white,
+                    border:`1.5px solid ${form.clausePreavis ? "#86EFAC" : C.border}`,
+                    borderRadius:10, cursor:"pointer",
+                    transition:"all 0.2s",
+                  }}
+                >
+                  <div style={{
+                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    background: form.clausePreavis ? "#16A34A" : C.creamDD,
+                    position:"relative", transition:"background 0.2s",
+                  }}>
+                    <div style={{
+                      position:"absolute", top:3, left: form.clausePreavis ? 21 : 3,
+                      width:18, height:18, borderRadius:"50%", background:C.white,
+                      boxShadow:"0 1px 4px #00000030",
+                      transition:"left 0.2s",
+                    }}/>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: form.clausePreavis ? "#15803D" : C.textM, marginBottom:3 }}>
+                      {form.clausePreavis ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
+                    </div>
+                    <div style={{ fontFamily:T.body, fontSize:12, color: form.clausePreavis ? "#16A34A" : C.textL, lineHeight:1.5 }}>
+                      Pour une mission récurrente (forfait mensuel, abonnement), impose un préavis minimum de {form.preavisJours} jours avant que le client puisse arrêter la collaboration. Les prestations continuent normalement pendant ce délai.
+                    </div>
+                  </div>
+                </div>
+                {form.clausePreavis && (
+                  <div style={{ marginTop:12 }}>
+                    <ToggleGroup label="Durée du préavis" options={["15","30","45","60"]} labels={["15 jours","30 jours","45 jours","60 jours"]} value={form.preavisJours} onChange={v=>update("preavisJours",v)} tooltip="30 jours est une convention courante et équilibrée pour une mission récurrente. Choisis plus court ou plus long selon ce qui te semble juste." />
+                  </div>
+                )}
               </div>
 
               {apiError && (
@@ -10692,7 +10741,7 @@ QUESTION DU FREELANCE : "${assistantQuestion}"
 Si la question concerne bien ce contrat/ce client, réponds en :
 1. Répondant clairement si le freelance est protégé ou non dans sa situation, en citant l'article ou la clause exacte du contrat qui s'applique (ou en disant clairement qu'aucune clause ne le couvre si c'est le cas)
 2. Donnant un conseil concret et actionnable pour cette situation précise
-3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client), (j) clause de bonne conduite et respect mutuel en cas de comportement abusif du client, (k) clause de suspension du travail en cas de retard de paiement persistant, (l) clause de sécurité et assurance professionnelle pour les interventions sur site à risque, (m) clause d'interlocuteur unique désigné côté client. N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
+3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client), (j) clause de bonne conduite et respect mutuel en cas de comportement abusif du client, (k) clause de suspension du travail en cas de retard de paiement persistant, (l) clause de sécurité et assurance professionnelle pour les interventions sur site à risque, (m) clause d'interlocuteur unique désigné côté client, (n) clause de préavis de 30 jours pour les missions récurrentes. N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
 4. Terminant par une courte phrase indiquant que cette analyse est indicative et qu'un avocat reste recommandé pour un désaccord persistant ou un montant important
 
 Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 150-250 mots maximum. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple, il sera affiché tel quel.`;
