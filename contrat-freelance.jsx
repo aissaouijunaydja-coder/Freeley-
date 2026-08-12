@@ -4086,7 +4086,14 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 
           {/* Contract body — rendered Markdown */}
           <div className="fade-up fade-up-2">
-            <MarkdownContract text={contract} form={form} />
+            <MarkdownContract
+              text={contract}
+              form={form}
+              signatureStatus={history[0]?.signatureStatus}
+              freelanceSignature={history[0]?.freelanceSignature}
+              clientSignature={history[0]?.clientSignature}
+              signedByClientAt={history[0]?.signedByClientAt}
+            />
           </div>
 
         </div>
@@ -4227,6 +4234,11 @@ const getOrReserveInvoiceNumber = async ({ authUser, contractId, key, avenantNum
         } catch(e) { console.error("Erreur sauvegarde numéro de facture:", e); }
       }
     }
+  }
+  // Garde-fou légal : une facture doit porter un vrai numéro séquentiel. Si la réservation a échoué,
+  // on refuse de produire un document plutôt que d'émettre une facture non conforme.
+  if (invoiceNum === `FA-${year}-····`) {
+    throw new Error("Impossible de réserver un numéro de facture. Vérifie ta connexion et réessaie — aucune facture n'a été générée.");
   }
   return invoiceNum;
 };
@@ -11242,7 +11254,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                   </div>
                   <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginTop:2, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                     {isLocked ? "Passe premium pour accéder à ce contrat" : `${entry.clientName}${entry.clientCompany ? ` · ${entry.clientCompany}` : ""}`}
-                    {!isLocked && entry.signatureStatus === "pending" && (
+                    {!isLocked && (entry.signatureStatus === "pending_client" || entry.signatureStatus === "pending_signature") && (
                       <span style={{ fontFamily:T.body, fontSize:9, background:"#DBEAFE", color:"#1D4ED8", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>✍ SIGNATURE EN ATTENTE</span>
                     )}
                     {!isLocked && entry.signatureStatus === "signed" && (
@@ -11564,8 +11576,10 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
     setForm(f => ({ ...f, ...resumeCandidate.form }));
     setResumeDismissed(true);
   };
-  const [_depositPct, setLocalDepositPct] = useState(depositPctProp ?? Number(form.acomptePourcentage) ?? 0);
-  const depositPct = depositPctProp ?? _depositPct;
+  const [_depositPct, setLocalDepositPct] = useState(
+    Number.isFinite(depositPctProp) ? depositPctProp : (Number(form.acomptePourcentage) || 0)
+  );
+  const depositPct = Number.isFinite(depositPctProp) ? depositPctProp : (Number(_depositPct) || 0);
   const setDepositPct = (v) => {
     setLocalDepositPct(v);
     if (onDepositPctChange) onDepositPctChange(v);
@@ -11589,9 +11603,12 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
   // Réserve définitivement le numéro (appelé au téléchargement) — atomique, garantit une suite continue sans trou ni doublon
   const reserveInvoiceNumber = async () => {
     const year = new Date().getFullYear();
-    if (!authUser?.id) return `FA-${year}-${String(Date.now()).slice(-4)}`; // repli très improbable si jamais non connecté
+    if (!authUser?.id) throw new Error("Tu dois être connecté pour générer une facture numérotée.");
     const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
-    if (error) { console.error("Erreur réservation numéro de facture:", error); return invoiceNum; }
+    if (error) {
+      console.error("Erreur réservation numéro de facture:", error);
+      throw new Error("Impossible de réserver un numéro de facture. Vérifie ta connexion et réessaie — aucune facture n'a été générée.");
+    }
     const finalNum = `FA-${year}-${String(data).padStart(4, "0")}`;
     setInvoiceNum(finalNum);
     return finalNum;
@@ -13403,10 +13420,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
     setDrawing(true);
-    setHasStrokes(true);
+    // On ne marque PAS la signature comme tracée ici : un simple clic sans mouvement
+    // ne doit jamais valider une signature vide. C'est le mouvement qui compte (voir draw).
   };
 
-  const draw = (ref, isDrawing) => (e) => {
+  const draw = (ref, isDrawing, setHasStrokes) => (e) => {
     e.preventDefault();
     if (!isDrawing) return;
     const canvas = ref.current;
@@ -13415,6 +13433,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     const pos = getPos(e, canvas);
     ctx.lineTo(pos.x, pos.y);
     ctx.stroke();
+    if (setHasStrokes) setHasStrokes(true);
   };
 
   const stopDraw = (setDrawing) => (e) => {
@@ -13640,11 +13659,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   width={460} height={160}
                   style={{ width:"100%", height:160, display:"block", touchAction:"none", cursor:"crosshair" }}
                   onMouseDown={startDraw(freelanceCanvasRef, setFreelanceDrawing, setFreelanceHasStrokes)}
-                  onMouseMove={draw(freelanceCanvasRef, freelanceDrawing)}
+                  onMouseMove={draw(freelanceCanvasRef, freelanceDrawing, setFreelanceHasStrokes)}
                   onMouseUp={stopDraw(setFreelanceDrawing)}
                   onMouseLeave={stopDraw(setFreelanceDrawing)}
                   onTouchStart={startDraw(freelanceCanvasRef, setFreelanceDrawing, setFreelanceHasStrokes)}
-                  onTouchMove={draw(freelanceCanvasRef, freelanceDrawing)}
+                  onTouchMove={draw(freelanceCanvasRef, freelanceDrawing, setFreelanceHasStrokes)}
                   onTouchEnd={stopDraw(setFreelanceDrawing)}
                 />
                 {!freelanceHasStrokes && (
@@ -13816,11 +13835,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     width={460} height={130}
                     style={{ width:"100%", height:130, display:"block", touchAction:"none", cursor:"crosshair" }}
                     onMouseDown={startDraw(clientCanvasRef, setClientDrawing, setClientHasStrokes)}
-                    onMouseMove={draw(clientCanvasRef, clientDrawing)}
+                    onMouseMove={draw(clientCanvasRef, clientDrawing, setClientHasStrokes)}
                     onMouseUp={stopDraw(setClientDrawing)}
                     onMouseLeave={stopDraw(setClientDrawing)}
                     onTouchStart={startDraw(clientCanvasRef, setClientDrawing, setClientHasStrokes)}
-                    onTouchMove={draw(clientCanvasRef, clientDrawing)}
+                    onTouchMove={draw(clientCanvasRef, clientDrawing, setClientHasStrokes)}
                     onTouchEnd={stopDraw(setClientDrawing)}
                   />
                   {!clientHasStrokes && (
