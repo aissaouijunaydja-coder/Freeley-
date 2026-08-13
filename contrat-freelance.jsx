@@ -8907,7 +8907,8 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
         {/* ── Liens légaux ── */}
         <div style={{ textAlign:"center", padding:"14px 0 4px" }}>
           <a href="/?legal=mentions" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none", marginRight:14 }}>Mentions légales</a>
-          <a href="/?legal=confidentialite" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none" }}>Politique de confidentialité</a>
+          <a href="/?legal=confidentialite" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none", marginRight:14 }}>Politique de confidentialité</a>
+          <a href="/?legal=cgu" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none" }}>CGU</a>
         </div>
       </div>
     </div>
@@ -15407,7 +15408,8 @@ function LandingPage({ onStart }) {
 
         <div style={{ textAlign:"center", marginTop:28 }}>
           <a href="/?legal=mentions" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none", marginRight:14 }}>Mentions légales</a>
-          <a href="/?legal=confidentialite" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none" }}>Politique de confidentialité</a>
+          <a href="/?legal=confidentialite" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none", marginRight:14 }}>Politique de confidentialité</a>
+          <a href="/?legal=cgu" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none" }}>CGU</a>
         </div>
       </div>
     </div>
@@ -15508,6 +15510,122 @@ function PolitiqueConfidentialitePage() {
   );
 }
 
+function CguPage() {
+  const Section = ({ title, children }) => (
+    <>
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
+      {children}
+    </>
+  );
+  return (
+    <LegalPageLayout title="Conditions générales d'utilisation">
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : août 2026</p>
+
+      <Section title="Article 1 — Objet">
+        <p>
+          Les présentes conditions générales d'utilisation (CGU) définissent les modalités de
+          mise à disposition et d'utilisation du service Freeley, accessible à l'adresse freeley.fr.
+        </p>
+        <p>
+          Freeley est un outil qui permet aux freelances de générer des contrats de prestation,
+          des factures, et des documents de relance en cas d'impayé, à l'aide de l'intelligence
+          artificielle. L'utilisation du service implique l'acceptation pleine et entière des
+          présentes CGU.
+        </p>
+      </Section>
+
+      <Section title="Article 2 — Description du service">
+        <p>Freeley propose :</p>
+        <ul style={{ paddingLeft:20 }}>
+          <li>la génération de contrats de prestation de services entre un freelance et son client, à partir des informations saisies par l'utilisateur</li>
+          <li>la génération de factures conformes à la réglementation en vigueur</li>
+          <li>la génération de documents de relance et de mise en demeure en cas d'impayé</li>
+          <li>la signature électronique des documents générés</li>
+        </ul>
+        <p>
+          Les documents sont générés automatiquement à partir d'un modèle et des informations
+          fournies par l'utilisateur, avec l'assistance d'un modèle d'intelligence artificielle.
+        </p>
+      </Section>
+
+      <Section title="Article 3 — Rôle de l'intelligence artificielle et responsabilité de l'utilisateur">
+        <p>
+          <strong>Freeley génère des documents à partir d'un modèle. Ces documents ne constituent
+          pas un avis juridique et ne remplacent pas la consultation d'un avocat ou d'un
+          professionnel du droit.</strong>
+        </p>
+        <p>L'utilisateur reconnaît et accepte que :</p>
+        <ul style={{ paddingLeft:20 }}>
+          <li>il lui appartient de relire et de vérifier l'intégralité de chaque document avant de l'envoyer, de le transmettre à un tiers, ou de le signer</li>
+          <li>il est seul responsable du contenu final des documents qu'il valide, transmet ou signe, qu'ils aient été générés avec ou sans l'assistance de l'intelligence artificielle</li>
+          <li>Freeley met à disposition un outil d'assistance à la rédaction, et non un service de conseil juridique personnalisé</li>
+          <li>en cas de doute sur une clause ou une situation particulière, il est recommandé de consulter un professionnel du droit</li>
+        </ul>
+      </Section>
+
+      <Section title="Article 4 — Obligations de l'utilisateur">
+        <p>L'utilisateur s'engage à :</p>
+        <ul style={{ paddingLeft:20 }}>
+          <li>fournir des informations exactes lors de l'utilisation du service</li>
+          <li>ne pas utiliser le service à des fins illégales ou frauduleuses</li>
+          <li>vérifier la conformité de chaque document généré à sa situation avant toute utilisation</li>
+        </ul>
+      </Section>
+
+      <Section title="Article 5 — Limitation de responsabilité">
+        <p>Freeley met en œuvre les moyens raisonnables pour assurer la fiabilité du service. L'éditeur ne saurait toutefois être tenu responsable :</p>
+        <ul style={{ paddingLeft:20 }}>
+          <li>des conséquences directes ou indirectes résultant de l'utilisation d'un document généré sans relecture préalable par l'utilisateur</li>
+          <li>d'une inadéquation entre un document généré et la situation particulière de l'utilisateur, dès lors que celui-ci n'a pas correctement renseigné les informations demandées</li>
+          <li>d'une interruption temporaire du service</li>
+        </ul>
+        <p>Cette limitation ne s'applique pas en cas de faute lourde ou intentionnelle de l'éditeur.</p>
+      </Section>
+
+      <Section title="Article 6 — Disponibilité du service et évolution des tarifs">
+        <p>
+          Le service est actuellement proposé gratuitement. L'éditeur se réserve le droit de faire
+          évoluer les conditions tarifaires du service, moyennant une information préalable des
+          utilisateurs.
+        </p>
+      </Section>
+
+      <Section title="Article 7 — Propriété intellectuelle">
+        <p>
+          Les documents générés par l'utilisateur à partir de ses propres informations lui
+          appartiennent. La structure, le code et les modèles utilisés par Freeley restent la
+          propriété de l'éditeur.
+        </p>
+      </Section>
+
+      <Section title="Article 8 — Données personnelles">
+        <p>
+          Le traitement des données personnelles est détaillé dans la{" "}
+          <a href="/?legal=confidentialite" style={{ color:C.gold }}>Politique de confidentialité</a>.
+        </p>
+      </Section>
+
+      <Section title="Article 9 — Modification des CGU">
+        <p>
+          L'éditeur se réserve le droit de modifier les présentes CGU à tout moment. Les
+          utilisateurs seront informés de toute modification substantielle.
+        </p>
+      </Section>
+
+      <Section title="Article 10 — Droit applicable">
+        <p>Les présentes CGU sont soumises au droit français. Tout litige relève des tribunaux compétents.</p>
+      </Section>
+
+      <Section title="Contact">
+        <p>
+          Pour toute question :{" "}
+          <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>
+        </p>
+      </Section>
+    </LegalPageLayout>
+  );
+}
+
 export default function App() {
   // Page admin (privée) : ?admin=feedback
   const adminParam = new URLSearchParams(window.location.search).get("admin");
@@ -15559,6 +15677,13 @@ export default function App() {
     return (
       <ErrorBoundary>
         <PolitiqueConfidentialitePage />
+      </ErrorBoundary>
+    );
+  }
+  if (legalParam === "cgu") {
+    return (
+      <ErrorBoundary>
+        <CguPage />
       </ErrorBoundary>
     );
   }
