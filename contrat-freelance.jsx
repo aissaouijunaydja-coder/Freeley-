@@ -14760,6 +14760,11 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                     <li>Choisis le type <strong>Confidentielle</strong>, puis copie l'identifiant et le secret générés ci-dessous</li>
                   </ol>
                 </div>
+                <div style={{ padding:"12px 14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, marginBottom:14 }}>
+                  <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6 }}>
+                    <strong>⚠️ Ne rate pas cette étape :</strong> quand tu ajoutes ton entreprise sur Super PDP (étape 1), on te propose 3 choix pour la réception des factures. Prends bien <strong>"inscrire mon adresse"</strong> (immédiat ou au 01/09/2026) — pas "je ne souhaite pas inscrire pour le moment". Dès le <strong>1er septembre 2026</strong>, tout assujetti à la TVA doit pouvoir <strong>recevoir</strong> des factures électroniques, même les auto-entrepreneurs en franchise. Sans ce choix, tu restes invisible dans l'annuaire officiel, même une fois connecté à Freeley.
+                  </div>
+                </div>
                 <div style={{ marginBottom:10 }}>
                   <label style={labelStyle}>IDENTIFIANT (CLIENT_ID)</label>
                   <input style={inputStyle} value={superPdpClientIdInput} onChange={e => setSuperPdpClientIdInput(e.target.value)} placeholder="ex : 019fce57-244f-77cd-987f-8777b6a88dc2" onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
