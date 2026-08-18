@@ -4162,7 +4162,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           marginLeft:"auto",
           marginRight:"auto",
         }}>
-          Freeley est un outil d'automatisation de documents commerciaux. L'application fournit des modèles basés sur vos données à des fins de gestion administrative et ne constitue pas un service de conseil ou de rédaction professionnelle.
+          Ce document est généré automatiquement à partir de modèles et de clauses préétablies, à l'exception de la description de la mission ci-dessus, générée par un système d'intelligence artificielle à partir des éléments renseignés par l'utilisateur. Ce contenu généré par IA peut comporter des erreurs, imprécisions ou omissions et doit être relu et corrigé avant signature. Le document ne constitue pas une consultation juridique personnalisée. Il vous appartient de vérifier son adéquation à votre situation et, si nécessaire, de consulter un avocat, notamment pour toute activité réglementée. La responsabilité de Freeley ne saurait être engagée à raison d'une utilisation inadaptée, hors faute lourde ou dolosive.
         </p>
       </div>
 
@@ -5579,10 +5579,10 @@ function MarkdownContract({ text, form, signatureStatus, freelanceSignature, cli
         {/* Footer */}
         <div style={{ marginTop: 28, textAlign: "center" }}>
           <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#B8B5AE", letterSpacing: "0.08em" }}>
-            Document généré par Freeley · IA · À titre indicatif — faire relire par un professionnel pour les missions importantes
+            Document généré par Freeley · IA
           </div>
           <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: "#C8C4BC", marginTop: 8, lineHeight: 1.5, maxWidth: 520, margin: "8px auto 0" }}>
-            Freeley est un outil d'automatisation de documents commerciaux. L'application fournit des modèles basés sur vos données à des fins de gestion administrative et ne constitue pas un service de conseil ou de rédaction professionnelle.
+            Ce document est généré automatiquement à partir de modèles et de clauses préétablies, à l'exception de la description de la mission ci-dessus, générée par un système d'intelligence artificielle à partir des éléments renseignés par l'utilisateur. Ce contenu généré par IA peut comporter des erreurs, imprécisions ou omissions et doit être relu et corrigé avant signature. Le document ne constitue pas une consultation juridique personnalisée. Il vous appartient de vérifier son adéquation à votre situation et, si nécessaire, de consulter un avocat, notamment pour toute activité réglementée. La responsabilité de Freeley ne saurait être engagée à raison d'une utilisation inadaptée, hors faute lourde ou dolosive.
           </div>
         </div>
       </div>
