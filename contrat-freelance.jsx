@@ -234,6 +234,7 @@ const getHistory = async () => {
       clientSignature: content.clientSignature || contenu.clientSignature || null,
       freelanceSignature: content.freelanceSignature || contenu.freelanceSignature || null,
       signedByClientAt: content.signedByClientAt || contenu.signedByClientAt || null,
+      retractationWaivedAt: content.retractationWaivedAt || contenu.retractationWaivedAt || null,
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
       paymentStatus: row.payment_status || "pending",
@@ -331,6 +332,24 @@ const getContractForSigning = async (contractId) => {
   if (error || !data || !data[0]) { console.error("getContractForSigning error:", error); return null; }
   const row = data[0];
   return { ...row, content: parseContent(row.content) };
+};
+
+// Le client (particulier) demande expressément le démarrage immédiat et renonce à son délai de rétractation de 14 jours
+const submitRetractationWaiver = async (contractId) => {
+  const { data: existing, error: e1 } = await supabase
+    .from("contracts")
+    .select("content, status")
+    .eq("id", contractId)
+    .single();
+  if (e1) { console.error(e1); return false; }
+  const newContent = { ...parseContent(existing.content), retractationWaivedAt: new Date().toISOString() };
+  const { error: e2 } = await supabase.rpc("update_contract_content", {
+    p_contract_id: contractId,
+    p_new_content: JSON.stringify(newContent),
+    p_new_status: existing.status,
+  });
+  if (e2) { console.error(e2); return false; }
+  return true;
 };
 
 // Le client signe : on enregistre sa signature et on passe le statut à "signed"
@@ -4141,6 +4160,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               freelanceSignature={history[0]?.freelanceSignature}
               clientSignature={history[0]?.clientSignature}
               signedByClientAt={history[0]?.signedByClientAt}
+              retractationWaivedAt={history[0]?.retractationWaivedAt}
             />
           </div>
 
@@ -5256,7 +5276,7 @@ CONSIGNES :
 }
 
 /* ══════════════════════════════════════════ MARKDOWN CONTRACT RENDERER ══ */
-function MarkdownContract({ text, form, signatureStatus, freelanceSignature, clientSignature, signedByClientAt }) {
+function MarkdownContract({ text, form, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, retractationWaivedAt }) {
   if (!text) return null;
 
   // ── Inline renderer: **bold** → <strong>
@@ -5570,6 +5590,21 @@ function MarkdownContract({ text, form, signatureStatus, freelanceSignature, cli
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 20, padding: "5px 12px" }}>
                   <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#F59E0B", animation: "shimmer 1.5s ease-in-out infinite" }} />
                   <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>En attente de signature…</span>
+                </div>
+              )}
+              {form?.typeClient === "particulier" && (
+                <div style={{ marginTop: 10 }}>
+                  {retractationWaivedAt ? (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 20, padding: "5px 12px" }}>
+                      <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#16A34A" }} />
+                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>✓ Renonciation au délai de rétractation validée le {new Date(retractationWaivedAt).toLocaleDateString("fr-FR")}</span>
+                    </div>
+                  ) : (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 20, padding: "5px 12px" }}>
+                      <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#F59E0B" }} />
+                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>Renonciation au délai de rétractation pas encore validée</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -10950,7 +10985,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
-        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} />
+        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} retractationWaivedAt={historyView.retractationWaivedAt} />
       </div>
 
       {/* Liste des avenants déjà créés sur ce contrat */}
@@ -14990,6 +15025,18 @@ function ClientSignaturePage({ contractId }) {
   const canvasRef = useRef(null);
   const [hasStrokes, setHasStrokes] = useState(false);
   const drawing = useRef(false);
+  const [retractationChecked, setRetractationChecked] = useState(false);
+  const [retractationWaiving, setRetractationWaiving] = useState(false);
+  const [retractationDoneLocally, setRetractationDoneLocally] = useState(false);
+
+  const handleContinueFromRetractationScreen = async () => {
+    if (!retractationChecked) { setRetractationDoneLocally(true); return; }
+    setRetractationWaiving(true);
+    const ok = await submitRetractationWaiver(contractId);
+    setRetractationWaiving(false);
+    if (ok) setRetractationDoneLocally(true);
+    else setError("Erreur lors de l'enregistrement. Réessaie.");
+  };
 
   useEffect(() => {
     getContractForSigning(contractId)
@@ -15056,6 +15103,38 @@ function ClientSignaturePage({ contractId }) {
 
   const content = contractData?.content || {};
   const contractText = content.contract || "";
+  const isParticulier = content.form?.typeClient === "particulier";
+  const retractationAlreadyWaived = !!content.retractationWaivedAt;
+  const showRetractationGate = isParticulier && !retractationAlreadyWaived && !retractationDoneLocally;
+
+  if (showRetractationGate) return (
+    <div style={wrap}>
+      <div style={{ width:"100%", maxWidth:520 }}>
+        <div style={{ textAlign:"center", marginBottom:20 }}>
+          <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
+          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Avant de consulter le contrat</div>
+        </div>
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Droit de rétractation</div>
+          <div style={{ fontSize:12.5, color:"#5A6B80", lineHeight:1.6, marginBottom:16 }}>
+            Ce contrat est conclu à distance avec un particulier. La loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si la prestation peut commencer avant la fin de ce délai.
+          </div>
+          <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
+            <input type="checkbox" checked={retractationChecked} onChange={e => setRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
+            <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>Je demande expressément que l'exécution de la prestation commence immédiatement, avant l'expiration du délai de rétractation de 14 jours. Je conserve mon droit de rétractation, mais je pourrai devoir payer la part du service déjà réalisée si je m'en sers.</span>
+          </label>
+          <button
+            onClick={handleContinueFromRetractationScreen}
+            disabled={retractationWaiving}
+            style={{ width:"100%", marginTop:16, padding:"12px 18px", background: !retractationWaiving ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: !retractationWaiving ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+          >{retractationWaiving ? "Enregistrement…" : (retractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers le contrat")}</button>
+          <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:12, lineHeight:1.5, textAlign:"center" }}>
+            Que tu coches ou non, tu accèdes au contrat et tu peux le signer. Ton choix, coché ou non, est horodaté et conservé.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div style={wrap}>
