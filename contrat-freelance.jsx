@@ -13616,6 +13616,18 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const acompte = form.price ? (isComptant ? Number(form.price) : Math.round(Number(form.price) * (acomptePct / 100))) : 0;
   const clientName = form.clientName || "Jean Dupont";
   const [showDepositInvoiceModal, setShowDepositInvoiceModal] = useState(false);
+  const isParticulier = form.typeClient === "particulier";
+  const [tactileRetractationChecked, setTactileRetractationChecked] = useState(false);
+  const [tactileRetractationWaiving, setTactileRetractationWaiving] = useState(false);
+  const [tactileRetractationDone, setTactileRetractationDone] = useState(false);
+
+  const handleTactileRetractationContinue = async () => {
+    if (!tactileRetractationChecked) { setTactileRetractationDone(true); return; }
+    setTactileRetractationWaiving(true);
+    if (contractId) await submitRetractationWaiver(contractId);
+    setTactileRetractationWaiving(false);
+    setTactileRetractationDone(true);
+  };
 
   // Drawing helpers
   const getPos = (e, canvas) => {
@@ -13977,6 +13989,27 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   👋 Bonjour {clientName}, voici votre contrat à signer
                 </div>
 
+                {isParticulier && !tactileRetractationDone ? (
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#1D4ED8", marginBottom:8 }}>Droit de rétractation</div>
+                    <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
+                      Ce contrat est conclu à distance avec un particulier. La loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si la prestation peut commencer avant la fin de ce délai.
+                    </div>
+                    <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
+                      <input type="checkbox" checked={tactileRetractationChecked} onChange={e => setTactileRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
+                      <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{RETRACTATION_WAIVER_TEXT}</span>
+                    </label>
+                    <button
+                      onClick={handleTactileRetractationContinue}
+                      disabled={tactileRetractationWaiving}
+                      style={{ width:"100%", marginTop:12, padding:"11px 16px", background: !tactileRetractationWaiving ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:8, cursor: !tactileRetractationWaiving ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
+                    >{tactileRetractationWaiving ? "Enregistrement…" : (tactileRetractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
+                    <div style={{ fontSize:10, color:"#6B7280", marginTop:10, lineHeight:1.5, textAlign:"center" }}>
+                      Que tu coches ou non, tu accèdes à la signature. Ton choix, coché ou non, est horodaté et conservé.
+                    </div>
+                  </div>
+                ) : (
+                <>
                 {/* ── Bannière confiance client ── */}
                 {(() => {
                   const clientEmail = form.clientEmail || "";
@@ -14109,6 +14142,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     ) : "✅ Valider la signature du client"}
                   </button>
                 </div>
+                </>
+                )}
               </div>
             </div>
           )}
