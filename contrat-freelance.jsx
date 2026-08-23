@@ -235,6 +235,8 @@ const getHistory = async () => {
       freelanceSignature: content.freelanceSignature || contenu.freelanceSignature || null,
       signedByClientAt: content.signedByClientAt || contenu.signedByClientAt || null,
       retractationWaivedAt: content.retractationWaivedAt || contenu.retractationWaivedAt || null,
+      retractationWaiverText: content.retractationWaiverText || contenu.retractationWaiverText || null,
+      retractationConfirmationSentAt: content.retractationConfirmationSentAt || contenu.retractationConfirmationSentAt || null,
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
       paymentStatus: row.payment_status || "pending",
@@ -334,6 +336,10 @@ const getContractForSigning = async (contractId) => {
   return { ...row, content: parseContent(row.content) };
 };
 
+// Texte exact affiché au client au moment de la renonciation — figé ici pour que le texte
+// sauvegardé comme preuve soit toujours identique, mot pour mot, à ce que le client a vu et coché
+const RETRACTATION_WAIVER_TEXT = "Je demande expressément que l'exécution de la prestation commence immédiatement, avant l'expiration du délai de rétractation de 14 jours, et je reconnais renoncer à mon droit de rétractation.";
+
 // Le client (particulier) demande expressément le démarrage immédiat et renonce à son délai de rétractation de 14 jours
 const submitRetractationWaiver = async (contractId) => {
   const { data: existing, error: e1 } = await supabase
@@ -342,7 +348,30 @@ const submitRetractationWaiver = async (contractId) => {
     .eq("id", contractId)
     .single();
   if (e1) { console.error(e1); return false; }
-  const newContent = { ...parseContent(existing.content), retractationWaivedAt: new Date().toISOString() };
+  const newContent = {
+    ...parseContent(existing.content),
+    retractationWaivedAt: new Date().toISOString(),
+    retractationWaiverText: RETRACTATION_WAIVER_TEXT, // preuve : texte exact vu et accepté par le client
+  };
+  const { error: e2 } = await supabase.rpc("update_contract_content", {
+    p_contract_id: contractId,
+    p_new_content: JSON.stringify(newContent),
+    p_new_status: existing.status,
+  });
+  if (e2) { console.error(e2); return false; }
+  return true;
+};
+
+// Confirme que le freelance a envoyé la confirmation écrite exigée (art. L221-28 13° C.conso)
+// quand le livrable est un contenu numérique déjà existant, distincte de la case à cocher du client
+const submitRetractationConfirmationSent = async (contractId) => {
+  const { data: existing, error: e1 } = await supabase
+    .from("contracts")
+    .select("content, status")
+    .eq("id", contractId)
+    .single();
+  if (e1) { console.error(e1); return false; }
+  const newContent = { ...parseContent(existing.content), retractationConfirmationSentAt: new Date().toISOString() };
   const { error: e2 } = await supabase.rpc("update_contract_content", {
     p_contract_id: contractId,
     p_new_content: JSON.stringify(newContent),
@@ -411,6 +440,7 @@ const initialForm = {
   clauseInterlocuteur: true,
   clausePreavis: true,
   preavisJours: "30",
+  contenuNumeriquePret: false,
 };
 
 const validate = (step, form) => {
@@ -2036,7 +2066,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   };
 
   // ── Yousign : envoyer pour signature ──
-  const downloadPDF = (overrideForm, overrideContract, overrideFreelanceSig, overrideClientSig, overrideSignedAt) => {
+  const downloadPDF = (overrideForm, overrideContract, overrideFreelanceSig, overrideClientSig, overrideSignedAt, overrideRetractationWaivedAt) => {
     const rawForm = overrideForm || form;
     const pForm = {
       freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
@@ -2050,6 +2080,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     const pFreelanceSig = overrideFreelanceSig || null;
     const pClientSig = overrideClientSig || null;
     const pSignedAt = overrideSignedAt || null;
+    const pRetractationWaivedAt = overrideRetractationWaivedAt || null;
     if (!jsPDFReady || !window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!overrideForm) setPdfLoad(true);
     try {
@@ -2491,6 +2522,20 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       }
 
       y += 68;
+
+      // ── Mention renonciation au délai de rétractation (clients particuliers uniquement) ──
+      if (pForm.typeClient === "particulier") {
+        if (pRetractationWaivedAt) {
+          doc.setFillColor(...GREEN); doc.circle(ML + 2.5, y - 1.3, 2, "F");
+          doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREEN);
+          doc.text(`✓ Renonciation au délai de rétractation validée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
+        } else {
+          doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
+          doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
+          doc.text("Renonciation au délai de rétractation non validée à ce jour", ML + 7, y);
+        }
+        y += 8;
+      }
 
       // Mention finale
       doc.setFont("helvetica","italic"); doc.setFontSize(7);
@@ -2995,7 +3040,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         historyView={historyView}
         setHistoryView={setHistoryView}
         onBack={() => goToScreen("app")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt)}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt)}
         onDelete={async (id) => { await deleteFromHistory(id); const hist = await getHistory(); setHistory(hist); if (historyView?.id === id) setHistoryView(null); }}
         onDuplicate={async (entry) => {
           const dupForm = { ...(entry.form || {}), missionTitle: (entry.missionTitle || entry.form?.missionTitle || "") + " (copie)" };
@@ -3768,6 +3813,47 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 </div>
               </div>
 
+              {form.typeClient === "particulier" && (
+                <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+                    <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>LIVRABLE : CONTENU NUMÉRIQUE DÉJÀ EXISTANT</label>
+                    <LegalTooltip text="À cocher si vous vendez quelque chose déjà tout prêt à l'avance, comme un template ou un fichier que vous proposez tel quel à plusieurs clients. Ne cochez pas si vous réalisez un travail fait spécialement pour ce client. Si coché : dès que le client renonce à son délai de rétractation, envoyez-lui au plus vite l'email de confirmation qui apparaîtra sur la page du contrat — la loi l'exige avant la fin de son délai de 14 jours." />
+                  </div>
+                  <div
+                    onClick={() => update("contenuNumeriquePret", !form.contenuNumeriquePret)}
+                    style={{
+                      display:"flex", alignItems:"flex-start", gap:14,
+                      padding:"16px 18px",
+                      background: form.contenuNumeriquePret ? "#EFF6FF" : C.white,
+                      border:`1.5px solid ${form.contenuNumeriquePret ? "#93C5FD" : C.border}`,
+                      borderRadius:10, cursor:"pointer",
+                      transition:"all 0.2s",
+                    }}
+                  >
+                    <div style={{
+                      width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                      background: form.contenuNumeriquePret ? "#2563EB" : C.creamDD,
+                      position:"relative", transition:"background 0.2s",
+                    }}>
+                      <div style={{
+                        position:"absolute", top:3, left: form.contenuNumeriquePret ? 21 : 3,
+                        width:18, height:18, borderRadius:"50%", background:C.white,
+                        boxShadow:"0 1px 4px #00000030",
+                        transition:"left 0.2s",
+                      }}/>
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: form.contenuNumeriquePret ? "#1D4ED8" : C.textM, marginBottom:3 }}>
+                        {form.contenuNumeriquePret ? "✓ Oui, contenu déjà existant" : "Non, travail réalisé sur mesure"}
+                      </div>
+                      <div style={{ fontFamily:T.body, fontSize:12, color: form.contenuNumeriquePret ? "#2563EB" : C.textL, lineHeight:1.5 }}>
+                        Un template, un fichier standard ou une ressource déjà créée, plutôt qu'un travail fait spécifiquement pour ce client. Si oui, une confirmation écrite supplémentaire devra être envoyée au client avant la fin de son délai de rétractation.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Clause de sécurité et assurance professionnelle */}
               <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
@@ -4128,7 +4214,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 )}
               </div>
 
-              <button onClick={() => downloadPDF()} disabled={pdfLoading || !jsPDFReady} style={{
+              <button onClick={() => downloadPDF(undefined, undefined, undefined, undefined, undefined, history[0]?.retractationWaivedAt)} disabled={pdfLoading || !jsPDFReady} style={{
                 padding:"10px 16px", background: (pdfLoading||!jsPDFReady) ? "#2A4167" : C.gold,
                 color: (pdfLoading||!jsPDFReady) ? "#5A7A9A" : C.navyD,
                 border:"none", borderRadius:7, cursor:(pdfLoading||!jsPDFReady)?"not-allowed":"pointer",
@@ -6669,6 +6755,7 @@ function getRecouvrementCases(history) {
 function buildAlertsFromHistory(history) {
   if (!Array.isArray(history) || !history.length) return [];
   const alerts = [];
+  const now = new Date();
 
   // Alertes recouvrement (avant + après échéance) — même logique que la liste dans Recouvrement Ferme
   getRecouvrementCases(history).forEach(rc => {
@@ -6719,6 +6806,32 @@ function buildAlertsFromHistory(history) {
         title: "Signature en attente",
         detail: `Le contrat « ${c.missionTitle || "Sans titre"} » n'est pas encore signé électroniquement`,
         action: "mission",
+      });
+    }
+
+    // Alerte 3 : confirmation de renonciation (contenu numérique déjà existant) pas encore envoyée.
+    // Apparaît dès que le client a renoncé — mieux vaut l'envoyer tout de suite plutôt que d'attendre —
+    // et passe en retard une fois le délai légal de 14 jours dépassé.
+    if (!c.deleted && c.form?.typeClient === "particulier" && c.form?.contenuNumeriquePret && c.retractationWaivedAt && !c.retractationConfirmationSentAt && c.signedByClientAt) {
+      const deadline = new Date(c.signedByClientAt);
+      deadline.setDate(deadline.getDate() + 14);
+      const late = deadline < now;
+      const deadlineLabel = deadline.toLocaleDateString("fr-FR");
+      alerts.push({
+        id: "retractconf_" + c.id,
+        read: false,
+        icon: late ? "🚨" : "⏳",
+        accentBg: late ? "#FEF5F5" : "#FFFBEB",
+        accentIcon: late ? "#FEE2E2" : "#FEF3C7",
+        accentBorder: late ? "#FCA5A5" : "#FCD34D",
+        badgeBg: late ? "#DC2626" : "#D97706",
+        badgeText: late ? "DÉLAI DÉPASSÉ" : "À ENVOYER",
+        title: late ? "Confirmation de renonciation en retard" : "Confirmation de renonciation à envoyer",
+        detail: late
+          ? `Mission « ${c.missionTitle || "Sans titre"} » · ${c.clientName || "Client"} — le délai légal de 14 jours (${deadlineLabel}) est dépassé sans confirmation envoyée. Clique ici pour l'envoyer au plus vite.`
+          : `Mission « ${c.missionTitle || "Sans titre"} » · ${c.clientName || "Client"} — envoie dès que possible l'email de confirmation, et au plus tard le ${deadlineLabel}. Clique ici pour l'envoyer.`,
+        action: "mission",
+        contractId: c.id,
       });
     }
   });
@@ -10447,7 +10560,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                         </>
                       ) : (
                       <button
-                        onClick={() => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt)}
+                        onClick={() => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt)}
                         style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                       >⬇ PDF du contrat</button>
                       )}
@@ -10746,6 +10859,19 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     });
   };
 
+  // Envoie au client la confirmation écrite exigée (art. L221-28 13° C.conso) quand le livrable
+  // est un contenu numérique déjà existant — ouvre l'appli email du freelance, texte déjà rédigé
+  const sendRetractationConfirmation = async () => {
+    if (!historyView) return;
+    const clientEmail = historyView.form?.clientEmail || historyView.clientEmail || "";
+    const waivedDate = historyView.retractationWaivedAt ? new Date(historyView.retractationWaivedAt).toLocaleDateString("fr-FR") : "";
+    const subject = `Confirmation de votre accord — ${historyView.missionTitle || "mission"}`;
+    const body = `Bonjour ${historyView.clientName || ""},\n\nSuite à votre accord du ${waivedDate}, je vous confirme par écrit, conformément à l'article L221-28 du Code de la consommation :\n\n- Vous avez expressément demandé que l'exécution de la prestation « ${historyView.missionTitle || ""} » commence immédiatement, avant l'expiration de votre délai de rétractation de 14 jours ;\n- Vous avez reconnu renoncer à votre droit de rétractation à ce titre.\n\nCordialement,\n${historyView.form?.freelanceName || ""}`;
+    window.location.href = `mailto:${clientEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const ok = await submitRetractationConfirmationSent(historyView.id);
+    if (ok && onRefreshHistory) await onRefreshHistory();
+  };
+
   // ── Assistant IA par contrat ── répond UNIQUEMENT à partir du texte de CE contrat précis,
   // récupéré automatiquement (jamais de copier-coller par le freelance). Verrouillé sur le sujet :
   // ne doit jamais devenir un chatbot généraliste, même si le freelance essaie de dévier.
@@ -10822,6 +10948,18 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
             border:"none", borderRadius:7, cursor: jsPDFReady ? "pointer" : "not-allowed",
             fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
           }}>⬇ Télécharger PDF</button>
+          {historyView.form?.typeClient === "particulier" && historyView.form?.contenuNumeriquePret && historyView.retractationWaivedAt && (
+            historyView.retractationConfirmationSentAt ? (
+              <span style={{ padding:"10px 14px", background:"#0F2E1F", color:"#6FCFA0", border:"1px solid #2D6A4F", borderRadius:7, fontSize:13, fontFamily:T.body, fontWeight:600, display:"flex", alignItems:"center" }}>
+                ✓ Confirmation envoyée le {new Date(historyView.retractationConfirmationSentAt).toLocaleDateString("fr-FR")}
+              </span>
+            ) : (
+              <button onClick={sendRetractationConfirmation} style={{
+                padding:"10px 20px", background:"#7C2D12", color:"#FDBA74",
+                border:"1px solid #C2410C", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
+              }}>✉️ Envoyer la confirmation de renonciation</button>
+            )
+          )}
           <button onClick={() => handleCopy(historyView.contract)} style={{
             padding:"10px 20px",
             background: copied ? "#1E4A3A" : "#253D5E",
@@ -15121,7 +15259,7 @@ function ClientSignaturePage({ contractId }) {
           </div>
           <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
             <input type="checkbox" checked={retractationChecked} onChange={e => setRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
-            <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>Je demande expressément que l'exécution de la prestation commence immédiatement, avant l'expiration du délai de rétractation de 14 jours. Je conserve mon droit de rétractation, mais je pourrai devoir payer la part du service déjà réalisée si je m'en sers.</span>
+            <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>{RETRACTATION_WAIVER_TEXT}</span>
           </label>
           <button
             onClick={handleContinueFromRetractationScreen}
