@@ -381,6 +381,38 @@ const submitRetractationConfirmationSent = async (contractId) => {
   return true;
 };
 
+// Le client (particulier, dans les 14 jours) exerce son droit de rétractation.
+// Enregistre la date en base (la preuve légale la plus importante), puis déclenche l'envoi
+// automatique de l'accusé de réception — obligation depuis le 19 juin 2026 (art. D221-5 C.conso).
+// L'email est envoyé côté serveur (pas mailto) car il doit partir sans intervention du freelance.
+const submitRetractationExercise = async (contractId) => {
+  const { data: existing, error: e1 } = await supabase
+    .from("contracts")
+    .select("content, status")
+    .eq("id", contractId)
+    .single();
+  if (e1) { console.error(e1); return false; }
+  const newContent = { ...parseContent(existing.content), retractationExercisedAt: new Date().toISOString() };
+  const { error: e2 } = await supabase.rpc("update_contract_content", {
+    p_contract_id: contractId,
+    p_new_content: JSON.stringify(newContent),
+    p_new_status: existing.status,
+  });
+  if (e2) { console.error(e2); return false; }
+  try {
+    await fetch("/api/confirm-retraction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contractId }),
+    });
+  } catch (e) {
+    console.error("Erreur envoi accusé de réception:", e);
+    // On ne bloque jamais le client si l'email échoue : la date en base est la preuve légale,
+    // l'email est une confirmation en plus.
+  }
+  return true;
+};
+
 // Le client signe : on enregistre sa signature et on passe le statut à "signed"
 const submitClientSignature = async (contractId, clientSignature) => {
   const { data: existing, error: e1 } = await supabase
@@ -2999,7 +3031,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     <Shell>
       {AuthModalEl}
       <Header {...headerProps} />
-      <CGUPage onBack={() => goToScreen("app")} />
+      <CguPage />
     </Shell>
   );
 
@@ -15201,6 +15233,8 @@ function ClientSignaturePage({ contractId }) {
   const [retractationChecked, setRetractationChecked] = useState(false);
   const [retractationWaiving, setRetractationWaiving] = useState(false);
   const [retractationDoneLocally, setRetractationDoneLocally] = useState(false);
+  const [retractConfirming, setRetractConfirming] = useState(false);
+  const [retractSubmitting, setRetractSubmitting] = useState(false);
 
   const handleContinueFromRetractationScreen = async () => {
     if (!retractationChecked) { setRetractationDoneLocally(true); return; }
@@ -15211,11 +15245,24 @@ function ClientSignaturePage({ contractId }) {
     else setError("Erreur lors de l'enregistrement. Réessaie.");
   };
 
+  const handleConfirmRetractationExercise = async () => {
+    setRetractSubmitting(true);
+    const ok = await submitRetractationExercise(contractId);
+    setRetractSubmitting(false);
+    if (ok) {
+      setContractData(prev => ({ ...prev, content: { ...prev.content, retractationExercisedAt: new Date().toISOString() } }));
+      setRetractConfirming(false);
+    } else {
+      setError("Erreur lors de l'enregistrement. Réessaie.");
+    }
+  };
+
   useEffect(() => {
     getContractForSigning(contractId)
       .then(data => {
+        // Un contrat déjà signé n'est plus une erreur : le lien reste la page permanente
+        // du client pendant 14 jours (accès au contrat + bouton de rétractation si applicable).
         if (!data) { setError("Contrat introuvable ou lien expiré."); }
-        else if (data.status === "signed") { setError("Ce contrat a déjà été signé. Merci !"); }
         else { setContractData(data); }
         setLoading(false);
       })
@@ -15270,6 +15317,9 @@ function ClientSignaturePage({ contractId }) {
         <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
         <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Contrat signé !</div>
         <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Ta signature a bien été enregistrée. Le prestataire en est informé et recevra le contrat signé.</div>
+        <div style={{ fontSize:11.5, color:"#9CA3AF", marginTop:16, lineHeight:1.5, borderTop:"1px solid #F0EEE6", paddingTop:14 }}>
+          Garde ce lien précieusement : il te permet de revoir ton contrat à tout moment. En cas de perte, tu peux le retrouver via freeley.fr/?trouver-contrat=1.
+        </div>
       </div>
     </div>
   );
@@ -15278,13 +15328,77 @@ function ClientSignaturePage({ contractId }) {
   const contractText = content.contract || "";
   const isParticulier = content.form?.typeClient === "particulier";
   const retractationAlreadyWaived = !!content.retractationWaivedAt;
-  const showRetractationGate = isParticulier && !retractationAlreadyWaived && !retractationDoneLocally;
+  const showRetractationGate = isParticulier && !retractationAlreadyWaived && !retractationDoneLocally && contractData?.status !== "signed";
+
+  // ── Contrat déjà signé (visite après la signature, éventuellement plusieurs jours après) ──
+  // Le lien reste la page permanente du client pendant 14 jours : consultation du contrat,
+  // et bouton de rétractation si le client est particulier et que le délai n'est pas dépassé.
+  if (contractData?.status === "signed" && !done) {
+    const signedAt = content.signedByClientAt ? new Date(content.signedByClientAt) : null;
+    const retractDeadline = signedAt ? new Date(signedAt.getTime() + 14 * 24 * 60 * 60 * 1000) : null;
+    const withinRetractDeadline = retractDeadline ? (new Date() < retractDeadline) : false;
+    const retractationExercised = !!content.retractationExercisedAt;
+    const canRetract = isParticulier && withinRetractDeadline && !retractationExercised;
+
+    return (
+      <div style={wrap}>
+        <div style={{ width:"100%", maxWidth:560 }}>
+          <div style={{ textAlign:"center", marginBottom:20 }}>
+            <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
+            <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Ton contrat signé</div>
+          </div>
+
+          {retractationExercised && (
+            <div style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
+              <div style={{ fontSize:30, marginBottom:8 }}>✓</div>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Rétractation enregistrée</div>
+              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
+                Ta demande a été reçue le {new Date(content.retractationExercisedAt).toLocaleDateString("fr-FR")}. Un email de confirmation t'a été envoyé.
+              </div>
+            </div>
+          )}
+
+          {canRetract && retractConfirming && (
+            <div style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:8 }}>Confirmer la rétractation ?</div>
+              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginBottom:14 }}>
+                Cette action annule le contrat. Elle est définitive et le prestataire en sera informé immédiatement.
+              </div>
+              <div style={{ display:"flex", gap:10 }}>
+                <button onClick={() => setRetractConfirming(false)} style={{ flex:"0 0 auto", padding:"11px 16px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:12.5, color:"#5A6B80", fontWeight:500 }}>Annuler</button>
+                <button
+                  onClick={handleConfirmRetractationExercise}
+                  disabled={retractSubmitting}
+                  style={{ flex:1, padding:"11px 16px", background: !retractSubmitting ? "#DC2626" : "#D1D5DB", border:"none", borderRadius:10, cursor: !retractSubmitting ? "pointer" : "not-allowed", fontSize:13, fontWeight:700, color:"#fff" }}
+                >{retractSubmitting ? "Envoi…" : "Confirmer la rétractation"}</button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+            <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>CONTRAT SIGNÉ</div>
+            <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
+              {contractText || "Contenu du contrat indisponible."}
+            </div>
+          </div>
+
+          {canRetract && !retractConfirming && (
+            <button
+              onClick={() => setRetractConfirming(true)}
+              style={{ width:"100%", padding:"13px 18px", background:"#fff", border:"1.5px solid #DC2626", borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:700, color:"#DC2626" }}
+            >Renoncer au contrat</button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (showRetractationGate) return (
     <div style={wrap}>
       <div style={{ width:"100%", maxWidth:520 }}>
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
+
           <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Avant de consulter le contrat</div>
         </div>
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
@@ -15345,6 +15459,72 @@ function ClientSignaturePage({ contractId }) {
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
             En signant, tu acceptes les termes de ce contrat. Signature horodatée et conservée conformément au droit français.
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Page publique "j'ai perdu mon lien" : le client retrouve l'accès à son contrat par email,
+// sans jamais avoir besoin de créer de compte. Réponse toujours identique, qu'un contrat
+// corresponde ou non, pour ne jamais révéler si une adresse email est liée à un contrat.
+function FindMyContractPage() {
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!email.trim()) return;
+    setSubmitting(true);
+    try {
+      await fetch("/api/find-contract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+    } catch (e) {
+      console.error("Erreur recherche contrat:", e);
+    }
+    setSubmitting(false);
+    setSubmitted(true);
+  };
+
+  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+
+  return (
+    <div style={wrap}>
+      <div style={{ width:"100%", maxWidth:440 }}>
+        <div style={{ textAlign:"center", marginBottom:20 }}>
+          <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
+          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Retrouver mon contrat</div>
+        </div>
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          {submitted ? (
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:30, marginBottom:10 }}>✉️</div>
+              <div style={{ fontSize:13, color:"#1B2E4B", lineHeight:1.6 }}>
+                Si un contrat actif correspond à cette adresse, un email vient de t'être envoyé avec le lien pour y accéder.
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize:12.5, color:"#5A6B80", marginBottom:14, lineHeight:1.5 }}>
+                Entre l'adresse email que le freelance a utilisée pour t'envoyer ton contrat. Si un contrat existe, tu recevras un lien par email.
+              </div>
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="ton@email.com"
+                style={{ width:"100%", padding:"12px 14px", border:"1.5px solid #E8E0D0", borderRadius:10, fontSize:14, fontFamily:"'DM Sans', sans-serif", boxSizing:"border-box", marginBottom:14 }}
+              />
+              <button
+                onClick={handleSubmit}
+                disabled={!email.trim() || submitting}
+                style={{ width:"100%", padding:"12px 18px", background: (email.trim() && !submitting) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (email.trim() && !submitting) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+              >{submitting ? "Envoi…" : "Retrouver mon contrat"}</button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -15898,6 +16078,15 @@ export default function App() {
     return (
       <ErrorBoundary>
         <ClientSignaturePage contractId={signParam} />
+      </ErrorBoundary>
+    );
+  }
+  // Page "j'ai perdu mon lien" : ?trouver-contrat=1
+  const findContractParam = new URLSearchParams(window.location.search).get("trouver-contrat");
+  if (findContractParam) {
+    return (
+      <ErrorBoundary>
+        <FindMyContractPage />
       </ErrorBoundary>
     );
   }
