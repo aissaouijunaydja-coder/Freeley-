@@ -13782,6 +13782,20 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
             p_new_status: "signed",
           });
           if (e2) throw e2;
+          // Envoie au client son lien permanent vers le contrat — indispensable en signature
+          // tactile, puisque contrairement au lien à distance, le client n'en a jamais reçu.
+          // C'est ce même lien qui lui donnera accès au bouton de rétractation pendant 14 jours.
+          try {
+            await fetch("/api/send-contract-link", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ contractId }),
+            });
+          } catch (e3) {
+            console.error("Erreur envoi lien contrat au client:", e3);
+            // On ne bloque jamais la finalisation de la signature si cet envoi échoue :
+            // le contrat est déjà signé et sauvegardé, c'est l'essentiel.
+          }
         } catch (e) {
           console.error("Erreur sauvegarde signatures tactiles:", e);
           setSaveSignatureError(true);
