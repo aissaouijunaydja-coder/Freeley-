@@ -386,12 +386,11 @@ const submitRetractationConfirmationSent = async (contractId) => {
 // automatique de l'accusé de réception — obligation depuis le 19 juin 2026 (art. D221-5 C.conso).
 // L'email est envoyé côté serveur (pas mailto) car il doit partir sans intervention du freelance.
 const submitRetractationExercise = async (contractId) => {
-  const { data: existing, error: e1 } = await supabase
-    .from("contracts")
-    .select("content, status")
-    .eq("id", contractId)
-    .single();
-  if (e1) { console.error(e1); return false; }
+  // On relit via get_contract_for_signing plutôt qu'une lecture directe de la table :
+  // le client n'est jamais connecté avec un compte, la lecture directe est bloquée pour lui
+  // par les règles de sécurité, alors que cette fonction est déjà autorisée pour un visiteur anonyme.
+  const existing = await getContractForSigning(contractId);
+  if (!existing) { console.error("Contrat introuvable pour la rétractation"); return false; }
   const newContent = { ...parseContent(existing.content), retractationExercisedAt: new Date().toISOString() };
   const { error: e2 } = await supabase.rpc("update_contract_content", {
     p_contract_id: contractId,
