@@ -9087,7 +9087,8 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
         <div style={{ textAlign:"center", padding:"14px 0 4px" }}>
           <a href="/?legal=mentions" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none", marginRight:14 }}>Mentions légales</a>
           <a href="/?legal=confidentialite" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none", marginRight:14 }}>Politique de confidentialité</a>
-          <a href="/?legal=cgu" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none" }}>CGU</a>
+          <a href="/?legal=cgu" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none", marginRight:14 }}>CGU</a>
+          <a href="/?trouver-contrat=1" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, textDecoration:"none" }}>Retrouver mon contrat</a>
         </div>
       </div>
     </div>
@@ -15859,7 +15860,8 @@ function LandingPage({ onStart }) {
         <div style={{ textAlign:"center", marginTop:28 }}>
           <a href="/?legal=mentions" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none", marginRight:14 }}>Mentions légales</a>
           <a href="/?legal=confidentialite" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none", marginRight:14 }}>Politique de confidentialité</a>
-          <a href="/?legal=cgu" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none" }}>CGU</a>
+          <a href="/?legal=cgu" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none", marginRight:14 }}>CGU</a>
+          <a href="/?trouver-contrat=1" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none" }}>Retrouver mon contrat</a>
         </div>
       </div>
     </div>
