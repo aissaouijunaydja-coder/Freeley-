@@ -400,10 +400,10 @@ const submitRetractationExercise = async (contractId) => {
   });
   if (e2) { console.error(e2); return false; }
   try {
-    await fetch("/api/confirm-retraction", {
+    await fetch("/api/retraction", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contractId }),
+      body: JSON.stringify({ action: "confirm", contractId }),
     });
   } catch (e) {
     console.error("Erreur envoi accusé de réception:", e);
@@ -13786,10 +13786,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           // tactile, puisque contrairement au lien à distance, le client n'en a jamais reçu.
           // C'est ce même lien qui lui donnera accès au bouton de rétractation pendant 14 jours.
           try {
-            await fetch("/api/send-contract-link", {
+            await fetch("/api/retraction", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ contractId }),
+              body: JSON.stringify({ action: "send-link", contractId }),
             });
           } catch (e3) {
             console.error("Erreur envoi lien contrat au client:", e3);
@@ -15491,10 +15491,10 @@ function FindMyContractPage() {
     if (!email.trim()) return;
     setSubmitting(true);
     try {
-      await fetch("/api/find-contract", {
+      await fetch("/api/retraction", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({ action: "find", email: email.trim() }),
       });
     } catch (e) {
       console.error("Erreur recherche contrat:", e);
