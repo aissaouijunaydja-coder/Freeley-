@@ -336,12 +336,17 @@ const getContractForSigning = async (contractId) => {
   return { ...row, content: parseContent(row.content) };
 };
 
-// Texte exact affiché au client au moment de la renonciation — figé ici pour que le texte
-// sauvegardé comme preuve soit toujours identique, mot pour mot, à ce que le client a vu et coché
-const RETRACTATION_WAIVER_TEXT = "Je demande expressément que l'exécution de la prestation commence immédiatement, avant l'expiration du délai de rétractation de 14 jours, et je reconnais renoncer à mon droit de rétractation.";
+// Textes exacts affichés au client au moment de sa demande de démarrage anticipé — figés ici pour que
+// le texte sauvegardé comme preuve soit toujours identique, mot pour mot, à ce que le client a vu et coché.
+// Deux cas distincts selon la nature du livrable :
+// - contenu numérique déjà existant (art. L221-28, 13° C.conso) : rédaction relue par une juriste, reprise mot pour mot ;
+// - service sur mesure (art. L221-25 et L221-28, 1° C.conso) : rédaction interne, pas encore relue par une juriste.
+const RETRACTATION_WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la fourniture du contenu numérique commence avant l'expiration du délai de rétractation de quatorze (14) jours et je reconnais qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution.";
+const RETRACTATION_WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
+const getRetractationWaiverText = (isDigital) => isDigital ? RETRACTATION_WAIVER_TEXT_DIGITAL : RETRACTATION_WAIVER_TEXT_SERVICE;
 
-// Le client (particulier) demande expressément le démarrage immédiat et renonce à son délai de rétractation de 14 jours
-const submitRetractationWaiver = async (contractId) => {
+// Le client (particulier) demande expressément le démarrage avant la fin du délai de rétractation de 14 jours
+const submitRetractationWaiver = async (contractId, waiverText) => {
   const { data: existing, error: e1 } = await supabase
     .from("contracts")
     .select("content, status")
@@ -351,7 +356,7 @@ const submitRetractationWaiver = async (contractId) => {
   const newContent = {
     ...parseContent(existing.content),
     retractationWaivedAt: new Date().toISOString(),
-    retractationWaiverText: RETRACTATION_WAIVER_TEXT, // preuve : texte exact vu et accepté par le client
+    retractationWaiverText: waiverText || RETRACTATION_WAIVER_TEXT_SERVICE, // preuve : texte exact vu et accepté par le client
   };
   const { error: e2 } = await supabase.rpc("update_contract_content", {
     p_contract_id: contractId,
@@ -2581,11 +2586,15 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         if (pRetractationWaivedAt) {
           doc.setFillColor(...GREEN); doc.circle(ML + 2.5, y - 1.3, 2, "F");
           doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREEN);
-          doc.text(`✓ Renonciation au délai de rétractation validée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
+          doc.text(pForm.contenuNumeriquePret
+            ? `✓ Perte du droit de rétractation acceptée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`
+            : `✓ Démarrage avant la fin du délai de rétractation demandé le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
         } else {
           doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
           doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
-          doc.text("Renonciation au délai de rétractation non validée à ce jour", ML + 7, y);
+          doc.text(pForm.contenuNumeriquePret
+            ? "Perte du droit de rétractation non acceptée à ce jour"
+            : "Démarrage avant la fin du délai de rétractation non demandé à ce jour", ML + 7, y);
         }
         y += 8;
       }
@@ -5736,12 +5745,12 @@ function MarkdownContract({ text, form, signatureStatus, freelanceSignature, cli
                   {retractationWaivedAt ? (
                     <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 20, padding: "5px 12px" }}>
                       <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#16A34A" }} />
-                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>✓ Renonciation au délai de rétractation validée le {new Date(retractationWaivedAt).toLocaleDateString("fr-FR")}</span>
+                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>{form?.contenuNumeriquePret ? "✓ Perte du droit de rétractation acceptée le " : "✓ Démarrage avant la fin du délai de rétractation demandé le "}{new Date(retractationWaivedAt).toLocaleDateString("fr-FR")}</span>
                     </div>
                   ) : (
                     <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 20, padding: "5px 12px" }}>
                       <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#F59E0B" }} />
-                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>Renonciation au délai de rétractation pas encore validée</span>
+                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>{form?.contenuNumeriquePret ? "Perte du droit de rétractation pas encore acceptée" : "Démarrage avant la fin du délai de rétractation pas encore demandé"}</span>
                     </div>
                   )}
                 </div>
@@ -6879,10 +6888,10 @@ function buildAlertsFromHistory(history) {
         accentBorder: late ? "#FCA5A5" : "#FCD34D",
         badgeBg: late ? "#DC2626" : "#D97706",
         badgeText: late ? "DÉLAI DÉPASSÉ" : "À ENVOYER",
-        title: late ? "Confirmation de renonciation en retard" : "Confirmation de renonciation à envoyer",
+        title: late ? "Confirmation en retard : ne livre rien avant de l'envoyer" : "Confirmation à envoyer avant de livrer",
         detail: late
-          ? `Mission « ${c.missionTitle || "Sans titre"} » · ${c.clientName || "Client"} — le délai légal de 14 jours (${deadlineLabel}) est dépassé sans confirmation envoyée. Clique ici pour l'envoyer au plus vite.`
-          : `Mission « ${c.missionTitle || "Sans titre"} » · ${c.clientName || "Client"} — envoie dès que possible l'email de confirmation, et au plus tard le ${deadlineLabel}. Clique ici pour l'envoyer.`,
+          ? `Mission « ${c.missionTitle || "Sans titre"} » · ${c.clientName || "Client"} — le délai de 14 jours (${deadlineLabel}) est dépassé sans confirmation envoyée. Ne livre pas le contenu avant de l'avoir envoyée. Clique ici pour l'envoyer.`
+          : `Mission « ${c.missionTitle || "Sans titre"} » · ${c.clientName || "Client"} — envoie l'email de confirmation AVANT de livrer le contenu à ton client, et au plus tard le ${deadlineLabel}. Clique ici pour l'envoyer.`,
         action: "mission",
         contractId: c.id,
       });
@@ -7892,6 +7901,13 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
 }
 
 /* ══════════════════════════════════════════════════════════ RECOUVREMENT FERME MODAL ══ */
+// ⚠️ MISE EN DEMEURE FORMELLE MASQUÉE (échéance dépassée) en attendant la mise à jour des taux légaux de janvier
+// et une relecture juridique. Pour la réactiver : mettre FORMAL_LETTER_ENABLED à true APRÈS avoir mis à jour
+// CURRENT_PENALTY_RATE_B2B et CURRENT_LEGAL_RATE_B2C dans RecouvrementFermeModal.
+// Les relances amiables avant échéance et le message pour client silencieux restent disponibles.
+const FORMAL_LETTER_ENABLED = false;
+// Vrai quand le courrier serait une mise en demeure formelle (échéance dépassée ou non renseignée)
+const isFormalLetterPath = (dueDate) => !(dueDate && Math.floor((new Date() - new Date(dueDate)) / (1000 * 60 * 60 * 24)) < 0);
 function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
   /* ── State global ── */
   const [manualOpen, setManualOpen] = useState(false); // le mode manuel démarre toujours fermé et vide
@@ -8086,6 +8102,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
 
   const generateAuto = async () => {
     if (!autoCase) return;
+    if (!FORMAL_LETTER_ENABLED && isFormalLetterPath(autoCase.dueDate)) return; // mise en demeure formelle masquée
     setAutoStep("loading");
     setStripeLinkUrl(""); setStripeLinkCopied(false); // évite de réutiliser le lien d'un dossier précédent
     try {
@@ -8140,6 +8157,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       return;
     }
     if (!manDebtor.trim() || !manAmount.trim()) return;
+    if (!FORMAL_LETTER_ENABLED && isFormalLetterPath(manDueDate)) return; // mise en demeure formelle masquée
     setManStep("loading");
     setStripeLinkUrl(""); setStripeLinkCopied(false); // évite de réutiliser le lien d'un dossier précédent
     try {
@@ -8546,7 +8564,12 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                     </div>
                   )}
                   {/* Bouton génération auto */}
-                  {autoStep === "alert" && (
+                  {autoStep === "alert" && (!FORMAL_LETTER_ENABLED && isFormalLetterPath(autoCase.dueDate) ? (
+                    <div style={{ background:"rgba(255,255,255,0.75)", border:"1px solid #FECACA", borderRadius:11, padding:"13px 15px" }}>
+                      <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:800, color:"#991B1B", marginBottom:5 }}>La mise en demeure formelle est temporairement indisponible</div>
+                      <div style={{ fontFamily:T.body, fontSize:12, color:"#7F1D1D", lineHeight:1.6 }}>Les taux légaux sont en cours de mise à jour. Pour relancer ce client, contacte-le directement ou envoie-lui toi-même un courrier recommandé.</div>
+                    </div>
+                  ) : (
                     <button
                       onClick={generateAuto}
                       style={{ width:"100%", padding:"13px 16px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:"0 6px 24px rgba(185,28,28,0.45)", transition:"all 0.2s", letterSpacing:"0.02em" }}
@@ -8555,7 +8578,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                     >
                       <span style={{ fontSize:16 }}>⚡</span> Générer la mise en demeure IA
                     </button>
-                  )}
+                  ))}
                 </div>
 
                 {/* Loading / Résultat mode auto */}
@@ -8682,7 +8705,9 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         <label style={labelSt}>DATE D'ÉCHÉANCE</label>
                         <input type="date" style={inputStyle} value={manDueDate} onChange={e=>setManDueDate(e.target.value)} onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
                         <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
-                          Dépassée ou à venir — Freeley choisit automatiquement le bon courrier : rappel préventif (pas encore due) ou mise en demeure (en retard).
+                          {FORMAL_LETTER_ENABLED
+                            ? "Dépassée ou à venir — Freeley choisit automatiquement le bon courrier : rappel préventif (pas encore due) ou mise en demeure (en retard)."
+                            : "Pour l'instant, seul le rappel amical avant échéance est disponible : indique une échéance à venir. La mise en demeure formelle est temporairement indisponible."}
                         </div>
                       </div>
                       </>
@@ -8710,7 +8735,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         />
                       </div>
                       {(() => {
-                        const manDisabled = manMode === "silence" ? !manDebtor.trim() : (!manDebtor.trim() || !manAmount.trim());
+                        const manFormalBlocked = manMode !== "silence" && !FORMAL_LETTER_ENABLED && isFormalLetterPath(manDueDate);
+                        const manDisabled = manMode === "silence" ? !manDebtor.trim() : (!manDebtor.trim() || !manAmount.trim() || manFormalBlocked);
                         return (
                         <button
                           onClick={generateManual}
@@ -8741,11 +8767,13 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
             </div>
           )}
 
-          {/* Note informative */}
+          {/* Note informative — visible seulement quand la mise en demeure formelle est active */}
+          {FORMAL_LETTER_ENABLED && (
           <div style={{ marginTop:18, fontFamily:T.body, fontSize:10.5, color:C.textL, lineHeight:1.65, textAlign:"center", padding:"0 8px" }}>
             Cette mise en demeure s'appuie sur les articles L441-10 et D441-5 du Code de commerce.<br/>
             <span style={{ color:"#991B1B", fontWeight:600 }}>Indemnité forfaitaire de 40€ + pénalités BCE + 10 pts.</span>
           </div>
+          )}
         </div>
       </div>
     </div>
@@ -10798,6 +10826,7 @@ function CGUPage({ onBack }) {
 
 function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe, setForm, signingContractId, setSigningContractId, setShowTactileSign, remoteSignLink, setRemoteSignLink, showRemoteSignPad, setShowRemoteSignPad, remoteSigHasStrokes, setRemoteSigHasStrokes, remoteSignLoading, remoteSignCopied, setRemoteSignCopied, remoteSigCanvasRef, startRemoteSigDraw, drawRemoteSig, endRemoteSigDraw, clearRemoteSig, handleRemoteSign }) {
   const [copied, setCopied] = useState(false);
+  const [retractMailOpenedFor, setRetractMailOpenedFor] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
   const [showAssistantModal, setShowAssistantModal] = useState(false);
@@ -10915,15 +10944,26 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
   // Envoie au client la confirmation écrite exigée (art. L221-28 13° C.conso) quand le livrable
   // est un contenu numérique déjà existant — ouvre l'appli email du freelance, texte déjà rédigé
-  const sendRetractationConfirmation = async () => {
+  // Étape 1 : ouvre l'email pré-rédigé dans la messagerie du freelance. On n'enregistre PAS encore l'envoi :
+  // ouvrir la messagerie ne prouve pas que l'email est parti.
+  const sendRetractationConfirmation = () => {
     if (!historyView) return;
     const clientEmail = historyView.form?.clientEmail || historyView.clientEmail || "";
     const waivedDate = historyView.retractationWaivedAt ? new Date(historyView.retractationWaivedAt).toLocaleDateString("fr-FR") : "";
     const subject = `Confirmation de votre accord — ${historyView.missionTitle || "mission"}`;
-    const body = `Bonjour ${historyView.clientName || ""},\n\nSuite à votre accord du ${waivedDate}, je vous confirme par écrit, conformément à l'article L221-28 du Code de la consommation :\n\n- Vous avez expressément demandé que l'exécution de la prestation « ${historyView.missionTitle || ""} » commence immédiatement, avant l'expiration de votre délai de rétractation de 14 jours ;\n- Vous avez reconnu renoncer à votre droit de rétractation à ce titre.\n\nCordialement,\n${historyView.form?.freelanceName || ""}`;
+    const body = `Bonjour ${historyView.clientName || ""},\n\nÀ la suite de votre accord exprès donné le ${waivedDate}, nous vous confirmons que vous avez consenti à ce que la fourniture du contenu numérique “${historyView.missionTitle || ""}” commence avant l'expiration du délai de rétractation de quatorze (14) jours et que vous avez reconnu qu'en conséquence vous perdrez votre droit de rétractation dès le commencement de cette exécution.\n\nCordialement,\n${historyView.form?.freelanceName || ""}`;
+    setRetractMailOpenedFor(historyView.id);
     window.location.href = `mailto:${clientEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
+  // Étape 2 : le freelance déclare avoir réellement envoyé l'email. C'est seulement là qu'on enregistre la date.
+  const markRetractationConfirmationSent = async () => {
+    if (!historyView) return;
     const ok = await submitRetractationConfirmationSent(historyView.id);
-    if (ok && onRefreshHistory) await onRefreshHistory();
+    if (ok) {
+      setRetractMailOpenedFor(null);
+      if (onRefreshHistory) await onRefreshHistory();
+    }
   };
 
   // ── Assistant IA par contrat ── répond UNIQUEMENT à partir du texte de CE contrat précis,
@@ -11007,11 +11047,25 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
               <span style={{ padding:"10px 14px", background:"#0F2E1F", color:"#6FCFA0", border:"1px solid #2D6A4F", borderRadius:7, fontSize:13, fontFamily:T.body, fontWeight:600, display:"flex", alignItems:"center" }}>
                 ✓ Confirmation envoyée le {new Date(historyView.retractationConfirmationSentAt).toLocaleDateString("fr-FR")}
               </span>
+            ) : retractMailOpenedFor === historyView.id ? (
+              <>
+                <button onClick={markRetractationConfirmationSent} style={{
+                  padding:"10px 20px", background:"#14532D", color:"#86EFAC",
+                  border:"1px solid #22C55E", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
+                }}>✓ J'ai bien envoyé l'email</button>
+                <button onClick={sendRetractationConfirmation} style={{
+                  padding:"10px 14px", background:"transparent", color:"#FDBA74",
+                  border:"1px solid #C2410C", borderRadius:7, cursor:"pointer", fontSize:12, fontFamily:T.body, transition:"all .2s",
+                }}>Rouvrir l'email</button>
+              </>
             ) : (
-              <button onClick={sendRetractationConfirmation} style={{
-                padding:"10px 20px", background:"#7C2D12", color:"#FDBA74",
-                border:"1px solid #C2410C", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
-              }}>✉️ Envoyer la confirmation de renonciation</button>
+              <>
+                <button onClick={sendRetractationConfirmation} style={{
+                  padding:"10px 20px", background:"#7C2D12", color:"#FDBA74",
+                  border:"1px solid #C2410C", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
+                }}>✉️ Ouvrir l'email de confirmation</button>
+                <span style={{ fontSize:11.5, color:"#FDBA74", fontFamily:T.body, alignSelf:"center", lineHeight:1.4 }}>À envoyer avant de livrer le contenu à ton client.</span>
+              </>
             )
           )}
           <button onClick={() => handleCopy(historyView.contract)} style={{
@@ -13678,7 +13732,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const handleTactileRetractationContinue = async () => {
     if (!tactileRetractationChecked) { setTactileRetractationDone(true); return; }
     setTactileRetractationWaiving(true);
-    if (contractId) await submitRetractationWaiver(contractId);
+    if (contractId) await submitRetractationWaiver(contractId, getRetractationWaiverText(!!form.contenuNumeriquePret));
     setTactileRetractationWaiving(false);
     setTactileRetractationDone(true);
   };
@@ -14061,11 +14115,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   <div>
                     <div style={{ fontSize:13, fontWeight:700, color:"#1D4ED8", marginBottom:8 }}>Droit de rétractation</div>
                     <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
-                      Ce contrat est conclu à distance avec un particulier. La loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si la prestation peut commencer avant la fin de ce délai.
+                      Ce contrat est conclu à distance avec un particulier. La loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si {form.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
                     </div>
                     <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
                       <input type="checkbox" checked={tactileRetractationChecked} onChange={e => setTactileRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
-                      <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{RETRACTATION_WAIVER_TEXT}</span>
+                      <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!form.contenuNumeriquePret)}</span>
                     </label>
                     <button
                       onClick={handleTactileRetractationContinue}
@@ -15275,7 +15329,7 @@ function ClientSignaturePage({ contractId }) {
   const handleContinueFromRetractationScreen = async () => {
     if (!retractationChecked) { setRetractationDoneLocally(true); return; }
     setRetractationWaiving(true);
-    const ok = await submitRetractationWaiver(contractId);
+    const ok = await submitRetractationWaiver(contractId, getRetractationWaiverText(!!contractData?.content?.form?.contenuNumeriquePret));
     setRetractationWaiving(false);
     if (ok) setRetractationDoneLocally(true);
     else setError("Erreur lors de l'enregistrement. Réessaie.");
@@ -15440,11 +15494,11 @@ function ClientSignaturePage({ contractId }) {
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Droit de rétractation</div>
           <div style={{ fontSize:12.5, color:"#5A6B80", lineHeight:1.6, marginBottom:16 }}>
-            Ce contrat est conclu à distance avec un particulier. La loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si la prestation peut commencer avant la fin de ce délai.
+            Ce contrat est conclu à distance avec un particulier. La loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si {content.form?.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
           </div>
           <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
             <input type="checkbox" checked={retractationChecked} onChange={e => setRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
-            <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>{RETRACTATION_WAIVER_TEXT}</span>
+            <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!content.form?.contenuNumeriquePret)}</span>
           </label>
           <button
             onClick={handleContinueFromRetractationScreen}
