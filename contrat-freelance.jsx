@@ -3879,7 +3879,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
                     <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>LIVRABLE : CONTENU NUMÉRIQUE DÉJÀ EXISTANT</label>
-                    <LegalTooltip text="À cocher si vous vendez quelque chose déjà tout prêt à l'avance, comme un template ou un fichier que vous proposez tel quel à plusieurs clients. Ne cochez pas si vous réalisez un travail fait spécialement pour ce client. Si coché : dès que le client renonce à son délai de rétractation, envoyez-lui au plus vite l'email de confirmation qui apparaîtra sur la page du contrat — la loi l'exige avant la fin de son délai de 14 jours." />
+                    <LegalTooltip text="À cocher si vous vendez quelque chose déjà tout prêt à l'avance, comme un template ou un fichier que vous proposez tel quel à plusieurs clients. Ne cochez pas si vous réalisez un travail fait spécialement pour ce client. Si coché : dès que le client accepte de perdre son droit de rétractation, envoyez-lui l'email de confirmation qui apparaîtra sur la page du contrat, et faites-le avant de lui livrer le contenu." />
                   </div>
                   <div
                     onClick={() => update("contenuNumeriquePret", !form.contenuNumeriquePret)}
@@ -3909,7 +3909,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                         {form.contenuNumeriquePret ? "✓ Oui, contenu déjà existant" : "Non, travail réalisé sur mesure"}
                       </div>
                       <div style={{ fontFamily:T.body, fontSize:12, color: form.contenuNumeriquePret ? "#2563EB" : C.textL, lineHeight:1.5 }}>
-                        Un template, un fichier standard ou une ressource déjà créée, plutôt qu'un travail fait spécifiquement pour ce client. Si oui, une confirmation écrite supplémentaire devra être envoyée au client avant la fin de son délai de rétractation.
+                        Un template, un fichier standard ou une ressource déjà créée, plutôt qu'un travail fait spécifiquement pour ce client. Si oui, une confirmation écrite supplémentaire devra être envoyée au client avant de lui livrer le contenu.
                       </div>
                     </div>
                   </div>
