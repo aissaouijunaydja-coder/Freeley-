@@ -15898,7 +15898,7 @@ function LandingPage({ onStart }) {
     meta.setAttribute("content", "Freeley génère tes contrats freelance, factures et NDA. Signature électronique, vérification d'entreprise, facturation électronique. Gratuit.");
   }, []);
   const features = [
-    { icon: "📝", title: "Contrats en 2 minutes", text: "Décris ta mission, l'IA rédige un contrat complet et juridiquement solide." },
+    { icon: "📝", title: "Contrats en 2 minutes", text: "Décris ta mission, ton contrat complet et juridiquement solide est prêt aussitôt." },
     { icon: "✍️", title: "Signature électronique", text: "Toi et ton client signez directement depuis votre téléphone, sans papier." },
     { icon: "💳", title: "Paiements sécurisés", text: "Lien de paiement automatique, suivi des acomptes et des soldes." },
     { icon: "🛡️", title: "Vérification client", text: "Vérifie en 30 secondes qu'une entreprise existe vraiment, avant de signer." },
@@ -15984,6 +15984,16 @@ function MentionsLegalesPage() {
       <p>
         L'ensemble des éléments composant ce site (textes, graphismes, logo) est protégé par le
         droit d'auteur. Toute reproduction non autorisée est interdite.
+      </p>
+
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Génération de contenu</h3>
+      <p>
+        Les contrats et documents proposés par Freeley sont produits à l'aide d'un système
+        d'intelligence artificielle, à partir des informations fournies par l'utilisateur. Les
+        clauses de protection ainsi que les clauses relatives à la propriété intellectuelle et
+        aux garanties ont fait l'objet d'une revue juridique par une juriste en droit des
+        affaires et du numérique. L'utilisateur reste responsable de la vérification du contenu
+        généré et de son adéquation à sa situation.
       </p>
     </LegalPageLayout>
   );
