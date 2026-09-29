@@ -10413,11 +10413,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
     <div style={{ maxWidth:960, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
       <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Tableau de bord</div>
-      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:14 }}>Vue d'ensemble de ton activité freelance.</div>
-      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8, marginBottom:28, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.5 }}>
-        <span style={{ fontSize:15 }}>✓</span>
-        Les clauses de protection, ainsi que les clauses relatives à la propriété intellectuelle et aux garanties, ont fait l'objet d'une revue juridique par une juriste en droit des affaires et du numérique.
-      </div>
+      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:28 }}>Vue d'ensemble de ton activité freelance.</div>
 
       {total === 0 ? (
         <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #1B2E4B06" }}>
