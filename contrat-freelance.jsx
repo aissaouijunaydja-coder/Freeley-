@@ -3670,6 +3670,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 onChange={v=>update("categorieMetier",v)}
                 tooltip="Adapte automatiquement les clauses du contrat : propriété intellectuelle pour le digital, garantie de conformité aux normes pour l'artisanat, confidentialité pour le conseil."
               />
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginTop:-10, marginBottom:20, display:"flex", alignItems:"center", gap:6 }}>
+                <span>✓</span> Clause de propriété intellectuelle et de garantie ayant fait l'objet d'une revue juridique par une juriste en droit des affaires et du numérique.
+              </div>
               <div className="fade-up fade-up-4" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:16 }}>
                 <Field label="Date de début *" value={form.startDate} onChange={v=>update("startDate",v)} type="date" error={errors.startDate} />
                 <Field label="Date de fin *" value={form.endDate} onChange={v=>update("endDate",v)} type="date" error={errors.endDate} />
@@ -3708,6 +3711,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               </div>
               <div className="fade-up fade-up-4">
                 <ToggleGroup label="Révisions incluses" options={["1","2","3","Illimitées"]} labels={["1","2","3","Illimitées"]} value={form.revisions} onChange={v=>update("revisions",v)} tooltip="Nombre de retours client inclus dans le prix. Au-delà, tu peux facturer des modifications supplémentaires." />
+              </div>
+
+              {/* Mention juriste — clauses de protection (retard de paiement, dédommagement, bonne conduite, suspension, assurance, interlocuteur, préavis) */}
+              <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8, marginBottom:18, fontFamily:T.body, fontSize:11.5, color:"#166534", lineHeight:1.5 }}>
+                <span style={{ fontSize:15 }}>✓</span>
+                Les clauses de protection ci-dessous ont fait l'objet d'une revue juridique par une juriste en droit des affaires et du numérique.
               </div>
 
               {/* Pénalités de retard */}
@@ -10404,7 +10413,11 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
     <div style={{ maxWidth:960, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
       <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Tableau de bord</div>
-      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:28 }}>Vue d'ensemble de ton activité freelance.</div>
+      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:14 }}>Vue d'ensemble de ton activité freelance.</div>
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8, marginBottom:28, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.5 }}>
+        <span style={{ fontSize:15 }}>✓</span>
+        Les clauses de protection, ainsi que les clauses relatives à la propriété intellectuelle et aux garanties, ont fait l'objet d'une revue juridique par une juriste en droit des affaires et du numérique.
+      </div>
 
       {total === 0 ? (
         <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #1B2E4B06" }}>
@@ -15903,6 +15916,11 @@ function LandingPage({ onStart }) {
           <div style={{ fontFamily:T.body, fontSize:16, color:C.textM, lineHeight:1.5 }}>
             L'outil gratuit qui gère tes contrats freelance, tes signatures, et tes factures — du début à la fin.
           </div>
+        </div>
+
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, padding:"11px 16px", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, marginBottom:24, fontFamily:T.body, fontSize:13, color:"#166534", lineHeight:1.5, textAlign:"center" }}>
+          <span style={{ fontSize:16 }}>✓</span>
+          Les clauses de protection, ainsi que les clauses relatives à la propriété intellectuelle et aux garanties, ont fait l'objet d'une revue juridique par une juriste en droit des affaires et du numérique.
         </div>
 
         <button onClick={onStart} style={{
