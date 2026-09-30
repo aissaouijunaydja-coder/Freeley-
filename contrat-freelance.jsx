@@ -963,7 +963,7 @@ const FAQ_ITEMS = [
     a: "Vos contrats sont sauvegardés localement dans votre session. Cliquez sur « Relancer et corriger » ci-dessus : l'app s'ouvre directement sur l'onglet « En cours » où se trouvent tous vos contrats.",
   },
   {
-    q: "L'IA ne génère plus mon contrat — que faire ?",
+    q: "Mon contrat ne se génère plus — que faire ?",
     a: "Vérifiez votre connexion internet, puis cliquez sur « Relancer et corriger ». Si le problème persiste après 2 tentatives, attendez 2 minutes (limite de quota API temporaire) et réessayez.",
   },
   {
@@ -1113,7 +1113,7 @@ class ErrorBoundary extends React.Component {
               onMouseOut={e => { if (!faqOpen) { e.currentTarget.style.borderColor = "#D8D4CB"; e.currentTarget.style.background = "#FFFFFF"; }}}
             >
               <span>🤖</span>
-              Poser une question à l'assistant IA Freeley
+              Voir les questions fréquentes
               <span style={{ marginLeft: "auto", fontSize: 16, color: "#8A8780", transform: faqOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
             </button>
 
@@ -2419,7 +2419,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.setTextColor(...GREY);
       doc.text("Les droits de propriété intellectuelle sont cédés sous condition suspensive du paiement intégral des honoraires.", ML, cy);
       cy += 5;
-      doc.text("Contrat soumis au droit français. Généré par Freeley — IA. À faire relire pour toute mission sensible.", ML, cy);
+      doc.text("Contrat soumis au droit français. Généré par Freeley. À faire relire pour toute mission sensible.", ML, cy);
 
       /* ══════════════════════════════════════════
          PAGES DE CONTENU DU CONTRAT
@@ -3649,7 +3649,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 loading={scanStep0Loading}
                 success={scanStep0Success}
                 successMsg="Vos informations ont été extraites et injectées avec succès !"
-                tooltipText="Gagnez du temps : prenez une photo de votre carte de visite ou de vos notes pour pré-remplir automatiquement les champs avec l'IA."
+                tooltipText="Gagnez du temps : prenez une photo de votre carte de visite ou de vos notes pour pré-remplir automatiquement les champs."
               />
               <Field label="Nom complet *" value={form.freelanceName} onChange={v=>update("freelanceName",v)} placeholder="Jean Dupont" error={errors.freelanceName} delay={2} />
               <Field label="Activité / Métier *" value={form.freelanceActivity} onChange={v=>update("freelanceActivity",v)} placeholder="Développeur web, Designer graphique…" error={errors.freelanceActivity} delay={3} />
@@ -3724,7 +3724,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 success={scanStep1Success}
                 successMsg="Les détails de la mission ont été extraits et configurés !"
                 successStyle="gold"
-                tooltipText="Gagnez du temps : prenez une photo de votre carte de visite ou de vos notes pour pré-remplir automatiquement les champs avec l'IA."
+                tooltipText="Gagnez du temps : prenez une photo de votre carte de visite ou de vos notes pour pré-remplir automatiquement les champs."
               />
 
               {/* Tip banner */}
@@ -4325,7 +4325,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#E8EEF5", marginBottom:4 }}>Révision avant signature</div>
                     <div style={{ fontFamily:T.body, fontSize:11.5, color:"#8BA3C0", lineHeight:1.5, marginBottom:12 }}>
-                      Colle ici le retour du client. L'IA modifiera directement le contrat (pas d'avenant, puisqu'il n'est pas encore signé).
+                      Colle ici le retour du client. Freeley modifiera directement le contrat (pas d'avenant, puisqu'il n'est pas encore signé).
                     </div>
                     <textarea
                       value={reviseMessage}
@@ -4357,7 +4357,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                           cursor: reviseLoading ? "wait" : "pointer",
                           fontFamily:T.body, fontSize:13, fontWeight:700,
                         }}
-                      >{reviseLoading ? "L'IA révise le contrat…" : "✨ Appliquer les modifications"}</button>
+                      >{reviseLoading ? "Révision du contrat en cours…" : "✨ Appliquer les modifications"}</button>
                     </div>
                   </div>
                 )}
@@ -4417,7 +4417,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           marginLeft:"auto",
           marginRight:"auto",
         }}>
-          Ce document est généré automatiquement à partir de modèles et de clauses préétablies, à l'exception de la description de la mission ci-dessus, générée par un système d'intelligence artificielle à partir des éléments renseignés par l'utilisateur. Ce contenu généré par IA peut comporter des erreurs, imprécisions ou omissions et doit être relu et corrigé avant signature. Le document ne constitue pas une consultation juridique personnalisée. Il vous appartient de vérifier son adéquation à votre situation et, si nécessaire, de consulter un avocat, notamment pour toute activité réglementée. La responsabilité de Freeley ne saurait être engagée à raison d'une utilisation inadaptée, hors faute lourde ou dolosive.
+          Le document ne constitue pas une consultation juridique personnalisée. Il vous appartient de vérifier son adéquation à votre situation et, si nécessaire, de consulter un avocat, notamment pour toute activité réglementée. La responsabilité de Freeley ne saurait être engagée à raison d'une utilisation inadaptée, hors faute lourde ou dolosive.
         </p>
       </div>
 
@@ -5120,7 +5120,7 @@ CONSIGNES :
                   marginBottom:8, textTransform:"uppercase",
                 }}>MESSAGE DU CLIENT *</label>
                 <div style={{ fontFamily:T.body, fontSize:11.5, color:"#7C3AED", marginBottom:8, lineHeight:1.5 }}>
-                  Colle ici le message que ton client t'a envoyé (SMS, email...) — l'IA comprend toute seule ce qui change.
+                  Colle ici le message que ton client t'a envoyé (SMS, email...) — Freeley comprend tout seul ce qui change.
                 </div>
                 <textarea
                   value={clientMessage}
@@ -5249,7 +5249,7 @@ CONSIGNES :
                 onMouseOut={e => { e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow=canGenerate?"0 4px 14px rgba(146,64,14,0.35)":"none"; }}
               >
                 <span style={{ fontSize:15 }}>✦</span>
-                Générer l'avenant par IA
+                Générer l'avenant
               </button>
             </div>
           </div>
@@ -5270,7 +5270,7 @@ CONSIGNES :
               Rédaction de l'avenant…
             </div>
             <div style={{ fontFamily:T.body, fontSize:13, color:"#B45309", marginBottom:28 }}>
-              L'IA rédige votre document commercial
+              Rédaction de votre document commercial
             </div>
             <div style={{ background:C.creamDD, borderRadius:8, height:6, overflow:"hidden", margin:"0 auto", maxWidth:280 }}>
               <div style={{
@@ -5849,10 +5849,10 @@ function MarkdownContract({ text, form, signatureStatus, freelanceSignature, cli
         {/* Footer */}
         <div style={{ marginTop: 28, textAlign: "center" }}>
           <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#B8B5AE", letterSpacing: "0.08em" }}>
-            Document généré par Freeley · IA
+            Document généré par Freeley
           </div>
           <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: "#C8C4BC", marginTop: 8, lineHeight: 1.5, maxWidth: 520, margin: "8px auto 0" }}>
-            Ce document est généré automatiquement à partir de modèles et de clauses préétablies, à l'exception de la description de la mission ci-dessus, générée par un système d'intelligence artificielle à partir des éléments renseignés par l'utilisateur. Ce contenu généré par IA peut comporter des erreurs, imprécisions ou omissions et doit être relu et corrigé avant signature. Le document ne constitue pas une consultation juridique personnalisée. Il vous appartient de vérifier son adéquation à votre situation et, si nécessaire, de consulter un avocat, notamment pour toute activité réglementée. La responsabilité de Freeley ne saurait être engagée à raison d'une utilisation inadaptée, hors faute lourde ou dolosive.
+            Le document ne constitue pas une consultation juridique personnalisée. Il vous appartient de vérifier son adéquation à votre situation et, si nécessaire, de consulter un avocat, notamment pour toute activité réglementée. La responsabilité de Freeley ne saurait être engagée à raison d'une utilisation inadaptée, hors faute lourde ou dolosive.
           </div>
         </div>
       </div>
@@ -6105,7 +6105,7 @@ function PricingPage({ onSelect, onBack }) {
           color={C.textL} cta={null} />
         {/* Unité */}
         <PricingCard icon="📦" title="À l'unité" price="4€" sub="par contrat"
-          features={["1 contrat complet","Scan IA + Extraction","Téléchargement PDF","Idéal 1-2 missions/an"]}
+          features={["1 contrat complet","Scan + Extraction automatique","Téléchargement PDF","Idéal 1-2 missions/an"]}
           color="#3B7DD8" cta="Choisir" onSelect={() => onSelect("unite")} />
         {/* Mensuel — highlighted */}
         <PricingCard icon="🌙" title="Mensuel" price="17€" sub="/ mois · sans engagement"
@@ -6183,7 +6183,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
       onClick: onNda,
       title: "Accord de confidentialité instantané",
       description: "Protégez vos idées avant d'envoyer un brief.",
-      example: "Votre client a une idée de projet secrète, l'IA génère un accord de confidentialité conforme en 2 secondes.",
+      example: "Votre client a une idée de projet secrète, Freeley génère un accord de confidentialité conforme en 2 secondes.",
     },
     {
       id: "recouvrement",
@@ -6196,7 +6196,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
       onClick: onRecouvrement,
       title: "Mise en demeure commerciale",
       description: "Relancez vos factures en retard efficacement.",
-      example: "Un client a dépassé l'échéance, l'IA génère une mise en demeure officielle citant le Code de commerce.",
+      example: "Un client a dépassé l'échéance, Freeley génère une mise en demeure officielle citant le Code de commerce.",
     },
     {
       id: "scanner",
@@ -6207,9 +6207,9 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
       accentBorder: "#BAE6FD",
       accentText: "#0284C7",
       onClick: onScanner,
-      title: "Analyse IA du contrat",
+      title: "Analyse du contrat",
       description: "Analysez instantanément les failles d'un contrat envoyé par un client.",
-      example: "Avant de signer, l'IA détecte les clauses abusives ou déséquilibrées qui pourraient vous exposer.",
+      example: "Avant de signer, Freeley détecte les clauses abusives ou déséquilibrées qui pourraient vous exposer.",
     },
     {
       id: "invoice",
@@ -6268,7 +6268,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
           <span style={{
             fontFamily: T.body, fontSize: 10, letterSpacing: "0.16em",
             color: C.textL, fontWeight: 700,
-          }}>VOS OUTILS IA INSTANTANÉS</span>
+          }}>VOS OUTILS INSTANTANÉS</span>
         </div>
 
         {/* Grille 2 colonnes — boutons uniquement */}
@@ -7810,7 +7810,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
           {step === "form" && (
             <div className="fade-up">
               <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.65, marginBottom:22, background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px" }}>
-                🛡️ <strong style={{color:"#1E40AF"}}>Protégez vos idées avant d'envoyer votre brief.</strong> Ce NDA est généré par l'IA en 15 secondes et couvre toutes les obligations contractuelles françaises.
+                🛡️ <strong style={{color:"#1E40AF"}}>Protégez vos idées avant d'envoyer votre brief.</strong> Ce NDA est généré en 15 secondes et couvre toutes les obligations contractuelles françaises.
               </div>
 
               {/* Type d'accord */}
@@ -7931,7 +7931,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               <div style={{ width:56, height:56, border:`3px solid ${C.creamDD}`, borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 20px" }} />
               <div style={{ fontFamily:T.display, fontSize:18, color:C.navy, fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
               <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, lineHeight:1.7 }}>
-                L'IA rédige votre NDA conforme au droit français…<br/>
+                Rédaction de votre NDA conforme au droit français…<br/>
                 <span style={{ color:C.gold, fontWeight:600 }}>Article 1240 Code civil · {durationLabel}</span>
               </div>
             </div>
@@ -8663,7 +8663,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                       onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 32px rgba(185,28,28,0.55)";}}
                       onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 6px 24px rgba(185,28,28,0.45)";}}
                     >
-                      <span style={{ fontSize:16 }}>⚡</span> Générer la mise en demeure IA
+                      <span style={{ fontSize:16 }}>⚡</span> Générer la mise en demeure
                     </button>
                   ))}
                 </div>
@@ -9206,7 +9206,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
           }}>
             {[
               { icon:"📄", text:"Contrats juridiquement solides" },
-              { icon:"🪄", text:"Scanner IA intégré" },
+              { icon:"🪄", text:"Scanner intégré" },
             ].map((item, i) => (
               <React.Fragment key={i}>
                 {i > 0 && <span style={{ width:1, height:16, background:C.border, margin:"0 16px", flexShrink:0 }} />}
@@ -9278,7 +9278,7 @@ function MagicPhotoSectionTitle({ num, title, sub, delay=1, onMagicFill, loading
             {loading ? (
               <>
                 <div style={{ width:11, height:11, border:"1.5px solid #C8D8EF", borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.7s linear infinite", flexShrink:0 }} />
-                <span style={{ fontSize:10 }}>IA…</span>
+                <span style={{ fontSize:10 }}>Analyse…</span>
               </>
             ) : (
               <>
@@ -12981,7 +12981,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
 
   const loadingMessages = [
     "Lecture du document PDF…",
-    "Analyse des clauses par l'IA…",
+    "Analyse des clauses…",
     "Analyse de conformité & règles de projet…",
     "Génération du rapport…",
   ];
@@ -13123,7 +13123,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
     doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(255,255,255);
     doc.text("Rapport d'analyse de contrat", ML, 16);
     doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-    doc.text(`Généré le ${today} via Freeley — analyse IA`, ML, 24);
+    doc.text(`Généré le ${today} via Freeley — analyse automatique`, ML, 24);
 
     y = 46;
     findings.forEach((f, i) => {
@@ -13200,7 +13200,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
               fontSize:13, color:"#48484A",
               lineHeight:1.55, letterSpacing:"-0.01em",
             }}>
-              Cette autorisation permet à l'application d'analyser votre contrat PDF ou Word afin d'en détecter les clauses et risques grâce à notre assistant IA.
+              Cette autorisation permet à l'application d'analyser votre contrat PDF ou Word afin d'en détecter les clauses et risques grâce à notre outil d'analyse.
             </div>
           </div>
 
@@ -13299,7 +13299,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                       boxShadow:"0 8px 24px #00000040",
                     }}>
                       <div style={{ fontFamily:T.body, fontSize:11.5, color:"#CBD5E1", lineHeight:1.65 }}>
-                        Pas de fichier PDF ? Prenez simplement en photo les pages d'un contrat papier ou d'un écran. L'IA se charge de numériser et d'analyser le texte automatiquement.
+                        Pas de fichier PDF ? Prenez simplement en photo les pages d'un contrat papier ou d'un écran. Freeley se charge de numériser et d'analyser le texte automatiquement.
                       </div>
                       <div
                         onClick={() => setShowPhotoTooltip(false)}
@@ -13312,7 +13312,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                   )}
                 </div>
               </div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:1 }}>Analyse IA · Vérification de conformité & points de négociation</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:1 }}>Analyse automatique · Vérification de conformité & points de négociation</div>
             </div>
           </div>
           <button onClick={onClose} style={{
@@ -13344,7 +13344,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                           Numérisation et analyse des clauses...
                         </div>
                         <div style={{ fontFamily:T.body, fontSize:12, color:"#3B7DD8", animation:"shimmer 1.2s ease-in-out infinite" }}>
-                          🧠 L'IA traite les pages photographiées…
+                          🧠 Traitement des pages photographiées…
                         </div>
                       </>
                     ) : (
@@ -13425,7 +13425,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 display:"flex", gap:8, alignItems:"flex-start",
               }}>
                 <span style={{ fontSize:14, flexShrink:0 }}>ℹ️</span>
-                <span>L'IA analyse chaque article pour détecter les anomalies, les oublis et les points de négociation commerciale avant signature.</span>
+                <span>Chaque article est analysé pour détecter les anomalies, les oublis et les points de négociation commerciale avant signature.</span>
               </div>
 
               {/* CTA */}
@@ -13544,7 +13544,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 Créez un compte pour voir le résultat
               </h3>
               <p style={{ fontFamily:"sans-serif", fontSize:13, color:"#8A8780", marginBottom:24, lineHeight:1.6 }}>
-                Votre contrat a été analysé par l'IA. Créez un compte gratuit pour accéder au rapport complet.
+                Votre contrat a été analysé. Créez un compte gratuit pour accéder au rapport complet.
               </p>
               <button onClick={() => { onClose(); }} style={{
                 width:"100%", padding:"14px", background:"#1B2E4B", color:"white",
@@ -14685,7 +14685,7 @@ function SubscriptionModal({ onClose, onSubscribe }) {
 
         {/* Features */}
         <div style={{ background:C.creamD, borderRadius:12, padding:"14px 18px", marginBottom:20 }}>
-          {["✅ Contrats IA illimités", "✅ Téléchargement PDF inclus", "✅ Historique des contrats", "✅ Support prioritaire"].map(f => (
+          {["✅ Contrats illimités", "✅ Téléchargement PDF inclus", "✅ Historique des contrats", "✅ Support prioritaire"].map(f => (
             <div key={f} style={{ fontFamily:T.body, fontSize:12, color:C.navy, lineHeight:2 }}>{f}</div>
           ))}
         </div>
@@ -16085,16 +16085,6 @@ function MentionsLegalesPage() {
         L'ensemble des éléments composant ce site (textes, graphismes, logo) est protégé par le
         droit d'auteur. Toute reproduction non autorisée est interdite.
       </p>
-
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Génération de contenu</h3>
-      <p>
-        Les contrats et documents proposés par Freeley sont produits à l'aide d'un système
-        d'intelligence artificielle, à partir des informations fournies par l'utilisateur. Les
-        clauses de protection ainsi que les clauses relatives à la propriété intellectuelle et
-        aux garanties ont fait l'objet d'une revue juridique par une juriste en droit des
-        affaires et du numérique. L'utilisateur reste responsable de la vérification du contenu
-        généré et de son adéquation à sa situation.
-      </p>
     </LegalPageLayout>
   );
 }
@@ -16155,6 +16145,18 @@ function PolitiqueConfidentialitePage() {
           Conformément au RGPD, tu disposes d'un droit d'accès, de rectification, d'effacement et
           de portabilité de tes données. Tu peux exercer ces droits en écrivant à{" "}
           <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.
+        </p>
+      </Section>
+
+      <Section title="Utilisation de l'intelligence artificielle">
+        <p>
+          Certains contenus proposés par Freeley, notamment des contrats, des documents et des
+          analyses, sont produits à l'aide d'un système d'intelligence artificielle fourni par
+          Anthropic, à partir des informations que tu saisis. Ces informations lui sont transmises
+          pour produire le contenu demandé. Les clauses de protection ainsi que les clauses
+          relatives à la propriété intellectuelle et aux garanties ont fait l'objet d'une revue
+          juridique par une juriste en droit des affaires et du numérique. Tu restes responsable de
+          la vérification du contenu généré et de son adéquation à ta situation.
         </p>
       </Section>
     </LegalPageLayout>
