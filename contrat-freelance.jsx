@@ -1934,8 +1934,10 @@ ${form.clausePreavis ? (form.typeClient === "particulier"
 ARTICLE 10 — FORCE MAJEURE
 Clause standard de force majeure conforme à l'art. 1218 du Code civil.
 
-ARTICLE 11 — DROIT APPLICABLE, MÉDIATION ET ATTRIBUTION DE JURIDICTION
-Droit français. En cas de litige, les parties s'engagent à tenter une médiation avant toute action judiciaire. Attribution de compétence au Tribunal de commerce ou au Tribunal judiciaire compétent du ressort du domicile du Prestataire.
+ARTICLE 11 — ${form.typeClient === "particulier" ? "DROIT APPLICABLE ET RÈGLEMENT DES LITIGES" : "DROIT APPLICABLE, MÉDIATION ET ATTRIBUTION DE JURIDICTION"}
+${form.typeClient === "particulier"
+  ? `Le Client étant un consommateur, rédige cet article EXACTEMENT ainsi, mot pour mot, sans ajouter aucune obligation de médiation préalable ni aucune clause attribuant compétence à un tribunal : "Le présent contrat est soumis au droit français. En cas de litige, le Client peut recourir gratuitement à un médiateur de la consommation en vue de la résolution amiable du litige, dans les conditions prévues aux articles L611-1 et suivants du Code de la consommation. Ce recours est facultatif et ne constitue pas un préalable obligatoire à la saisine du juge. Le Client peut saisir, à son choix, l'une des juridictions territorialement compétentes en vertu du Code de procédure civile ou la juridiction du lieu où il demeurait au moment de la conclusion du contrat ou de la survenance du fait dommageable, conformément à l'article R631-3 du Code de la consommation."`
+  : `Droit français. En cas de litige, les parties s'engagent à tenter une médiation avant toute action judiciaire. Attribution de compétence au Tribunal de commerce ou au Tribunal judiciaire compétent du ressort du domicile du Prestataire.`}
 
 ARTICLE 12 — DISPOSITIONS GÉNÉRALES
 Intégralité de l'accord, divisibilité des clauses, absence de renonciation, hiérarchie des documents contractuels.
@@ -10894,7 +10896,7 @@ function CGUPage({ onBack }) {
         <P>Les signatures manuscrites tactiles et électroniques proposées par Freeley ont valeur de preuve conformément au droit français. L'utilisateur reconnaît que la valeur probante d'une signature dépend des conditions de son recueil.</P>
 
         <H>7. Responsabilité</H>
-        <P>Freeley met tout en œuvre pour assurer la disponibilité et la fiabilité du service, sans garantie d'absence d'interruption ou d'erreur. La responsabilité de Freeley ne saurait être engagée pour les dommages indirects résultant de l'utilisation du service.</P>
+        <P>Freeley met tout en œuvre pour assurer la disponibilité et la fiabilité du service, sans garantie d'absence d'interruption ou d'erreur. La responsabilité de Freeley ne saurait être engagée pour les dommages indirects résultant de l'utilisation du service. Freeley n'est pas partie aux contrats conclus entre l'utilisateur et ses clients. L'utilisateur reste seul responsable des obligations légales qui lui incombent en tant que professionnel envers ses clients, notamment, lorsqu'il contracte avec des consommateurs, l'adhésion à un dispositif de médiation de la consommation et la communication des coordonnées du médiateur dont il relève.</P>
 
         <H>8. Propriété intellectuelle</H>
         <P>Les documents que tu génères t'appartiennent. L'interface, le code et les modèles de Freeley restent la propriété de leurs auteurs et ne peuvent être reproduits sans autorisation.</P>
