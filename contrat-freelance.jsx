@@ -233,8 +233,8 @@ const getHistory = async () => {
       signatureRequestId: null,
       clientSignature: content.clientSignature || contenu.clientSignature || null,
       freelanceSignature: content.freelanceSignature || contenu.freelanceSignature || null,
-      signedByClientAt: content.signedByClientAt || contenu.signedByClientAt || null,
-      retractationWaivedAt: content.retractationWaivedAt || contenu.retractationWaivedAt || null,
+      signedByClientAt: content.signedByClientAtServer || content.signedByClientAt || contenu.signedByClientAt || null,
+      retractationWaivedAt: content.retractationWaivedAtServer || content.retractationWaivedAt || contenu.retractationWaivedAt || null,
       retractationWaiverText: content.retractationWaiverText || contenu.retractationWaiverText || null,
       retractationConfirmationSentAt: content.retractationConfirmationSentAt || contenu.retractationConfirmationSentAt || null,
       avenants: content.avenants || contenu.avenants || [],
@@ -345,6 +345,40 @@ const RETRACTATION_WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la 
 const RETRACTATION_WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
 const getRetractationWaiverText = (isDigital) => isDigital ? RETRACTATION_WAIVER_TEXT_DIGITAL : RETRACTATION_WAIVER_TEXT_SERVICE;
 
+// ── Information légale sur la rétractation : modèle officiel (annexe à l'article R221-3 du Code de la
+// consommation), complété avec les coordonnées du freelance, qui est le professionnel du contrat.
+// Formulaire : modèle officiel (annexe à l'article R221-1). Textes repris mot pour mot.
+// ⚠️ Les mêmes textes existent dans api/retraction.js : si tu modifies l'un, modifie l'autre.
+const retractationCoords = (f = {}) => [f.freelanceName, f.freelanceAddress, f.freelancePhone, f.freelanceEmail].map(v => (v || "").trim()).filter(Boolean).join(", ");
+const RETRACTATION_ONLINE_REF = "la page de votre contrat sur Freeley, accessible par le lien reçu par courriel";
+const buildRetractationNotice = (f = {}, where = RETRACTATION_ONLINE_REF) => {
+  const parts = [
+    "Droit de rétractation",
+    "Vous avez le droit de vous rétracter du présent contrat sans donner de motif dans un délai de quatorze jours.",
+    "Le délai de rétractation expire quatorze jours après le jour de la conclusion du contrat.",
+    `Pour exercer le droit de rétractation, vous devez nous notifier (${retractationCoords(f)}) votre décision de rétractation du présent contrat au moyen d'une déclaration dénuée d'ambiguïté (par exemple, lettre envoyée par la poste ou courrier électronique). Vous pouvez utiliser le modèle de formulaire de rétractation mais ce n'est pas obligatoire.`,
+    `Vous pouvez également exercer votre droit de rétractation en ligne sur ${where}. Si vous utilisez cette fonctionnalité en ligne, nous vous enverrons, dans les meilleurs délais, un accusé de réception de la rétractation sur un support durable (par exemple, par courriel), y compris son contenu ainsi que la date et l'heure de sa soumission.`,
+    "Pour que le délai de rétractation soit respecté, il suffit que vous transmettiez votre communication relative à l'exercice du droit de rétractation avant l'expiration du délai de rétractation.",
+    "Effets de rétractation",
+    "En cas de rétractation de votre part du présent contrat, nous vous rembourserons tous les paiements reçus de vous, y compris les frais de livraison (à l'exception des frais supplémentaires découlant du fait que vous avez choisi, le cas échéant, un mode de livraison autre que le mode moins coûteux de livraison standard proposé par nous) sans retard excessif et, en tout état de cause, au plus tard quatorze jours à compter du jour où nous sommes informés de votre décision de rétractation du présent contrat. Nous procéderons au remboursement en utilisant le même moyen de paiement que celui que vous aurez utilisé pour la transaction initiale, sauf si vous convenez expressément d'un moyen différent ; en tout état de cause, ce remboursement n'occasionnera pas de frais pour vous.",
+  ];
+  if (!f.contenuNumeriquePret) parts.push("Si vous avez demandé de commencer la prestation de services pendant le délai de rétractation, vous devrez nous payer un montant proportionnel à ce qui vous a été fourni jusqu'au moment où vous nous avez informé de votre rétractation du présent contrat, par rapport à l'ensemble des prestations prévues par le contrat.");
+  return parts.join("\n\n");
+};
+const buildRetractationForm = (f = {}) => [
+  "Modèle de formulaire de rétractation",
+  "(Veuillez compléter et renvoyer le présent formulaire uniquement si vous souhaitez vous rétracter du contrat.)",
+  `A l'attention de ${retractationCoords(f)} :`,
+  "Je/nous (*) vous notifie/notifions (*) par la présente ma/notre (*) rétractation du contrat portant sur la vente du bien (*)/pour la prestation de services (*) ci-dessous :",
+  "Commandé le (*)/reçu le (*) :",
+  "Nom du (des) consommateur(s) :",
+  "Adresse du (des) consommateur(s) :",
+  "Signature du (des) consommateur(s) (uniquement en cas de notification du présent formulaire sur papier) :",
+  "Date :",
+  "(*) Rayez la mention inutile.",
+].join("\n\n");
+const RETRACTATION_BOX_STYLE = { maxHeight:200, overflowY:"auto", whiteSpace:"pre-wrap", fontSize:10.5, color:"#334155", lineHeight:1.55, background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:10, padding:"10px 12px", marginBottom:12, textAlign:"left" };
+
 // Le client (particulier) demande expressément le démarrage avant la fin du délai de rétractation de 14 jours
 const submitRetractationWaiver = async (contractId, waiverText) => {
   const { data: existing, error: e1 } = await supabase
@@ -364,6 +398,14 @@ const submitRetractationWaiver = async (contractId, waiverText) => {
     p_new_status: existing.status,
   });
   if (e2) { console.error(e2); return false; }
+  // Date enregistrée aussi par le serveur (horloge serveur, plus fiable que celle du téléphone du client)
+  try {
+    await fetch("/api/retraction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "stamp-waiver", contractId }),
+    });
+  } catch (e3) { console.error("Erreur horodatage serveur de la case:", e3); }
   return true;
 };
 
@@ -432,6 +474,16 @@ const submitClientSignature = async (contractId, clientSignature) => {
     p_new_status: "signed",
   });
   if (e2) { console.error(e2); return false; }
+  // Confirmation du contrat sur support durable : email automatique envoyé par le serveur, avec le texte
+  // du contrat et, pour un particulier, l'information officielle sur la rétractation et le formulaire.
+  // Ne bloque jamais la signature si l'envoi échoue.
+  try {
+    await fetch("/api/retraction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "send-link", contractId }),
+    });
+  } catch (e3) { console.error("Erreur envoi confirmation du contrat:", e3); }
   return true;
 };
 
@@ -464,7 +516,7 @@ const submitAvenantSignature = async (contractId, avenantNum, clientSignature) =
 };
 
 const initialForm = {
-  freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
+  freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "", freelancePhone: "",
   freelanceEmail: "",
   clientName: "", clientCompany: "", clientAddress: "", clientSiret: "", clientEmail: "", clientPhone: "", typeClient: "professionnel",
   missionTitle: "", missionDescription: "", categorieMetier: "autre", startDate: "", endDate: "",
@@ -487,6 +539,7 @@ const validate = (step, form) => {
     if (!form.freelanceAddress.trim()) e.freelanceAddress = "Ton adresse est obligatoire";
     if (!form.freelanceEmail.trim()) e.freelanceEmail = "Ton email est obligatoire";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.freelanceEmail)) e.freelanceEmail = "Email invalide";
+    if (form.typeClient === "particulier" && !(form.freelancePhone || "").trim()) e.freelancePhone = "Ton téléphone est obligatoire pour un client particulier";
     if (!form.clientName.trim()) e.clientName = "Le nom du client est obligatoire";
     if (!form.clientEmail.trim()) e.clientEmail = "L'email du client est obligatoire";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.clientEmail)) e.clientEmail = "Email invalide";
@@ -2127,7 +2180,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   const downloadPDF = (overrideForm, overrideContract, overrideFreelanceSig, overrideClientSig, overrideSignedAt, overrideRetractationWaivedAt) => {
     const rawForm = overrideForm || form;
     const pForm = {
-      freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "",
+      freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "", freelancePhone: "",
       freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
       clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
       endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
@@ -2603,6 +2656,28 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.setFont("helvetica","italic"); doc.setFontSize(7);
       doc.setTextColor(...GREY);
       doc.text(`Contrat en ${1} exemplaire originaux. Droit français applicable. Freeley — ${today}`, ML, y);
+
+      // ── Annexe : information officielle sur la rétractation + formulaire (clients particuliers) ──
+      if (pForm.typeClient === "particulier") {
+        const annexTitles = ["Droit de rétractation", "Effets de rétractation", "Modèle de formulaire de rétractation"];
+        const writeAnnex = (txt) => {
+          txt.split("\n\n").forEach(par => {
+            const isTitle = annexTitles.includes(par);
+            doc.setFont("helvetica", isTitle ? "bold" : "normal"); doc.setFontSize(isTitle ? 9 : 8); doc.setTextColor(...DARK);
+            const lines = doc.splitTextToSize(par, cw);
+            checkY(lines.length * 3.6 + 3);
+            doc.text(lines, ML, y);
+            y += lines.length * 3.6 + 3;
+          });
+        };
+        newPage();
+        doc.setFont("helvetica","bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
+        doc.text("Annexe — Informations concernant l'exercice du droit de rétractation", ML, y);
+        y += 9;
+        writeAnnex(buildRetractationNotice(pForm));
+        y += 5;
+        writeAnnex(buildRetractationForm(pForm));
+      }
 
       /* ── Header/footer toutes les pages intérieures ── */
       const total = doc.internal.getNumberOfPages();
@@ -3577,6 +3652,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <Field label="Nom complet *" value={form.freelanceName} onChange={v=>update("freelanceName",v)} placeholder="Jean Dupont" error={errors.freelanceName} delay={2} />
               <Field label="Activité / Métier *" value={form.freelanceActivity} onChange={v=>update("freelanceActivity",v)} placeholder="Développeur web, Designer graphique…" error={errors.freelanceActivity} delay={3} />
               <Field label="Email professionnel *" value={form.freelanceEmail} onChange={v=>update("freelanceEmail",v)} placeholder="jean@example.com" type="email" error={errors.freelanceEmail} delay={4} />
+              <Field label={form.typeClient === "particulier" ? "Téléphone professionnel *" : "Téléphone professionnel"} value={form.freelancePhone || ""} onChange={v=>update("freelancePhone",v)} placeholder="06 12 34 56 78" type="tel" error={errors.freelancePhone} delay={4} />
               <Field label="Numéro SIRET" value={form.freelanceSiret} onChange={v=>update("freelanceSiret",v)} placeholder="123 456 789 00012 (optionnel)" delay={5} />
               <Field label="Adresse complète *" value={form.freelanceAddress} onChange={v=>update("freelanceAddress",v)} placeholder="12 rue de la Paix, 75001 Paris" error={errors.freelanceAddress} delay={5} />
               <SectionDivider label="Informations client" />
@@ -14124,8 +14200,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   <div>
                     <div style={{ fontSize:13, fontWeight:700, color:"#1D4ED8", marginBottom:8 }}>Droit de rétractation</div>
                     <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
-                      Ce contrat est conclu à distance avec un particulier. La loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si {form.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
+                      En tant que particulier, la loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si {form.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
                     </div>
+                    <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(form)}{"\n\n"}{buildRetractationForm(form)}</div>
                     <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
                       <input type="checkbox" checked={tactileRetractationChecked} onChange={e => setTactileRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
                       <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!form.contenuNumeriquePret)}</span>
@@ -14136,7 +14213,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       style={{ width:"100%", marginTop:12, padding:"11px 16px", background: !tactileRetractationWaiving ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:8, cursor: !tactileRetractationWaiving ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
                     >{tactileRetractationWaiving ? "Enregistrement…" : (tactileRetractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
                     <div style={{ fontSize:10, color:"#6B7280", marginTop:10, lineHeight:1.5, textAlign:"center" }}>
-                      Que tu coches ou non, tu accèdes à la signature. Ton choix, coché ou non, est horodaté et conservé.
+                      Que tu coches ou non, tu accèdes à la signature. Si tu coches, ta demande est horodatée et conservée.
                     </div>
                   </div>
                 ) : (
@@ -14285,6 +14362,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               {saveSignatureError && (
                 <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#B91C1C", textAlign:"left" }}>
                   ⚠️ Les signatures n'ont pas pu être sauvegardées sur le serveur (elles resteront visibles ici, mais pas dans le PDF téléchargé ni sur un autre appareil). Réessaie, ou contacte le support si ça persiste.
+                </div>
+              )}
+              {!saveSignatureError && (
+                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#1D4ED8", textAlign:"left", lineHeight:1.5 }}>
+                  📧 Un email de confirmation avec le contrat vient d'être envoyé à ton client. S'il ne le voit pas d'ici quelques minutes, dis-lui de regarder dans ses spams.
                 </div>
               )}
               {/* Big success badge */}
@@ -15332,6 +15414,7 @@ function ClientSignaturePage({ contractId }) {
   const [retractationChecked, setRetractationChecked] = useState(false);
   const [retractationWaiving, setRetractationWaiving] = useState(false);
   const [retractationDoneLocally, setRetractationDoneLocally] = useState(false);
+  const [contractReadForGate, setContractReadForGate] = useState(false); // le client a lu le contrat avant l'écran de rétractation
   const [retractConfirming, setRetractConfirming] = useState(false);
   const [retractSubmitting, setRetractSubmitting] = useState(false);
 
@@ -15416,6 +15499,11 @@ function ClientSignaturePage({ contractId }) {
         <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
         <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Contrat signé !</div>
         <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Ta signature a bien été enregistrée. Le prestataire en est informé et recevra le contrat signé.</div>
+        {contractData?.content?.form?.clientEmail && (
+          <div style={{ fontSize:13, color:"#1D4ED8", background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"10px 12px", marginTop:14, lineHeight:1.5 }}>
+            📧 Un email de confirmation avec ton contrat vient de t'être envoyé. Si tu ne le vois pas d'ici quelques minutes, regarde dans tes spams.
+          </div>
+        )}
         <div style={{ fontSize:11.5, color:"#9CA3AF", marginTop:16, lineHeight:1.5, borderTop:"1px solid #F0EEE6", paddingTop:14 }}>
           Garde ce lien précieusement : il te permet de revoir ton contrat à tout moment. En cas de perte, tu peux le retrouver via freeley.fr/?trouver-contrat=1.
         </div>
@@ -15427,7 +15515,8 @@ function ClientSignaturePage({ contractId }) {
   const contractText = content.contract || "";
   const isParticulier = content.form?.typeClient === "particulier";
   const retractationAlreadyWaived = !!content.retractationWaivedAt;
-  const showRetractationGate = isParticulier && !retractationAlreadyWaived && !retractationDoneLocally && contractData?.status !== "signed";
+  const retractationPending = isParticulier && !retractationAlreadyWaived && !retractationDoneLocally && contractData?.status !== "signed";
+  const showRetractationGate = retractationPending && contractReadForGate;
 
   // ── Contrat déjà signé (visite après la signature, éventuellement plusieurs jours après) ──
   // Le lien reste la page permanente du client pendant 14 jours : consultation du contrat,
@@ -15452,7 +15541,7 @@ function ClientSignaturePage({ contractId }) {
               <div style={{ fontSize:30, marginBottom:8 }}>✓</div>
               <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Rétractation enregistrée</div>
               <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
-                Ta demande a été reçue le {new Date(content.retractationExercisedAt).toLocaleDateString("fr-FR")}. Un email de confirmation t'a été envoyé.
+                Ta demande a été reçue le {new Date(content.retractationExercisedAtServer || content.retractationExercisedAt).toLocaleDateString("fr-FR")}.{" "}{content.form?.clientEmail ? "Un email de confirmation t'a été envoyé." : "Garde une capture de cet écran comme preuve de ta demande."}
               </div>
             </div>
           )}
@@ -15498,13 +15587,14 @@ function ClientSignaturePage({ contractId }) {
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
 
-          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Avant de consulter le contrat</div>
+          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Avant de signer le contrat</div>
         </div>
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Droit de rétractation</div>
           <div style={{ fontSize:12.5, color:"#5A6B80", lineHeight:1.6, marginBottom:16 }}>
-            Ce contrat est conclu à distance avec un particulier. La loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si {content.form?.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
+            En tant que particulier, la loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si {content.form?.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
           </div>
+          <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(content.form || {})}{"\n\n"}{buildRetractationForm(content.form || {})}</div>
           <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
             <input type="checkbox" checked={retractationChecked} onChange={e => setRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
             <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!content.form?.contenuNumeriquePret)}</span>
@@ -15513,10 +15603,11 @@ function ClientSignaturePage({ contractId }) {
             onClick={handleContinueFromRetractationScreen}
             disabled={retractationWaiving}
             style={{ width:"100%", marginTop:16, padding:"12px 18px", background: !retractationWaiving ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: !retractationWaiving ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
-          >{retractationWaiving ? "Enregistrement…" : (retractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers le contrat")}</button>
+          >{retractationWaiving ? "Enregistrement…" : (retractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:12, lineHeight:1.5, textAlign:"center" }}>
-            Que tu coches ou non, tu accèdes au contrat et tu peux le signer. Ton choix, coché ou non, est horodaté et conservé.
+            Que tu coches ou non, tu peux signer le contrat. Si tu coches, ta demande est horodatée et conservée.
           </div>
+          <button onClick={() => { setContractReadForGate(false); window.scrollTo(0, 0); }} style={{ display:"block", margin:"10px auto 0", background:"none", border:"none", color:"#1B2E4B", fontSize:12, textDecoration:"underline", cursor:"pointer" }}>← Relire le contrat</button>
         </div>
       </div>
     </div>
@@ -15537,6 +15628,12 @@ function ClientSignaturePage({ contractId }) {
           </div>
         </div>
 
+        {retractationPending ? (
+        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
+          <div style={{ fontSize:12.5, color:"#5A6B80", marginBottom:14, lineHeight:1.5 }}>Lis bien le contrat ci-dessus. L'étape suivante t'informe de ton droit de rétractation, avant la signature.</div>
+          <button onClick={() => { setContractReadForGate(true); window.scrollTo(0, 0); }} style={{ width:"100%", padding:"13px 18px", background:"#1B2E4B", border:"none", borderRadius:10, cursor:"pointer", fontSize:14, fontWeight:700, color:"#fff" }}>J'ai lu le contrat, continuer</button>
+        </div>
+        ) : (
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Ta signature</div>
           <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signe ci-dessous avec ton doigt (ou ta souris) pour accepter les termes de ce contrat.</div>
@@ -15559,6 +15656,7 @@ function ClientSignaturePage({ contractId }) {
             En signant, tu acceptes les termes de ce contrat. Signature horodatée et conservée conformément au droit français.
           </div>
         </div>
+        )}
       </div>
     </div>
   );
