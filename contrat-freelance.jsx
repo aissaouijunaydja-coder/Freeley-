@@ -1642,7 +1642,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5",
+          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
           max_tokens: 800,
           messages: [{
             role: "user",
@@ -1717,7 +1717,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5",
+          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
           max_tokens: 1500,
           messages: [{
             role: "user",
@@ -1984,7 +1984,7 @@ Continue EXACTEMENT à partir d'où le texte s'arrête (y compris en terminant l
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "claude-sonnet-4-5",
+            model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
             max_tokens: 8000,
             stream: true,
             messages: [{ role: "user", content: currentPrompt }],
@@ -2132,7 +2132,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5",
+          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
           max_tokens: 5000,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -4800,7 +4800,7 @@ CONSIGNES :
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5",
+          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
           max_tokens: 1000,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -7711,7 +7711,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
       const res = await fetch("/api/generate", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:1500, messages:[{role:"user",content:prompt}] }),
+        body: JSON.stringify({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:1500, messages:[{role:"user",content:prompt}] }),
       });
       const data = await res.json();
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
@@ -8181,7 +8181,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     const res = await fetch("/api/generate", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:2500, messages:[{role:"user",content:prompt}] }),
+      body: JSON.stringify({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:2500, messages:[{role:"user",content:prompt}] }),
     });
     const data = await res.json();
     return (data.content||[]).map(i=>i.text||"").join("\n").trim();
@@ -9455,7 +9455,7 @@ Réponds uniquement avec la description réécrite, sans guillemets ni formatage
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5",
+          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
           max_tokens: 600,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -11091,7 +11091,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
       const res = await fetch("/api/generate", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:1200, messages:[{role:"user",content:prompt}] }),
+        body: JSON.stringify({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:1200, messages:[{role:"user",content:prompt}] }),
       });
       const data = await res.json();
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
@@ -13025,7 +13025,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
       const mt = fileType && fileType.includes("pdf") ? "application/pdf" : (fileType || "image/jpeg");
       const isImg = mt.startsWith("image/");
       const src = isImg ? {type:"image",source:{type:"base64",media_type:mt,data:fileData}} : {type:"document",source:{type:"base64",media_type:"application/pdf",data:fileData}};
-      const res = await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,messages:[{role:"user",content:[src,{type:"text",text:"Analyse ce contrat en francais. Identifie clauses dangereuses, a negocier et positives. JSON: {findings:[{level:danger|warning|ok,article:nom,text:explication}]} Max 6."}]}]})})
+      const res = await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-5-5", thinking:{ type:"between_tools" },max_tokens:1500,messages:[{role:"user",content:[src,{type:"text",text:"Analyse ce contrat en francais. Identifie clauses dangereuses, a negocier et positives. JSON: {findings:[{level:danger|warning|ok,article:nom,text:explication}]} Max 6."}]}]})})
       const data = await res.json();
       const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
       const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
@@ -13048,7 +13048,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
       const mt = fileType && fileType.includes("pdf") ? "application/pdf" : (fileType || "image/jpeg");
       const isImg = mt.startsWith("image/");
       const src = isImg ? {type:"image",source:{type:"base64",media_type:mt,data:fileData}} : {type:"document",source:{type:"base64",media_type:"application/pdf",data:fileData}};
-      const res = await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:800,messages:[{role:"user",content:[src,{type:"text",text:"Extrait les infos cles de ce contrat. Reponds UNIQUEMENT en JSON: {client:string,mission:string,montant:string,acompte:string,dates:string}"}]}]})});
+      const res = await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-5-5", thinking:{ type:"between_tools" },max_tokens:800,messages:[{role:"user",content:[src,{type:"text",text:"Extrait les infos cles de ce contrat. Reponds UNIQUEMENT en JSON: {client:string,mission:string,montant:string,acompte:string,dates:string}"}]}]})});
       const data = await res.json();
       const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
       const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
