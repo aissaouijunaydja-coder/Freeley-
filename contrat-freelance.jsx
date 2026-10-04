@@ -7503,6 +7503,86 @@ const cleanNdaText = (text) => String(text || "")
   .map(line => line.includes("|") ? line.split("|").map(s => s.trim()).filter(Boolean).join(" — ") : line)
   .join("\n");
 
+// ── NDA : texte FIXE (plus aucune rédaction par l'IA). Seules les cases sont remplies : parties, objet, type, durée.
+// Structure fondée sur les clauses qui font consensus en droit français : définition, exclusions, obligations
+// (dont la non-utilisation), propriété, restitution, durée, responsabilité contractuelle (art. 1231-1 C. civ.), litiges.
+const NDA_YEARS = { "2": 2, "3": 3, "5": 5, "10": 10 };
+const buildNdaText = ({ partieA, partieB, objet, ndaType, duration, ref, date }) => {
+  const A = (partieA || "").trim();
+  const B = (partieB || "").trim();
+  const obj = (objet || "").trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
+  const years = NDA_YEARS[duration] || 3;
+  const yearsTxt = { 2: "deux (2)", 3: "trois (3)", 5: "cinq (5)", 10: "dix (10)" }[years];
+  const mutual = ndaType === "mutuel";
+  const bToA = ndaType === "unilateral_b";
+  const roles = mutual
+    ? "Chaque Partie peut communiquer des informations confidentielles à l'autre. La Partie qui communique une information est ci-après dénommée « la Partie divulgatrice » et celle qui la reçoit « la Partie réceptrice ». Les obligations du présent accord s'appliquent réciproquement à chacune des Parties."
+    : bToA
+      ? "La Partie B, qui communique des informations confidentielles, est ci-après dénommée « la Partie divulgatrice ». La Partie A, qui les reçoit, est ci-après dénommée « la Partie réceptrice »."
+      : "La Partie A, qui communique des informations confidentielles, est ci-après dénommée « la Partie divulgatrice ». La Partie B, qui les reçoit, est ci-après dénommée « la Partie réceptrice ».";
+  const preamble = mutual
+    ? `Dans le cadre de : ${obj} (ci-après « l'Objet »), les Parties sont amenées à se communiquer des informations confidentielles. Le présent accord définit les conditions dans lesquelles ces informations sont protégées.`
+    : `Dans le cadre de : ${obj} (ci-après « l'Objet »), la Partie divulgatrice est amenée à communiquer des informations confidentielles à la Partie réceptrice. Le présent accord définit les conditions dans lesquelles ces informations sont protégées.`;
+  return [
+    "ACCORD DE CONFIDENTIALITÉ (NDA)",
+    `N° ${ref}`,
+    `Établi le ${date}`,
+    "",
+    "ENTRE LES SOUSSIGNÉS :",
+    `${A}, ci-après « la Partie A »,`,
+    "ET",
+    `${B}, ci-après « la Partie B »,`,
+    "ci-après ensemble « les Parties » et individuellement « une Partie ».",
+    "",
+    roles,
+    "",
+    preamble,
+    "",
+    "ARTICLE 1 — INFORMATIONS CONFIDENTIELLES",
+    "Sont considérées comme des « Informations confidentielles » toutes les informations, de quelque nature que ce soit, notamment techniques, commerciales, financières, stratégiques ou juridiques, ainsi que le savoir-faire, les données, documents, codes, maquettes et projets, quels que soient leur forme et leur support, écrit, oral, visuel ou électronique, communiquées par la Partie divulgatrice à la Partie réceptrice dans le cadre de l'Objet, avant ou après la signature du présent accord. L'existence et le contenu des discussions entre les Parties sont également confidentiels.",
+    "",
+    "ARTICLE 2 — EXCLUSIONS",
+    "Ne sont pas des Informations confidentielles les informations dont la Partie réceptrice peut démontrer :",
+    "- qu'elles étaient dans le domaine public au moment de leur communication, ou qu'elles y sont tombées ensuite sans faute de sa part ;",
+    "- qu'elle les connaissait déjà de manière licite avant leur communication ;",
+    "- qu'elle les a reçues de manière licite d'un tiers non tenu à une obligation de confidentialité ;",
+    "- qu'elle les a développées de manière indépendante, sans utiliser les Informations confidentielles.",
+    "Lorsque la communication d'une Information confidentielle est exigée par la loi, par une décision de justice ou par une autorité compétente, la Partie réceptrice en informe préalablement la Partie divulgatrice lorsque la loi le permet, et limite la communication au strict nécessaire.",
+    "",
+    "ARTICLE 3 — OBLIGATIONS DE LA PARTIE RÉCEPTRICE",
+    "La Partie réceptrice s'engage à :",
+    "- garder les Informations confidentielles strictement confidentielles et ne pas les communiquer à un tiers sans l'accord écrit préalable de la Partie divulgatrice ;",
+    "- ne les utiliser que pour les besoins de l'Objet, à l'exclusion de toute autre fin ;",
+    "- n'y donner accès qu'aux personnes qui ont besoin de les connaître pour l'Objet, après les avoir informées de leur caractère confidentiel et s'être assurée qu'elles sont tenues à une obligation de confidentialité au moins équivalente ; elle répond du respect du présent accord par ces personnes ;",
+    "- les protéger avec le même soin que ses propres informations confidentielles, et au minimum avec un soin raisonnable ;",
+    "- ne les copier ou les reproduire que dans la mesure nécessaire à l'Objet ;",
+    "- informer sans délai la Partie divulgatrice de toute utilisation ou divulgation non autorisée dont elle aurait connaissance.",
+    "",
+    "ARTICLE 4 — PROPRIÉTÉ DES INFORMATIONS",
+    "Les Informations confidentielles restent la propriété de la Partie divulgatrice. Le présent accord ne confère à la Partie réceptrice aucun droit de propriété ni aucune licence sur les Informations confidentielles ou sur les droits de propriété intellectuelle qui s'y rattachent. Il n'oblige aucune des Parties à conclure un autre contrat.",
+    "",
+    "ARTICLE 5 — RESTITUTION OU DESTRUCTION",
+    "À la fin des discussions relatives à l'Objet, ou à tout moment sur demande écrite de la Partie divulgatrice, la Partie réceptrice restitue ou détruit, au choix de la Partie divulgatrice, l'ensemble des Informations confidentielles et de leurs copies, quel qu'en soit le support, et le confirme par écrit dans un délai de quinze (15) jours. Les copies dont la conservation est imposée par une obligation légale restent soumises au présent accord.",
+    "",
+    "ARTICLE 6 — DURÉE",
+    `Le présent accord entre en vigueur à la date de sa signature par les Parties et s'applique aux Informations confidentielles communiquées dans le cadre de l'Objet. Les obligations de confidentialité et de non-utilisation demeurent en vigueur pendant ${yearsTxt} ans à compter de la communication de la dernière Information confidentielle, que les Parties aient ou non conclu un autre contrat. Toutefois, pour les Informations confidentielles constituant un secret des affaires au sens de l'article L151-1 du Code de commerce, ces obligations demeurent en vigueur aussi longtemps qu'elles conservent ce caractère.`,
+    "",
+    "ARTICLE 7 — RESPONSABILITÉ",
+    "Tout manquement au présent accord engage la responsabilité contractuelle de la Partie réceptrice, conformément aux articles 1231-1 et suivants du Code civil, et l'oblige à réparer le préjudice subi par la Partie divulgatrice. En cas d'utilisation ou de divulgation non autorisée, la Partie divulgatrice peut en outre demander au juge, y compris en référé, toute mesure propre à faire cesser le trouble. Ces actions ne font pas obstacle à celles prévues par le Code de commerce pour la protection du secret des affaires (articles L151-1 et suivants).",
+    "",
+    "ARTICLE 8 — DISPOSITIONS GÉNÉRALES",
+    "Le présent accord exprime l'intégralité de l'accord des Parties sur son objet. Toute modification doit faire l'objet d'un écrit signé par les Parties. Le fait pour une Partie de ne pas se prévaloir d'un manquement ne vaut pas renonciation à s'en prévaloir ultérieurement. Si une stipulation est déclarée nulle, les autres stipulations conservent leur plein effet. Aucune Partie ne peut céder le présent accord sans l'accord écrit préalable de l'autre. Le présent accord est signé électroniquement, conformément aux articles 1366 et 1367 du Code civil.",
+    "",
+    "ARTICLE 9 — DROIT APPLICABLE ET LITIGES",
+    "Le présent accord est soumis au droit français. Les Parties s'efforceront de régler à l'amiable tout différend relatif à sa validité, son interprétation ou son exécution. À défaut d'accord amiable, le différend sera porté devant les juridictions françaises compétentes.",
+    "",
+    "Fait par signature électronique.",
+    "",
+    `Pour la Partie A : ${A}`,
+    `Pour la Partie B : ${B}`,
+  ].join("\n");
+};
+
 // Génère le PDF d'un NDA — partagé entre la fenêtre de création et la page "Mes NDA"
 const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSignature, clientSignature, signedAt) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
@@ -7542,7 +7622,7 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
 
     if (freelanceSignature) {
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
-      doc.text(`${partieAName || "Partie A"} (Partie Divulgatrice)`, ML, yA); yA += 6;
+      doc.text(`${partieAName || "Partie A"} (Partie A)`, ML, yA); yA += 6;
       try { doc.addImage(freelanceSignature, "PNG", ML, yA, halfW, 26); yA += 30; } catch(e) {}
       doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(120,120,120);
       doc.text("Signée à la création du document.", ML, yA); yA += 5;
@@ -7550,7 +7630,7 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
     if (clientSignature) {
       const xB = ML + halfW + 10;
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
-      doc.text(`${partieBName || "Partie B"} (Partie Réceptrice)`, xB, yB); yB += 6;
+      doc.text(`${partieBName || "Partie B"} (Partie B)`, xB, yB); yB += 6;
       try { doc.addImage(clientSignature, "PNG", xB, yB, halfW, 26); yB += 30; } catch(e) {}
       doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(120,120,120);
       const signedLabel = signedAt ? new Date(signedAt).toLocaleString("fr-FR") : today;
@@ -7600,7 +7680,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
   const [partieBEmail, setPartieBEmail] = useState("");
   const [objet, setObjet]         = useState("");
   const [ndaType, setNdaType]     = useState("unilateral"); // "unilateral" | "mutuel"
-  const [duration, setDuration]   = useState("3"); // "2" | "3" | "5" | "indeterminee"
+  const [duration, setDuration]   = useState("3"); // "2" | "3" | "5" | "10" (anciens NDA : "indeterminee")
   const [nda, setNda]             = useState("");
   const [ndaRef, setNdaRef]       = useState("");
   const [copying, setCopying]     = useState(false);
@@ -7655,7 +7735,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     return () => clearInterval(id);
   }, [step]);
 
-  const durationLabel = { "2":"2 ans", "3":"3 ans", "5":"5 ans", "indeterminee":"durée indéterminée, jusqu'à ce que l'information devienne publique" }[duration];
+  const durationLabel = { "2":"2 ans", "3":"3 ans", "5":"5 ans", "10":"10 ans", "indeterminee":"durée indéterminée, jusqu'à ce que l'information devienne publique" }[duration];
 
   // Dessin de la signature de la Partie A (toi), directement dans le formulaire
   const getPosA = (e) => {
@@ -7685,36 +7765,8 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     const ref = `NDA-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
     setNdaRef(ref);
     try {
-      const prompt = `Tu es un avocat d'affaires français. Rédige un NDA (Non-Disclosure Agreement) express, complet et juridiquement solide en droit français, entre :
-
-Partie A : ${partieA}
-Partie B : ${partieB}
-Objet / contexte du projet confidentiel : ${objet}
-Type d'accord : ${ndaType === "mutuel" ? "MUTUEL / BILATÉRAL — les deux parties se divulguent mutuellement des informations confidentielles et sont réciproquement tenues aux mêmes obligations" : "UNILATÉRAL — seule la Partie A divulgue des informations confidentielles, la Partie B les reçoit et s'engage à les protéger"}
-Durée de l'obligation de confidentialité : ${durationLabel}
-
-Structure OBLIGATOIRE :
-- En-tête : "ACCORD DE CONFIDENTIALITÉ (NDA)" + date du jour + référence — utilise EXACTEMENT cette référence, ne l'invente pas et ne la modifie pas : N° ${ref}
-- ARTICLE 1 — DÉFINITION DES INFORMATIONS CONFIDENTIELLES (adapte la rédaction selon que l'accord est unilatéral ou mutuel, précisé ci-dessus)
-- ARTICLE 2 — OBLIGATIONS DE CONFIDENTIALITÉ (durée : ${durationLabel} — reprends cette durée telle quelle, ne la recalcule pas)
-- ARTICLE 3 — EXCLUSIONS (information déjà publique, connue indépendamment…)
-- ARTICLE 4 — PROPRIÉTÉ DES INFORMATIONS
-- ARTICLE 5 — DURÉE ET RÉSILIATION
-- ARTICLE 6 — SANCTIONS ET RÉPARATION (référence art. 1240 Code civil, dommages et intérêts)
-- ARTICLE 7 — LOI APPLICABLE ET JURIDICTION (droit français, tribunal compétent)
-- BLOC SIGNATURES des deux parties
-
-MISE EN FORME — ce texte sera affiché tel quel, SANS interprétation du markdown : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Présente le texte avec des tirets ou retours à la ligne classiques uniquement.
-
-Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juridique précis. Maximum 500 mots.`;
-
-      const res = await fetch("/api/generate", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:1500, messages:[{role:"user",content:prompt}] }),
-      });
-      const data = await res.json();
-      const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
+      // Texte fixe, rempli avec les cases du formulaire (plus d'appel à l'IA)
+      const text = buildNdaText({ partieA, partieB, objet, ndaType, duration, ref, date: new Date().toLocaleDateString("fr-FR") });
       setNda(text);
       setStep("result");
       setSignLink(""); setNdaRowId(null); setNdaSaveError(false); setNdaClientSignature(null); setNdaSignedAt(null); setNdaFreelanceSignature(freelanceSig); // repart de zéro : ce nouveau NDA n'a pas encore d'id ni de lien de signature
@@ -7818,8 +7870,9 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
                 <label style={labelSt}>TYPE D'ACCORD</label>
                 <div style={{ display:"flex", gap:8 }}>
                   {[
-                    { key:"unilateral", label:"Unilatéral (A → B)" },
-                    { key:"mutuel", label:"Mutuel (A ⇄ B)" },
+                    { key:"unilateral", label:"A → B" },
+                    { key:"unilateral_b", label:"B → A" },
+                    { key:"mutuel", label:"A ⇄ B" },
                   ].map(o => (
                     <button key={o.key} type="button" onClick={() => setNdaType(o.key)} style={{
                       flex:1, padding:"9px 0", borderRadius:8, cursor:"pointer",
@@ -7831,20 +7884,20 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
                   ))}
                 </div>
                 <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
-                  {ndaType === "mutuel" ? "Les deux parties se partagent des informations confidentielles et ont les mêmes obligations." : "Seule la Partie A partage des informations ; la Partie B s'engage à les protéger."}
+                  {ndaType === "mutuel" ? "Mutuel : les deux parties se partagent des informations confidentielles et ont les mêmes obligations." : ndaType === "unilateral_b" ? "Unilatéral : seule la Partie B partage des informations ; vous vous engagez à les protéger." : "Unilatéral : seule la Partie A (vous) partage des informations ; la Partie B s'engage à les protéger."}
                 </div>
               </div>
 
               <div style={{ marginBottom:14 }}>
-                <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE A — VOUS" : "PARTIE A — VOUS (divulgatrice)"}</label>
+                <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE A — VOUS" : ndaType === "unilateral_b" ? "PARTIE A — VOUS (réceptrice)" : "PARTIE A — VOUS (divulgatrice)"}</label>
                 <input style={inputStyle} value={partieA} onChange={e=>setPartieA(e.target.value)} placeholder="Votre nom ou raison sociale" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
               </div>
               <div style={{ marginBottom:14 }}>
-                <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE B — L'AUTRE PARTIE" : "PARTIE B — LE DESTINATAIRE (réceptrice)"}</label>
+                <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE B — L'AUTRE PARTIE" : ndaType === "unilateral_b" ? "PARTIE B — CELUI QUI PARTAGE (divulgatrice)" : "PARTIE B — LE DESTINATAIRE (réceptrice)"}</label>
                 <input style={inputStyle} value={partieB} onChange={e=>setPartieB(e.target.value)} placeholder="Nom du client / partenaire" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
               </div>
               <div style={{ marginBottom:14 }}>
-                <label style={labelSt}>EMAIL DU DESTINATAIRE (optionnel)</label>
+                <label style={labelSt}>EMAIL DE LA PARTIE B (optionnel)</label>
                 <input type="email" style={inputStyle} value={partieBEmail} onChange={e=>setPartieBEmail(e.target.value)} placeholder="client@exemple.com" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
               </div>
               <div style={{ marginBottom:14 }}>
@@ -7860,7 +7913,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
                     { key:"2", label:"2 ans" },
                     { key:"3", label:"3 ans" },
                     { key:"5", label:"5 ans" },
-                    { key:"indeterminee", label:"Indéterminée" },
+                    { key:"10", label:"10 ans" },
                   ].map(o => (
                     <button key={o.key} type="button" onClick={() => setDuration(o.key)} style={{
                       flex:"1 1 auto", minWidth:80, padding:"9px 8px", borderRadius:8, cursor:"pointer",
@@ -7932,7 +7985,7 @@ Commence DIRECTEMENT par l'en-tête, sans introduction. Utilise un registre juri
               <div style={{ fontFamily:T.display, fontSize:18, color:C.navy, fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
               <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, lineHeight:1.7 }}>
                 Rédaction de votre NDA conforme au droit français…<br/>
-                <span style={{ color:C.gold, fontWeight:600 }}>Article 1240 Code civil · {durationLabel}</span>
+                <span style={{ color:C.gold, fontWeight:600 }}>Art. 1231-1 Code civil · {durationLabel}</span>
               </div>
             </div>
           )}
@@ -9173,6 +9226,13 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   <><span>{mode === "signup" ? "🛡️" : "👋"}</span> {mode === "signup" ? "Créer mon compte" : "Se connecter"}</>
                 )}
               </button>
+
+              <p style={{ fontFamily:T.body, fontSize:11, color:C.textL, textAlign:"center", lineHeight:1.6, margin:"10px 0 0" }}>
+                En continuant, y compris avec Google, vous acceptez les{" "}
+                <a href="/?legal=cgu" target="_blank" rel="noopener noreferrer" style={{ color:C.navy }}>conditions générales d'utilisation</a>{" "}
+                et confirmez utiliser Freeley pour votre activité professionnelle. Vos données sont traitées selon la{" "}
+                <a href="/?legal=confidentialite" target="_blank" rel="noopener noreferrer" style={{ color:C.navy }}>politique de confidentialité</a>.
+              </p>
 
               {mode === "login" && (
                 <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, textAlign:"center", lineHeight:1.6, margin:"8px 0 0" }}>
@@ -10863,50 +10923,6 @@ function DraftsPage({ onBack, onResume, onNewContract }) {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function CGUPage({ onBack }) {
-  const H = ({ children }) => <div style={{ fontFamily:T.display, fontSize:17, color:C.navy, fontWeight:700, marginTop:24, marginBottom:8 }}>{children}</div>;
-  const P = ({ children }) => <p style={{ fontFamily:T.body, fontSize:13.5, color:C.textM, lineHeight:1.7, marginBottom:10 }}>{children}</p>;
-  return (
-    <div style={{ maxWidth:760, margin:"0 auto", padding:"24px 16px 80px" }}>
-      <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
-      <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Conditions Générales d'Utilisation</div>
-      <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom:20 }}>Dernière mise à jour : {new Date().toLocaleDateString("fr-FR")}</div>
-
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"28px 26px", boxShadow:"0 2px 12px #1B2E4B06" }}>
-        <H>1. Objet</H>
-        <P>Freeley est un outil d'aide à la génération de contrats de prestation de services, de factures et de documents associés, destiné aux travailleurs indépendants. Les présentes conditions régissent l'utilisation du service.</P>
-
-        <H>2. Nature du service</H>
-        <P>Freeley fournit des modèles de documents générés automatiquement, y compris à l'aide d'intelligence artificielle. Ces documents sont fournis à titre d'aide et ne constituent pas un conseil juridique. L'utilisateur reste seul responsable de la vérification, de l'adaptation et de la validité juridique des documents avant leur utilisation.</P>
-
-        <H>3. Absence de conseil juridique</H>
-        <P>Freeley n'est pas un cabinet d'avocats et ne fournit pas de prestations de conseil juridique. Pour toute situation complexe ou tout litige, il est recommandé de consulter un professionnel du droit. Freeley ne saurait être tenu responsable des conséquences liées à l'utilisation des documents générés.</P>
-
-        <H>4. Compte utilisateur</H>
-        <P>L'accès à certaines fonctionnalités nécessite la création d'un compte. L'utilisateur s'engage à fournir des informations exactes et à préserver la confidentialité de ses identifiants. Il est responsable de toute activité effectuée depuis son compte.</P>
-
-        <H>5. Données personnelles (RGPD)</H>
-        <P>Les données saisies (informations de contrat, profil, coordonnées) sont conservées de manière sécurisée et ne sont pas revendues à des tiers. L'utilisateur peut demander à tout moment la suppression de son compte et de ses données, conformément au Règlement Général sur la Protection des Données.</P>
-
-        <H>6. Signature électronique</H>
-        <P>Les signatures manuscrites tactiles et électroniques proposées par Freeley ont valeur de preuve conformément au droit français. L'utilisateur reconnaît que la valeur probante d'une signature dépend des conditions de son recueil.</P>
-
-        <H>7. Responsabilité</H>
-        <P>Freeley met tout en œuvre pour assurer la disponibilité et la fiabilité du service, sans garantie d'absence d'interruption ou d'erreur. La responsabilité de Freeley ne saurait être engagée pour les dommages indirects résultant de l'utilisation du service. Freeley n'est pas partie aux contrats conclus entre l'utilisateur et ses clients. L'utilisateur reste seul responsable des obligations légales qui lui incombent en tant que professionnel envers ses clients, notamment, lorsqu'il contracte avec des consommateurs, l'adhésion à un dispositif de médiation de la consommation et la communication des coordonnées du médiateur dont il relève.</P>
-
-        <H>8. Propriété intellectuelle</H>
-        <P>Les documents que tu génères t'appartiennent. L'interface, le code et les modèles de Freeley restent la propriété de leurs auteurs et ne peuvent être reproduits sans autorisation.</P>
-
-        <H>9. Modification des CGU</H>
-        <P>Freeley se réserve le droit de modifier les présentes conditions. Les utilisateurs seront informés des modifications substantielles. L'utilisation continue du service vaut acceptation des conditions mises à jour.</P>
-
-        <H>10. Contact</H>
-        <P>Pour toute question relative aux présentes conditions, tu peux contacter l'équipe Freeley via les coordonnées indiquées sur le site.</P>
-      </div>
     </div>
   );
 }
@@ -16058,33 +16074,64 @@ function LandingPage({ onStart }) {
 }
 
 function MentionsLegalesPage() {
+  const Section = ({ title, children }) => (
+    <>
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
+      {children}
+    </>
+  );
   return (
     <LegalPageLayout title="Mentions légales">
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Éditeur du site</h3>
-      <p>
-        Ce site est édité à titre non professionnel, conformément à l'article 1-1 de la loi
-        n° 2004-575 du 21 juin 2004 pour la confiance dans l'économie numérique. L'éditeur a
-        communiqué son identité complète à l'hébergeur.
-      </p>
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : octobre 2026</p>
 
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Hébergement</h3>
-      <p>
-        Vercel Inc.<br/>
-        340 S Lemon Ave #4133, Walnut, CA 91789, États-Unis<br/>
-        https://vercel.com
-      </p>
+      <Section title="Éditeur du site">
+        <p>
+          Le site freeley.fr et l'application Freeley sont édités par Junayd Aissaoui, entrepreneur
+          individuel (EI), exerçant sous le nom commercial Freeley.<br/>
+          Adresse : 180 avenue Valéry Giscard d'Estaing, Bâtiment B, Étage 2, Appartement 22, 80000 Amiens, France<br/>
+          Téléphone : 07 67 47 50 77<br/>
+          Email : <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a><br/>
+          Immatriculation : RCS Amiens 130 333 891 — SIRET 130 333 891 00013<br/>
+          TVA : non applicable, article 293 B du CGI (franchise en base de TVA)
+        </p>
+      </Section>
 
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Contact</h3>
-      <p>
-        Pour toute question concernant le site ou son fonctionnement :{" "}
-        <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>
-      </p>
+      <Section title="Directeur de la publication">
+        <p>Junayd Aissaoui, en sa qualité d'entrepreneur individuel.</p>
+      </Section>
 
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>Propriété intellectuelle</h3>
-      <p>
-        L'ensemble des éléments composant ce site (textes, graphismes, logo) est protégé par le
-        droit d'auteur. Toute reproduction non autorisée est interdite.
-      </p>
+      <Section title="Hébergement du site">
+        <p>
+          Vercel Inc.<br/>
+          340 S Lemon Ave #4133, Walnut, CA 91789, États-Unis<br/>
+          Téléphone : +1 (559) 288-7060<br/>
+          https://vercel.com
+        </p>
+      </Section>
+
+      <Section title="Stockage des données">
+        <p>
+          Les données de l'application sont stockées par Supabase Pte. Ltd., 65 Chulia Street
+          #38-02/03, OCBC Centre, Singapour 049513, dans un centre de données situé dans l'Union
+          européenne (Irlande).<br/>
+          https://supabase.com
+        </p>
+      </Section>
+
+      <Section title="Propriété intellectuelle">
+        <p>
+          L'ensemble des éléments composant ce site et l'application (textes, modèles, graphismes,
+          logo, code) est protégé par le droit de la propriété intellectuelle. Toute reproduction
+          non autorisée est interdite.
+        </p>
+      </Section>
+
+      <Section title="Données personnelles">
+        <p>
+          Le traitement des données personnelles est décrit dans la{" "}
+          <a href="/?legal=confidentialite" style={{ color:C.gold }}>Politique de confidentialité</a>.
+        </p>
+      </Section>
     </LegalPageLayout>
   );
 }
@@ -16098,53 +16145,127 @@ function PolitiqueConfidentialitePage() {
   );
   return (
     <LegalPageLayout title="Politique de confidentialité">
-      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : août 2026</p>
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : octobre 2026</p>
 
-      <Section title="Quelles données sont collectées">
-        <p>Selon ton usage de Freeley, les données suivantes peuvent être traitées :</p>
-        <ul style={{ paddingLeft:20 }}>
-          <li>Compte : email, nom (via connexion classique ou Google)</li>
-          <li>Profil freelance : nom, activité, SIRET, adresse, numéro de TVA, coordonnées bancaires (IBAN/BIC), logo</li>
-          <li>Contrats : informations sur toi et ton client (nom, email, adresse), détails de la mission, montants</li>
-          <li>Signatures électroniques (image de la signature dessinée)</li>
-          <li>Paiements : traités directement par Stripe — Freeley ne stocke jamais de numéro de carte bancaire</li>
-        </ul>
-      </Section>
-
-      <Section title="Pourquoi ces données sont collectées">
+      <Section title="Qui est responsable de tes données">
         <p>
-          Uniquement pour permettre à Freeley de fonctionner : générer tes contrats et factures,
-          te permettre de recevoir des paiements, t'envoyer les emails nécessaires (confirmation de
-          compte, réinitialisation de mot de passe). Aucune donnée n'est vendue ni utilisée à des
-          fins publicitaires.
+          Le responsable du traitement est Junayd Aissaoui, entrepreneur individuel (EI), exerçant
+          sous le nom commercial Freeley, 180 avenue Valéry Giscard d'Estaing, Bâtiment B, Étage 2,
+          Appartement 22, 80000 Amiens. Pour toute question sur tes données, écris à{" "}
+          <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.
         </p>
       </Section>
 
-      <Section title="Avec qui ces données sont partagées">
-        <p>Freeley s'appuie sur les prestataires suivants pour fonctionner, chacun ne recevant que les données nécessaires à son rôle :</p>
-        <ul style={{ paddingLeft:20 }}>
-          <li><strong>Supabase</strong> — hébergement de la base de données et des comptes</li>
-          <li><strong>Vercel</strong> — hébergement du site</li>
-          <li><strong>Stripe</strong> — traitement des paiements</li>
-          <li><strong>Resend</strong> — envoi des emails automatiques</li>
-          <li><strong>Anthropic (Claude)</strong> — génération et analyse de tes contrats à partir des informations que tu fournis</li>
-          <li><strong>Super PDP</strong> — transmission des factures électroniques, uniquement si tu utilises cette option et pour un client professionnel</li>
+      <Section title="Les deux rôles de Freeley">
+        <p>
+          Pour les données de ton compte et de ton profil, Freeley est responsable du traitement.
+        </p>
+        <p>
+          Pour les données de tes clients que tu saisis dans Freeley (contrats, factures, accords de
+          confidentialité, signatures), Freeley agit comme sous-traitant, pour ton compte et selon tes
+          instructions, au sens de l'article 28 du RGPD. C'est toi qui en es responsable, notamment
+          pour informer tes clients. Les engagements de Freeley en tant que sous-traitant figurent
+          dans les <a href="/?legal=cgu" style={{ color:C.gold }}>CGU</a>.
+        </p>
+      </Section>
+
+      <Section title="Quelles données sont traitées">
+        <ul>
+          <li>Compte : adresse email, nom, et mot de passe ou identifiant de connexion Google.</li>
+          <li>Profil : nom, activité, SIRET, adresse, téléphone, numéro de TVA, coordonnées bancaires (IBAN et BIC), logo.</li>
+          <li>Documents : contrats, avenants, accords de confidentialité, factures, relances et analyses de contrats, avec les informations qu'ils contiennent sur toi et sur tes clients (nom, email, adresse, détails de mission, montants).</li>
+          <li>Signatures et preuves : image de la signature dessinée, dates et heures de signature, choix exprimés par un client particulier sur son droit de rétractation, et dates d'envoi des emails associés.</li>
+          <li>Paiements : traités par Stripe. Freeley ne stocke aucun numéro de carte bancaire.</li>
+          <li>Données techniques : journaux de connexion et de fonctionnement produits par nos prestataires d'hébergement.</li>
         </ul>
       </Section>
 
-      <Section title="Combien de temps ces données sont conservées">
+      <Section title="Pourquoi, et sur quelle base légale">
+        <ul>
+          <li>Fournir le service : créer et gérer ton compte, générer, faire signer, envoyer et conserver tes documents, t'envoyer les emails liés au service. Base légale : l'exécution du contrat qui nous lie, c'est-à-dire les CGU (article 6.1.b du RGPD).</li>
+          <li>Respecter nos obligations légales, comme la comptabilité, la facturation ou les demandes des autorités. Base légale : l'obligation légale (article 6.1.c du RGPD).</li>
+          <li>Assurer la sécurité du service, prévenir la fraude et corriger les erreurs. Base légale : l'intérêt légitime de Freeley à proposer un service fiable et sûr (article 6.1.f du RGPD).</li>
+        </ul>
+        <p>Freeley ne vend aucune donnée et ne fait aucune publicité ciblée.</p>
+      </Section>
+
+      <Section title="Qui reçoit tes données">
+        <p>Seules les personnes et les prestataires qui en ont besoin y ont accès. Nos prestataires agissent comme sous-traitants de Freeley :</p>
+        <ul>
+          <li>Supabase : base de données et authentification. Tes données sont stockées dans l'Union européenne, en Irlande.</li>
+          <li>Vercel : hébergement du site et exécution des fonctions du serveur.</li>
+          <li>Stripe : traitement des paiements.</li>
+          <li>Resend : envoi des emails automatiques.</li>
+          <li>Anthropic : génération et analyse de contenus à partir des informations que tu saisis.</li>
+          <li>Super PDP : transmission des factures électroniques, uniquement si tu utilises cette option.</li>
+        </ul>
+      </Section>
+
+      <Section title="Transferts hors de l'Union européenne">
         <p>
-          Tes données sont conservées tant que ton compte Freeley existe. Si tu supprimes ton
-          compte, tes données personnelles sont supprimées, sous réserve des obligations légales
-          de conservation qui pourraient s'appliquer à certains documents (factures notamment).
+          Certains de ces prestataires sont établis hors de l'Union européenne, notamment aux
+          États-Unis. Ces transferts sont encadrés soit par la décision d'adéquation de la Commission
+          européenne relative au cadre de protection des données UE–États-Unis (Data Privacy
+          Framework), lorsque le prestataire y est certifié, soit par les clauses contractuelles types
+          adoptées par la Commission européenne.
         </p>
+      </Section>
+
+      <Section title="Combien de temps tes données sont conservées">
+        <ul>
+          <li>Compte et profil : tant que ton compte est actif. Ils sont supprimés quand tu supprimes ton compte. Un compte inactif depuis trois ans peut être supprimé, après un avertissement par email.</li>
+          <li>Documents, signatures et preuves : tant que ton compte est actif, pour que tu puisses les retrouver et prouver tes accords. Tu peux les supprimer à tout moment. Avant de supprimer ton compte, télécharge-les : tu dois toi-même conserver tes contrats et tes factures pendant les durées légales qui s'appliquent à ton activité, par exemple dix ans pour les factures.</li>
+          <li>Échanges avec le support : trois ans après le dernier échange.</li>
+          <li>Journaux techniques : selon les durées de nos prestataires, et au plus un an.</li>
+        </ul>
       </Section>
 
       <Section title="Tes droits">
         <p>
-          Conformément au RGPD, tu disposes d'un droit d'accès, de rectification, d'effacement et
-          de portabilité de tes données. Tu peux exercer ces droits en écrivant à{" "}
+          Tu disposes d'un droit d'accès, de rectification, d'effacement, de limitation, d'opposition
+          et de portabilité de tes données, ainsi que du droit de définir des directives sur leur sort
+          après ton décès. Pour les exercer, écris à{" "}
           <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.
+          Nous te répondons dans un délai d'un mois. Tu peux aussi supprimer ton compte directement
+          depuis l'application.
+        </p>
+        <p>
+          Si tu estimes que tes droits ne sont pas respectés, tu peux adresser une réclamation à la
+          CNIL, sur www.cnil.fr.
+        </p>
+        <p>
+          Tes clients doivent t'adresser leurs demandes, puisque tu es responsable de leurs données.
+          Freeley t'aide à y répondre.
+        </p>
+      </Section>
+
+      <Section title="Sécurité">
+        <p>
+          Les échanges sont chiffrés (HTTPS). L'accès aux données est protégé par des identifiants et
+          des règles d'accès. Les mots de passe sont gérés par notre prestataire d'authentification et
+          ne sont jamais stockés en clair. En cas de violation de données présentant un risque,
+          Freeley en informe la CNIL et, si nécessaire, les personnes concernées, dans les conditions
+          prévues par le RGPD.
+        </p>
+      </Section>
+
+      <Section title="Cookies et stockage sur ton appareil">
+        <p>
+          Freeley n'utilise ni cookie publicitaire ni outil de mesure d'audience. L'application
+          enregistre seulement sur ton appareil les éléments strictement nécessaires à son
+          fonctionnement, comme ta session de connexion et certaines préférences. Ces éléments ne
+          nécessitent pas ton consentement.
+        </p>
+      </Section>
+
+      <Section title="Mineurs">
+        <p>Freeley est réservé aux professionnels majeurs.</p>
+      </Section>
+
+      <Section title="Modifications">
+        <p>
+          Cette politique peut évoluer, par exemple en cas de nouveau prestataire. La date de mise à
+          jour figure en haut de cette page, et les changements importants te sont signalés.
         </p>
       </Section>
 
@@ -16172,101 +16293,181 @@ function CguPage() {
   );
   return (
     <LegalPageLayout title="Conditions générales d'utilisation">
-      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : août 2026</p>
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : octobre 2026</p>
 
-      <Section title="Article 1 — Objet">
+      <Section title="Article 1 — Objet et acceptation">
         <p>
-          Les présentes conditions générales d'utilisation (CGU) définissent les modalités de
-          mise à disposition et d'utilisation du service Freeley, accessible à l'adresse freeley.fr.
-        </p>
-        <p>
-          Freeley est un outil qui permet aux freelances de générer des contrats de prestation,
-          des factures, et des documents de relance en cas d'impayé, à l'aide de l'intelligence
-          artificielle. L'utilisation du service implique l'acceptation pleine et entière des
-          présentes CGU.
+          Les présentes conditions générales d'utilisation (les « CGU ») régissent l'accès et
+          l'utilisation du service Freeley, accessible sur freeley.fr (le « Service »). L'Utilisateur
+          les accepte lors de la création de son compte. L'utilisation du Service vaut acceptation
+          des CGU en vigueur.
         </p>
       </Section>
 
-      <Section title="Article 2 — Description du service">
-        <p>Freeley propose :</p>
-        <ul style={{ paddingLeft:20 }}>
-          <li>la génération de contrats de prestation de services entre un freelance et son client, à partir des informations saisies par l'utilisateur</li>
-          <li>la génération de factures conformes à la réglementation en vigueur</li>
-          <li>la génération de documents de relance et de mise en demeure en cas d'impayé</li>
-          <li>la signature électronique des documents générés</li>
-        </ul>
+      <Section title="Article 2 — Éditeur">
         <p>
-          Les documents sont générés automatiquement à partir d'un modèle et des informations
-          fournies par l'utilisateur, avec l'assistance d'un modèle d'intelligence artificielle.
+          Le Service est édité par Junayd Aissaoui, entrepreneur individuel (EI), exerçant sous le nom
+          commercial Freeley, immatriculé au RCS d'Amiens sous le numéro 130 333 891 (ci-après
+          « Freeley »). Ses coordonnées complètes figurent dans les{" "}
+          <a href="/?legal=mentions" style={{ color:C.gold }}>mentions légales</a>.
         </p>
       </Section>
 
-      <Section title="Article 3 — Rôle de l'intelligence artificielle et responsabilité de l'utilisateur">
+      <Section title="Article 3 — Service réservé aux professionnels">
         <p>
-          <strong>Freeley génère des documents à partir d'un modèle. Ces documents ne constituent
-          pas un avis juridique et ne remplacent pas la consultation d'un avocat ou d'un
-          professionnel du droit.</strong>
-        </p>
-        <p>L'utilisateur reconnaît et accepte que :</p>
-        <ul style={{ paddingLeft:20 }}>
-          <li>il lui appartient de relire et de vérifier l'intégralité de chaque document avant de l'envoyer, de le transmettre à un tiers, ou de le signer</li>
-          <li>il est seul responsable du contenu final des documents qu'il valide, transmet ou signe, qu'ils aient été générés avec ou sans l'assistance de l'intelligence artificielle</li>
-          <li>Freeley met à disposition un outil d'assistance à la rédaction, et non un service de conseil juridique personnalisé</li>
-          <li>en cas de doute sur une clause ou une situation particulière, il est recommandé de consulter un professionnel du droit</li>
-        </ul>
-      </Section>
-
-      <Section title="Article 4 — Obligations de l'utilisateur">
-        <p>L'utilisateur s'engage à :</p>
-        <ul style={{ paddingLeft:20 }}>
-          <li>fournir des informations exactes lors de l'utilisation du service</li>
-          <li>ne pas utiliser le service à des fins illégales ou frauduleuses</li>
-          <li>vérifier la conformité de chaque document généré à sa situation avant toute utilisation</li>
-        </ul>
-      </Section>
-
-      <Section title="Article 5 — Limitation de responsabilité">
-        <p>Freeley met en œuvre les moyens raisonnables pour assurer la fiabilité du service. L'éditeur ne saurait toutefois être tenu responsable :</p>
-        <ul style={{ paddingLeft:20 }}>
-          <li>des conséquences directes ou indirectes résultant de l'utilisation d'un document généré sans relecture préalable par l'utilisateur</li>
-          <li>d'une inadéquation entre un document généré et la situation particulière de l'utilisateur, dès lors que celui-ci n'a pas correctement renseigné les informations demandées</li>
-          <li>d'une interruption temporaire du service</li>
-        </ul>
-        <p>Cette limitation ne s'applique pas en cas de faute lourde ou intentionnelle de l'éditeur.</p>
-      </Section>
-
-      <Section title="Article 6 — Disponibilité du service et évolution des tarifs">
-        <p>
-          Le service est actuellement proposé gratuitement. L'éditeur se réserve le droit de faire
-          évoluer les conditions tarifaires du service, moyennant une information préalable des
-          utilisateurs.
+          Le Service est destiné exclusivement aux professionnels, notamment aux travailleurs
+          indépendants, qui l'utilisent pour les besoins de leur activité professionnelle. En créant
+          un compte, l'Utilisateur déclare agir à des fins professionnelles. Le Service n'est pas
+          destiné aux consommateurs.
         </p>
       </Section>
 
-      <Section title="Article 7 — Propriété intellectuelle">
+      <Section title="Article 4 — Description du Service">
         <p>
-          Les documents générés par l'utilisateur à partir de ses propres informations lui
-          appartiennent. La structure, le code et les modèles utilisés par Freeley restent la
-          propriété de l'éditeur.
-        </p>
-      </Section>
-
-      <Section title="Article 8 — Données personnelles">
-        <p>
-          Le traitement des données personnelles est détaillé dans la{" "}
+          Freeley est un outil d'aide à la rédaction et à la gestion. Il permet notamment de créer des
+          contrats de prestation, des avenants, des accords de confidentialité, des factures et des
+          relances, de les faire signer électroniquement et de les suivre. Les documents sont établis
+          automatiquement à partir de modèles et des informations saisies par l'Utilisateur, à l'aide
+          de procédés automatisés décrits dans la{" "}
           <a href="/?legal=confidentialite" style={{ color:C.gold }}>Politique de confidentialité</a>.
         </p>
       </Section>
 
-      <Section title="Article 9 — Modification des CGU">
+      <Section title="Article 5 — Absence de conseil juridique">
         <p>
-          L'éditeur se réserve le droit de modifier les présentes CGU à tout moment. Les
-          utilisateurs seront informés de toute modification substantielle.
+          Freeley n'est pas un cabinet d'avocats et ne fournit aucun conseil juridique. Conformément à
+          la loi n° 71-1130 du 31 décembre 1971, Freeley n'exerce aucune activité de consultation
+          juridique ni de rédaction d'actes pour autrui. Les modèles proposés sont des documents
+          génériques que l'Utilisateur complète et personnalise lui-même.
+        </p>
+        <p>
+          L'Utilisateur reste seul responsable du choix, de l'utilisation, de l'interprétation et de la
+          personnalisation des documents, ainsi que de leur adéquation à sa situation. Il lui appartient
+          de relire et de vérifier chaque document avant de le signer, de l'envoyer ou de l'utiliser.
+          Malgré le soin apporté à leur mise à jour, Freeley ne garantit pas que les modèles soient
+          adaptés à chaque situation, ni qu'ils reflètent à tout instant l'évolution de la loi et de la
+          jurisprudence. Pour toute situation particulière, l'Utilisateur est invité à consulter un
+          professionnel du droit.
         </p>
       </Section>
 
-      <Section title="Article 10 — Droit applicable">
-        <p>Les présentes CGU sont soumises au droit français. Tout litige relève des tribunaux compétents.</p>
+      <Section title="Article 6 — Compte">
+        <p>
+          L'Utilisateur fournit des informations exactes et les tient à jour. Il garde ses
+          identifiants confidentiels, répond de toute utilisation de son compte et signale sans délai
+          toute utilisation non autorisée.
+        </p>
+      </Section>
+
+      <Section title="Article 7 — Obligations de l'Utilisateur">
+        <p>L'Utilisateur s'engage à :</p>
+        <ul>
+          <li>saisir des informations exactes, notamment sur lui-même et sur ses clients, dont il est seul responsable ;</li>
+          <li>utiliser le Service conformément à la loi, sans fraude ni atteinte aux droits des tiers ;</li>
+          <li>respecter ses propres obligations envers ses clients, notamment en matière d'information précontractuelle, de droit de rétractation, de facturation et de conservation des documents, et, lorsqu'il contracte avec des consommateurs, adhérer à un dispositif de médiation de la consommation et leur communiquer les coordonnées du médiateur dont il relève ;</li>
+          <li>disposer d'une base légale pour traiter les données de ses clients qu'il saisit dans le Service, et les informer de ce traitement.</li>
+        </ul>
+        <p>
+          Freeley n'est pas partie aux contrats conclus entre l'Utilisateur et ses clients, et
+          n'intervient pas dans leur exécution.
+        </p>
+      </Section>
+
+      <Section title="Article 8 — Signature électronique">
+        <p>
+          Le Service permet de signer des documents au moyen d'une signature électronique simple, au
+          sens du règlement (UE) n° 910/2014 dit « eIDAS », accompagnée d'un horodatage. Il appartient
+          à l'Utilisateur de vérifier que ce niveau de signature convient à l'usage qu'il en fait.
+        </p>
+      </Section>
+
+      <Section title="Article 9 — Données personnelles des clients de l'Utilisateur">
+        <p>
+          Lorsque l'Utilisateur saisit des données personnelles concernant ses clients ou d'autres
+          personnes, il agit en qualité de responsable du traitement et Freeley en qualité de
+          sous-traitant, au sens de l'article 28 du RGPD. Ces données (identité, coordonnées,
+          informations de mission et de facturation, signatures) sont traitées pour fournir le
+          Service, pendant toute la durée de son utilisation. Freeley s'engage à :
+        </p>
+        <ul>
+          <li>traiter ces données uniquement pour fournir le Service, selon les instructions de l'Utilisateur, qui résultent de son utilisation du Service ;</li>
+          <li>garantir leur confidentialité et mettre en œuvre des mesures de sécurité appropriées ;</li>
+          <li>ne recourir qu'aux sous-traitants ultérieurs listés dans la Politique de confidentialité, que l'Utilisateur autorise de manière générale, et l'informer de tout changement afin qu'il puisse s'y opposer en supprimant son compte ;</li>
+          <li>l'aider à répondre aux demandes des personnes concernées et à respecter ses obligations de sécurité ;</li>
+          <li>l'informer dans les meilleurs délais après avoir pris connaissance d'une violation de ces données ;</li>
+          <li>supprimer ces données lors de la suppression du compte, sauf obligation légale de conservation, l'Utilisateur pouvant les télécharger auparavant ;</li>
+          <li>mettre à sa disposition les informations nécessaires pour démontrer le respect de ces obligations, et contribuer aux audits dans des conditions raisonnables.</li>
+        </ul>
+      </Section>
+
+      <Section title="Article 10 — Disponibilité">
+        <p>
+          Freeley s'efforce d'assurer l'accès au Service en continu, sans pouvoir le garantir. Le
+          Service peut être interrompu, notamment pour maintenance ou en cas de défaillance d'un
+          prestataire. Freeley est tenu d'une obligation de moyens.
+        </p>
+      </Section>
+
+      <Section title="Article 11 — Responsabilité">
+        <p>
+          Freeley n'est responsable que des dommages directs et prouvés résultant d'un manquement qui
+          lui est imputable. Ne sont pas indemnisés les dommages indirects, notamment la perte de
+          chiffre d'affaires, de clientèle, de données ou d'opportunité, ni les conséquences d'un
+          document utilisé sans relecture, de données inexactes saisies par l'Utilisateur ou de
+          l'inadéquation d'un document à sa situation.
+        </p>
+        <p>
+          La responsabilité totale de Freeley est limitée au plus élevé des deux montants suivants :
+          les sommes versées par l'Utilisateur à Freeley au cours des douze mois précédant le fait
+          générateur, ou cent (100) euros. Ces limitations ne s'appliquent pas en cas de faute lourde
+          ou dolosive de Freeley, ni aux dommages corporels.
+        </p>
+      </Section>
+
+      <Section title="Article 12 — Propriété intellectuelle">
+        <p>
+          Le Service, son code, ses modèles, ses textes et ses éléments graphiques sont la propriété
+          de Freeley. L'Utilisateur peut utiliser, modifier et diffuser librement les documents qu'il
+          crée avec le Service pour les besoins de son activité, notamment en les transmettant à ses
+          clients. Il reste propriétaire des informations et contenus qu'il saisit, et autorise
+          Freeley à les héberger et à les traiter dans la seule mesure nécessaire au fonctionnement
+          du Service. Toute reproduction ou exploitation du Service ou de ses modèles en dehors de cet
+          usage est interdite.
+        </p>
+      </Section>
+
+      <Section title="Article 13 — Durée, suspension et résiliation">
+        <p>
+          Les CGU s'appliquent pendant toute la durée d'utilisation du Service. L'Utilisateur peut
+          supprimer son compte à tout moment depuis l'application. Freeley peut suspendre ou
+          supprimer un compte en cas de manquement grave aux CGU, de fraude ou d'utilisation illicite,
+          après en avoir informé l'Utilisateur, sauf urgence. Avant la suppression de son compte,
+          l'Utilisateur est invité à télécharger ses documents.
+        </p>
+      </Section>
+
+      <Section title="Article 14 — Prix">
+        <p>
+          Le Service est actuellement gratuit. Freeley pourra proposer des offres payantes. Aucune
+          fonctionnalité payante ne sera facturée sans l'accord exprès de l'Utilisateur, et toute
+          évolution tarifaire sera annoncée au moins trente (30) jours à l'avance.
+        </p>
+      </Section>
+
+      <Section title="Article 15 — Modification des CGU">
+        <p>
+          Freeley peut modifier les CGU. L'Utilisateur est informé des modifications importantes au
+          moins quinze (15) jours avant leur entrée en vigueur. S'il ne les accepte pas, il peut
+          supprimer son compte. À défaut, la poursuite de l'utilisation du Service vaut acceptation.
+        </p>
+      </Section>
+
+      <Section title="Article 16 — Droit applicable et litiges">
+        <p>
+          Les CGU sont soumises au droit français. En cas de différend, les parties recherchent
+          d'abord une solution amiable. À défaut, le litige est porté devant les juridictions
+          françaises compétentes.
+        </p>
       </Section>
 
       <Section title="Contact">
