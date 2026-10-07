@@ -336,6 +336,22 @@ const getContractForSigning = async (contractId) => {
   return { ...row, content: parseContent(row.content) };
 };
 
+// Lit le contrat juste avant de l'enregistrer. Le freelance connecté peut lire sa table directement.
+// Le client, lui, n'a jamais de compte : les règles de sécurité de la base lui bloquent la lecture
+// directe (erreur « 0 rows »). Pour lui, on passe par get_contract_for_signing, déjà autorisée.
+const readContractForUpdate = async (contractId) => {
+  const { data, error } = await supabase
+    .from("contracts")
+    .select("content, status")
+    .eq("id", contractId)
+    .maybeSingle();
+  if (!error && data) return { content: parseContent(data.content), status: data.status };
+  const viaSigning = await getContractForSigning(contractId);
+  if (viaSigning) return { content: viaSigning.content, status: viaSigning.status };
+  console.error("Contrat illisible avant enregistrement:", error);
+  return null;
+};
+
 // Textes exacts affichés au client au moment de sa demande de démarrage anticipé — figés ici pour que
 // le texte sauvegardé comme preuve soit toujours identique, mot pour mot, à ce que le client a vu et coché.
 // Deux cas distincts selon la nature du livrable :
@@ -381,14 +397,10 @@ const RETRACTATION_BOX_STYLE = { maxHeight:200, overflowY:"auto", whiteSpace:"pr
 
 // Le client (particulier) demande expressément le démarrage avant la fin du délai de rétractation de 14 jours
 const submitRetractationWaiver = async (contractId, waiverText) => {
-  const { data: existing, error: e1 } = await supabase
-    .from("contracts")
-    .select("content, status")
-    .eq("id", contractId)
-    .single();
-  if (e1) { console.error(e1); return false; }
+  const existing = await readContractForUpdate(contractId);
+  if (!existing) return false;
   const newContent = {
-    ...parseContent(existing.content),
+    ...existing.content,
     retractationWaivedAt: new Date().toISOString(),
     retractationWaiverText: waiverText || RETRACTATION_WAIVER_TEXT_SERVICE, // preuve : texte exact vu et accepté par le client
   };
@@ -461,13 +473,9 @@ const submitRetractationExercise = async (contractId) => {
 
 // Le client signe : on enregistre sa signature et on passe le statut à "signed"
 const submitClientSignature = async (contractId, clientSignature) => {
-  const { data: existing, error: e1 } = await supabase
-    .from("contracts")
-    .select("content")
-    .eq("id", contractId)
-    .single();
-  if (e1) { console.error(e1); return false; }
-  const newContent = { ...parseContent(existing.content), clientSignature, signedByClientAt: new Date().toISOString() };
+  const existing = await readContractForUpdate(contractId);
+  if (!existing) return false;
+  const newContent = { ...existing.content, clientSignature, signedByClientAt: new Date().toISOString() };
   const { error: e2 } = await supabase.rpc("update_contract_content", {
     p_contract_id: contractId,
     p_new_content: JSON.stringify(newContent),
@@ -1681,7 +1689,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     }
   };
 
-
+  const magicFillStep0 = () => setMagicFillTarget("step0");
   const magicFillStep1 = () => setMagicFillTarget("step1");
 
   // Extraction réelle via Claude Vision après capture photo
@@ -3252,6 +3260,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       <ArchivesPage
         history={history}
         onBack={() => goToScreen("history")}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt)}
         profile={profile}
         authUser={authUser}
         onRestore={async (id) => {
@@ -4378,7 +4387,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, transition:"all .2s",
                 flex:1, minWidth:0,
               }}>{copied ? "✓ Copié" : "Copier"}</button>
-              <button onClick={() => { startFreshContract(); setSignResult(null); }} style={{
+              <button onClick={() => { startFreshContract(); }} style={{
                 padding:"10px 14px", background:"transparent", color:"#5A7A9A",
                 border:"1px solid #354F6E", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body,
                 flexShrink:0,
@@ -9045,11 +9054,11 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
 
   return (
     <div
-      style={{ position:"fixed", inset:0, background:"rgba(12,22,38,0.72)", zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", padding:20, backdropFilter:"blur(8px)" }}
+      style={{ position:"fixed", inset:0, background:"rgba(12,22,38,0.72)", zIndex:300, display:"flex", overflowY:"auto", padding:20, backdropFilter:"blur(8px)" }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="fade-up" style={{
-        background:C.white, borderRadius:24, width:"100%", maxWidth:432,
+        background:C.white, borderRadius:24, width:"100%", maxWidth:432, margin:"auto", flexShrink:0,
         boxShadow:"0 40px 100px rgba(27,46,75,0.22), 0 0 0 1px rgba(27,46,75,0.06)",
         overflow:"hidden", position:"relative",
       }}>
@@ -9239,7 +9248,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   <span onClick={async () => {
                     if (!email.trim()) { setError("Entre ton email d'abord"); return; }
                     setError(""); setResetEmailSent("");
-                    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: "https://freeley-ten.vercel.app" });
+                    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
                     if (error) setError(error.message);
                     else setResetEmailSent("✓ Email de réinitialisation envoyé ! Vérifie ta boîte mail.");
                   }} style={{ cursor:"pointer", color:C.navy, textDecoration:"underline", fontWeight:500 }}>
@@ -10697,7 +10706,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
 }
 
 /* ── ArchivesPage : retrouver un contrat supprimé (et ses factures) par nom de client ── */
-function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPaid }) {
+function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPaid, onDownloadPDF }) {
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState(null);
   const [restoringId, setRestoringId] = useState(null);
@@ -10789,7 +10798,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                         </>
                       ) : (
                       <button
-                        onClick={() => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt)}
+                        onClick={() => onDownloadPDF && onDownloadPDF(entry)}
                         style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                       >⬇ PDF du contrat</button>
                       )}
