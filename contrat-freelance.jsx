@@ -365,7 +365,9 @@ const getRetractationWaiverText = (isDigital) => isDigital ? RETRACTATION_WAIVER
 // consommation), complété avec les coordonnées du freelance, qui est le professionnel du contrat.
 // Formulaire : modèle officiel (annexe à l'article R221-1). Textes repris mot pour mot.
 // ⚠️ Les mêmes textes existent dans api/retraction.js : si tu modifies l'un, modifie l'autre.
-const retractationCoords = (f = {}) => [f.freelanceName, f.freelanceAddress, f.freelancePhone, f.freelanceEmail].map(v => (v || "").trim()).filter(Boolean).join(", ");
+// Numéro français à 10 chiffres écrit par paires (0767475077 → 07 67 47 50 77) ; tout autre format est laissé tel quel
+const fmtPhone = (v) => { const d = String(v || "").replace(/[\s.\-]/g, ""); return /^0\d{9}$/.test(d) ? d.replace(/(\d{2})(?=\d)/g, "$1 ") : String(v || ""); };
+const retractationCoords = (f = {}) => [f.freelanceName, f.freelanceAddress, fmtPhone(f.freelancePhone), f.freelanceEmail].map(v => (v || "").trim()).filter(Boolean).join(", ");
 const RETRACTATION_ONLINE_REF = "la page de votre contrat sur Freeley, accessible par le lien reçu par courriel";
 const buildRetractationNotice = (f = {}, where = RETRACTATION_ONLINE_REF) => {
   const parts = [
@@ -565,6 +567,36 @@ const validate = (step, form) => {
       e.price = "Entre un prix valide (ex : 800)";
   }
   return e;
+};
+
+/* ── Prix tels qu'ils apparaissent dans le contrat ──
+   Le prix saisi par le freelance est HORS TAXES : c'est lui qui sert aux factures.
+   Pour un client particulier, le Code de la consommation impose d'annoncer le prix TOUTES TAXES
+   COMPRISES. Même règle que les factures : TVA à 20 % seulement si le profil contient un numéro
+   de TVA ; sinon le freelance est en franchise et le prix TTC est égal au prix HT. */
+const fmtEuro = (n) => {
+  const v = Math.round((Number(n) || 0) * 100) / 100;
+  const s = Number.isInteger(v) ? v.toLocaleString("fr-FR") : v.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return s.replace(/[\u202F\u00A0]/g, " ");
+};
+const contractPricing = (form, profile) => {
+  const ht = Number(form?.price) || 0;
+  const pct = Number(form?.acomptePourcentage) || 0;
+  const b2c = form?.typeClient === "particulier";
+  const tvaApplicable = !!(profile?.tvaNumber && String(profile.tvaNumber).trim());
+  const rate = b2c && tvaApplicable ? 1.2 : 1;
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const total = round2(ht * rate);
+  const acompte = round2(Math.round(ht * pct / 100) * rate);
+  const solde = round2(total - acompte);
+  const unit = b2c ? "TTC" : "HT";
+  const taxNote = !b2c ? "" : tvaApplicable
+    ? `soit ${fmtEuro(ht)} € HT et ${fmtEuro(round2(total - ht))} € de TVA au taux de 20 %`
+    : "TVA non applicable, article 293 B du CGI";
+  // Libellé sûr pour les écrans où le montant affiché reste le prix saisi (HT) : « TTC » seulement
+  // quand les deux sont égaux, c'est-à-dire pour un particulier avec un freelance en franchise.
+  const enteredUnit = b2c && !tvaApplicable ? "TTC" : "HT";
+  return { b2c, tvaApplicable, ht, pct, total, acompte, solde, unit, taxNote, enteredUnit };
 };
 
 /* ══════════════════════════════════════════════════════════ CLIENT RATING MODAL ══ */
@@ -1212,6 +1244,89 @@ const readUrlDraft = () => {
   } catch(e) { return null; }
 };
 
+/* ── Appel au modèle en flux (le texte arrive au fur et à mesure) ── */
+async function streamClaude(messages, maxTokens, onDelta) {
+  const res = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
+      max_tokens: maxTokens,
+      stream: true,
+      messages,
+    }),
+  });
+  if (!res.ok || !res.body) {
+    const errBody = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status}: ${errBody}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", text = "", stopReason = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop(); // garde la ligne incomplète pour le prochain morceau
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const jsonStr = line.slice(6).trim();
+      if (!jsonStr || jsonStr === "[DONE]") continue;
+      let evt;
+      try { evt = JSON.parse(jsonStr); } catch(e) { continue; }
+      if (evt.type === "content_block_delta" && evt.delta?.text) {
+        text += evt.delta.text;
+        if (onDelta) onDelta(text);
+      } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
+        stopReason = evt.delta.stop_reason;
+      } else if (evt.type === "error") {
+        throw new Error(evt.error?.message || "Erreur de streaming");
+      }
+    }
+  }
+  return { text, stopReason };
+}
+
+/* ── Texte long (contrat complet) avec reprise automatique ──
+   Un contrat détaillé peut dépasser la limite de longueur d'une seule réponse. On redemande alors la
+   suite. Point essentiel : la demande de suite renvoie la DEMANDE D'ORIGINE (toutes les consignes et
+   les clauses à reprendre mot pour mot) + le texte déjà écrit. Avant, seule la partie écrite était
+   renvoyée : la fin du contrat était rédigée sans les consignes, et les clauses validées par la
+   juriste disparaissaient (bonne conduite, préavis, article des litiges, article des signatures). */
+const CONTINUE_INSTRUCTION = `Ta réponse précédente s'est arrêtée avant la fin du contrat (limite de longueur atteinte). Continue EXACTEMENT à partir de l'endroit où ton texte s'arrête, y compris en terminant le mot ou la phrase en cours, jusqu'à la fin du contrat. Pour tous les articles qui restent, applique strictement les consignes de ma demande initiale et reprends mot pour mot les clauses qu'elle impose. Garde la même mise en forme et la même numérotation. Réponds UNIQUEMENT avec la suite du texte, sans rien répéter de ce qui précède, sans introduction ni commentaire.`;
+
+async function generateLongText(prompt, { maxTokens = 8000, maxAttempts = 3, looksComplete = () => true, onText } = {}) {
+  let fullText = "";
+  let stopReason = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const messages = (attempt === 1 || !fullText.trim())
+      ? [{ role: "user", content: prompt }]
+      : [
+          { role: "user", content: prompt },
+          { role: "assistant", content: fullText },
+          { role: "user", content: CONTINUE_INSTRUCTION },
+        ];
+    const before = fullText;
+    const onDelta = onText ? (t) => onText(before + t) : null;
+    let r;
+    try {
+      r = await streamClaude(messages, maxTokens, onDelta);
+    } catch (e) {
+      // Filet de sécurité : si la conversation en plusieurs messages était refusée (erreur 400),
+      // on redemande la suite en un seul message, qui contient lui aussi TOUTES les consignes.
+      if (messages.length === 1 || !/^HTTP 400/.test(String(e?.message))) throw e;
+      const single = `${prompt}\n\n══════════════════════════════════════════════\nDÉBUT DE TA RÉPONSE, DÉJÀ RÉDIGÉ (ne le répète pas) :\n"""\n${fullText}\n"""\n\n${CONTINUE_INSTRUCTION}`;
+      r = await streamClaude([{ role: "user", content: single }], maxTokens, onDelta);
+    }
+    fullText = before + r.text;
+    stopReason = r.stopReason;
+    if (stopReason !== "max_tokens" && looksComplete(fullText)) break; // terminé
+    if (attempt < maxAttempts) console.warn(`[Freeley] Texte coupé, suite demandée (${attempt + 1}/${maxAttempts})…`);
+  }
+  return { text: fullText, stopReason };
+}
+
 function AppInner() {
   const [step, setStep]           = useState(() => {
     const urlDraft = readUrlDraft();
@@ -1817,8 +1932,9 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         ? "comptant à la commande (100 % à la signature)"
         : `${form.paymentTerms} jours nets à compter de la date de facturation`;
       const acomptePct = Number(form.acomptePourcentage) || 0;
-      const acompteAmount = Math.round(Number(form.price) * acomptePct / 100);
-      const soldeAmount   = Math.round(Number(form.price) * (100 - acomptePct) / 100);
+      // Montants du contrat : TTC pour un particulier (obligatoire), HT pour un professionnel
+      const pricing = contractPricing(form, profile);
+      const U = pricing.unit;
       // Date et numéro générés par l'app (pas par l'IA) : garantit une info réelle, jamais hallucinée
       const todayFull = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
       const contractRef = `CP-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
@@ -1831,7 +1947,7 @@ DONNÉES DE LA MISSION
 Prestataire        : ${form.freelanceName}
 Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + form.freelanceSiret : ""}
 Adresse Prestataire: ${form.freelanceAddress}
-Email Prestataire  : ${form.freelanceEmail || "—"}
+Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + form.freelancePhone : ""}
 
 Client             : ${form.clientName}${form.clientCompany ? " — " + form.clientCompany : ""}
 Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}
@@ -1842,10 +1958,12 @@ Titre de la mission: ${form.missionTitle}
 Domaine d'activité : ${form.categorieMetier === "artisanat" ? "Métier manuel / artisanat" : form.categorieMetier === "digital" ? "Digital / Tech / Création" : form.categorieMetier === "conseil" ? "Conseil / Formation / Services" : "Autre / prestation générale"}
 Description        : ${form.missionDescription}
 Période            : du ${d1} au ${d2}
-Honoraires HT      : ${form.price} €
+${pricing.b2c ? `Prix TTC           : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Honoraires HT      : ${form.price} €`}
 Conditions paiement: ${paymentTermsLabel}
 Révisions incluses : ${form.revisions} aller(s)-retour(s)
-Pénalités de retard: ${form.latePaymentPenalty ? "OUI (clause légale obligatoire Art. L441-10 C.com.)" : "NON"}
+${form.typeClient === "particulier"
+  ? `Intérêts de retard : ${form.latePaymentPenalty ? "OUI (taux d'intérêt légal, après mise en demeure — art. 1231-6 C. civ.)" : "NON"}`
+  : `Pénalités de retard: ${form.latePaymentPenalty ? "OUI (clause légale obligatoire Art. L441-10 C.com.)" : "NON"}`}
 Clause de dédommagement annulation: ${form.clauseDedit ? "OUI" : "NON"}
 Clause de bonne conduite / respect mutuel: ${form.clauseRespect ? "OUI" : "NON"}
 Clause de suspension en cas de retard de paiement: ${form.clauseSuspension ? "OUI" : "NON"}
@@ -1880,18 +1998,20 @@ ${form.clauseInterlocuteur ? (form.typeClient === "particulier"
   : ""}
 
 ARTICLE 4 — HONORAIRES, MODALITÉS DE PAIEMENT ET ACOMPTE
-Montant total HT : ${form.price} €
+${pricing.b2c ? `Montant total TTC : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Montant total HT : ${form.price} €`}
 Inclure OBLIGATOIREMENT :
 ${acomptePct > 0
-  ? `- Un acompte de ${acomptePct} % soit ${acompteAmount} € HT dû à la signature du présent contrat, dont le versement conditionne le démarrage de la mission (condition suspensive) ;
-- Le solde de ${100 - acomptePct} % soit ${soldeAmount} € HT exigible à la livraison/recette finale de la mission, payable selon le délai convenu (${paymentTermsLabel}). Ne JAMAIS indiquer que le solde est "comptant à la commande" ou "à la signature" puisqu'un acompte est demandé ;`
-  : `- Aucun acompte n'est demandé. La totalité des honoraires, soit 100 % du montant (${form.price} € HT), est due selon le délai de paiement convenu : ${paymentTermsLabel} ;`}
+  ? `- Un acompte de ${acomptePct} % soit ${fmtEuro(pricing.acompte)} € ${U} dû à la signature du présent contrat, dont le versement conditionne le démarrage de la mission (condition suspensive) ;
+- Le solde de ${100 - acomptePct} % soit ${fmtEuro(pricing.solde)} € ${U} exigible à la livraison/recette finale de la mission, payable selon le délai convenu (${paymentTermsLabel}). Ne JAMAIS indiquer que le solde est "comptant à la commande" ou "à la signature" puisqu'un acompte est demandé ;`
+  : `- Aucun acompte n'est demandé. La totalité des honoraires, soit 100 % du montant (${fmtEuro(pricing.total)} € ${U}), est due selon le délai de paiement convenu : ${paymentTermsLabel} ;`}
 ${form.latePaymentPenalty
   ? (form.typeClient === "particulier"
     ? `- Le client étant un PARTICULIER (B2C), la clause doit IMPÉRATIVEMENT s'intituler "intérêts de retard" (jamais "pénalités de retard", terme réservé au Code de commerce entre professionnels et inapplicable à un consommateur), utiliser le taux d'intérêt légal en vigueur en France applicable aux consommateurs, ET exiger une mise en demeure préalable conformément à l'article 1231-6 du Code civil — ces intérêts ne courent qu'à compter de cette mise en demeure, jamais automatiquement dès la date d'échéance (et non le Code de commerce ni l'indemnité forfaitaire de 40 €, strictement réservés aux professionnels) : "En cas de retard de paiement, une mise en demeure sera préalablement adressée au Client par lettre recommandée ou courrier électronique avec accusé de réception. À défaut de règlement, des intérêts de retard calculés au taux d'intérêt légal en vigueur seront appliqués sur les sommes dues à compter de la date de cette mise en demeure et jusqu'au complet paiement, conformément à l'article 1231-6 du Code civil et au droit de la consommation."`
     : `- La clause légale de pénalités de retard réservée aux professionnels : "Conformément à l'article L441-10 du Code de commerce, toute somme non réglée à l'échéance porte, de plein droit et sans qu'un rappel soit nécessaire, des pénalités de retard au taux d'intérêt appliqué par la Banque centrale européenne à son opération de refinancement la plus récente, majoré de dix (10) points de pourcentage, sauf stipulation d'un autre taux conforme aux limites légales. Les pénalités sont exigibles à compter du jour suivant la date de règlement figurant sur la facture. En sus, tout professionnel en situation de retard de paiement est de plein droit débiteur de l'indemnité forfaitaire pour frais de recouvrement fixée à quarante euros (40 €) par l'article D441-5 du Code de commerce. Lorsque les frais de recouvrement exposés sont supérieurs à ce montant, le Prestataire peut demander une indemnisation complémentaire sur justification."`)
   : `- Indique explicitement : "Pénalités de retard : Non stipulées."`}
-- Toutes les sommes sont exprimées hors taxes ; la TVA applicable, le cas échéant, sera ajoutée au taux en vigueur.
+${pricing.b2c
+  ? `- Le Client étant un consommateur, le prix doit OBLIGATOIREMENT être exprimé toutes taxes comprises : n'écris jamais « HT » ni « hors taxes » dans le contrat, et n'écris jamais qu'une taxe s'ajoutera au prix. Inclus cette phrase : "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent aux montants que le Client aura effectivement à payer (${pricing.taxNote})."`
+  : `- Toutes les sommes sont exprimées hors taxes ; la TVA applicable, le cas échéant, sera ajoutée au taux en vigueur.`}
 ${form.clauseSuspension ? `- Inclus OBLIGATOIREMENT la clause de suspension suivante : "En cas de retard de paiement de toute somme exigible au titre du présent contrat persistant plus de huit (8) jours après une mise en demeure adressée par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception, restée sans effet, le Prestataire peut suspendre l'exécution de la mission jusqu'au complet règlement des sommes dues. Cette suspension ne constitue pas une faute du Prestataire et n'ouvre pas droit à indemnité au profit du Client. Les délais d'exécution affectés par la suspension sont eux-mêmes suspendus et prorogés d'une durée correspondant à la période de suspension, sans que le retard qui en résulte puisse être imputé au Prestataire."` : ""}
 
 ARTICLE 5 — RÉVISIONS ET MODIFICATIONS DU PÉRIMÈTRE
@@ -1962,82 +2082,24 @@ CONSIGNES DE RÉDACTION
 - Cite systématiquement les fondements légaux (articles de loi) entre parenthèses.
 - Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
 - Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.
-- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € HT"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
-- Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").`;
+- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € ${U}"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
+- Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").
+- Ne cite un article de loi que si tu es certain de son numéro exact. N'écris JAMAIS de numéro d'article incomplet ou approximatif (par exemple « L221-... ») : dans le doute, ne cite pas d'article.
+- N'ajoute aucune clause qui contredit ou affaiblit les clauses imposées ci-dessus, et ne remplace jamais une clause imposée par ta propre formulation.`;
 
       setStreamingText("");
 
-      // ── Génération avec continuation automatique en cas de troncature ──
-      // Un contrat détaillé (longue mission, beaucoup d'exclusions/clauses) peut dépasser la limite
-      // de tokens en une seule réponse. Au lieu de sauvegarder un contrat coupé en plein milieu d'une
-      // phrase (bug constaté : Article 9.2 tronqué sur "...seront calcul"), on redemande la SUITE
-      // exacte du texte tant que la réponse n'est pas complète, jusqu'à 3 tentatives au total.
-      let fullText = "";
-      let stopReason = null;
-      const MAX_ATTEMPTS = 3;
+      // ── Génération avec reprise automatique en cas de troncature ──
+      // Un contrat détaillé peut dépasser la limite de longueur d'une seule réponse. La suite est
+      // redemandée AVEC la demande d'origine (voir generateLongText) : les clauses imposées restent
+      // présentes jusqu'à la fin du contrat, même quand la rédaction se fait en plusieurs fois.
       const looksComplete = (t) => /ARTICLE 1[23]|voie électronique/i.test(t);
-
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        const isFirst = attempt === 1;
-        const currentPrompt = isFirst ? prompt : `Voici un contrat de prestation de services en cours de rédaction, dont la génération a été interrompue avant la fin (limite de longueur atteinte) — la phrase ou l'article en cours n'est pas terminé.
-
-TEXTE DÉJÀ RÉDIGÉ (ne le répète surtout pas, continue directement à la suite) :
-"""
-${fullText}
-"""
-
-Continue EXACTEMENT à partir d'où le texte s'arrête (y compris en terminant la phrase ou le mot en cours si besoin), jusqu'à la fin du contrat (Article 13 — Signatures inclus, avec la mention finale sur la signature électronique). Respecte strictement la même mise en forme, le même style et la même numérotation que le texte déjà rédigé. Réponds UNIQUEMENT avec la suite du texte, sans rien répéter de ce qui précède, sans introduction ni commentaire.`;
-
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
-            max_tokens: 8000,
-            stream: true,
-            messages: [{ role: "user", content: currentPrompt }],
-          }),
-        });
-
-        if (!res.ok) {
-          const errBody = await res.text().catch(() => "");
-          throw new Error(`HTTP ${res.status}: ${errBody}`);
-        }
-
-        // Lit le flux morceau par morceau — le texte s'affiche au fur et à mesure de sa rédaction,
-        // au lieu de faire attendre l'utilisateur devant un écran figé pendant toute la génération.
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop(); // garde la ligne incomplète pour le prochain morceau
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr || jsonStr === "[DONE]") continue;
-            let evt;
-            try { evt = JSON.parse(jsonStr); } catch(e) { continue; }
-
-            if (evt.type === "content_block_delta" && evt.delta?.text) {
-              fullText += evt.delta.text;
-              setStreamingText(fullText);
-            } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
-              stopReason = evt.delta.stop_reason;
-            } else if (evt.type === "error") {
-              throw new Error(evt.error?.message || "Erreur de streaming");
-            }
-          }
-        }
-
-        if (looksComplete(fullText) && stopReason !== "max_tokens") break; // terminé, pas besoin de continuer
-        if (attempt < MAX_ATTEMPTS) console.warn(`[Freeley] Contrat tronqué, tentative de continuation ${attempt + 1}/${MAX_ATTEMPTS}…`);
-      }
+      const { text: fullText, stopReason } = await generateLongText(prompt, {
+        maxTokens: 8000,
+        maxAttempts: 3,
+        looksComplete,
+        onText: (t) => setStreamingText(t),
+      });
 
       const text = fullText.trim();
       if (!text) throw new Error("Réponse vide");
@@ -2132,24 +2194,17 @@ ${contract}
 RETOUR DU CLIENT (ses demandes de modification avant signature) :
 "${reviseMessage.trim()}"
 
-Ta tâche : réécris le contrat COMPLET en intégrant les demandes légitimes du client, tout en gardant le prestataire protégé. Garde exactement la même structure, la même mise en forme et le même style que le contrat original (mêmes articles numérotés, mêmes titres). Modifie uniquement ce qui est concerné par le retour du client. Si une demande est déraisonnable ou dangereuse pour le prestataire, adapte-la de façon équilibrée plutôt que de la refuser.
+Ta tâche : réécris le contrat COMPLET en intégrant les demandes légitimes du client, tout en gardant le prestataire protégé. Garde exactement la même structure, la même mise en forme et le même style que le contrat original (mêmes articles numérotés, mêmes titres). Modifie uniquement ce qui est concerné par le retour du client : toutes les autres clauses doivent être reprises MOT POUR MOT, sans les reformuler. Si une demande est déraisonnable ou dangereuse pour le prestataire, adapte-la de façon équilibrée plutôt que de la refuser.${form.typeClient === "particulier" ? " Le client est un particulier : les prix restent exprimés toutes taxes comprises (TTC)." : ""}
 
 Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire avant ou après, sans backticks.`;
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
-          max_tokens: 5000,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
-      const newContract = (data.content || []).map(i => i.text || "").join("").trim();
+      // Le contrat complet est long : même reprise automatique que pour la première rédaction,
+      // et on refuse d'enregistrer une version coupée (elle remplacerait le contrat entier).
+      const looksComplete = (t) => /ARTICLE 1[23]|voie électronique/i.test(t);
+      const { text: revised, stopReason } = await generateLongText(prompt, { maxTokens: 8000, maxAttempts: 3, looksComplete });
+      const newContract = revised.trim();
       if (!newContract) throw new Error("Réponse vide");
+      if (stopReason === "max_tokens" || !looksComplete(newContract)) throw new Error("Révision incomplète");
       setContract(newContract);
       setReviseSuccess(true);
       setReviseMessage("");
@@ -2174,7 +2229,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         }
       }
     } catch(e) {
-      setReviseError("Erreur lors de la révision. Vérifie ta connexion et réessaie.");
+      setReviseError(e?.message === "Révision incomplète"
+        ? "La révision n'a pas pu être terminée. Ton contrat n'a pas été modifié. Réessaie."
+        : "Erreur lors de la révision. Vérifie ta connexion et réessaie.");
     } finally {
       setReviseLoading(false);
     }
@@ -2224,7 +2281,16 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       const GREYLT = [220, 220, 220];
       const GREEN  = [39, 119, 63];   // badge scellé
 
-      const safe = s => (s||"").replace(/[^a-zA-Z0-9]/g,"_").substring(0,25);
+      const safe = s => (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9]+/g,"_").substring(0,25).replace(/^_+|_+$/g,"");
+      // Les polices standard de jsPDF n'ont pas le caractère ✓ (il s'affichait comme un point) :
+      // la coche est dessinée avec deux traits.
+      const drawCheck = (x, y, size, color) => {
+        doc.setDrawColor(...color); doc.setLineWidth(Math.max(0.35, size * 0.16));
+        doc.line(x - size * 0.42, y, x - size * 0.1, y + size * 0.32);
+        doc.line(x - size * 0.1, y + size * 0.32, x + size * 0.45, y - size * 0.38);
+      };
+      const pricing = contractPricing(pForm, profile);
+      const contractNumber = (String(pContract || "").match(/CP-\d{4}-\d{4}/) || [])[0] || "";
       const d1 = pForm.startDate ? new Date(pForm.startDate).toLocaleDateString("fr-FR") : "Non défini";
       const d2 = pForm.endDate   ? new Date(pForm.endDate).toLocaleDateString("fr-FR")   : "Non défini";
       const today = new Date().toLocaleDateString("fr-FR");
@@ -2296,10 +2362,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       // Numéro de contrat (coin droit de la bande)
       doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
       doc.setTextColor(160, 190, 230);
-      doc.text("Réf. document", PW - MR, 20, { align:"right" });
-      doc.setFont("helvetica","bold"); doc.setFontSize(9);
-      doc.setTextColor(...WHITE);
-      doc.text(`${safe(pForm.missionTitle)}_${safe(pForm.clientName)}`, PW - MR, 28, { align:"right" });
+      if (contractNumber) {
+        doc.text("Réf. document", PW - MR, 20, { align:"right" });
+        doc.setFont("helvetica","bold"); doc.setFontSize(9);
+        doc.setTextColor(...WHITE);
+        doc.text(contractNumber, PW - MR, 28, { align:"right" });
+      }
       doc.setFont("helvetica","normal"); doc.setFontSize(7);
       doc.setTextColor(180, 210, 240);
       doc.text(`Fait le ${today}`, PW - MR, 35, { align:"right" });
@@ -2372,15 +2440,17 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       const tableRows = [
         ["Mission",          pForm.missionTitle],
         ["Période",          `Du ${d1} au ${d2}`],
-        ["Honoraires HT",    `${frMoney(pForm.price)} €`],
+        [`Honoraires ${pricing.unit}`, `${fmtEuro(pricing.total)} €`],
       ];
+      if (pricing.b2c) tableRows.push(["TVA", pricing.tvaApplicable ? `Incluse : ${fmtEuro(pricing.total - pricing.ht)} € (20 %)` : "Non applicable — art. 293 B du CGI"]);
       if (acomptePctPdf > 0) {
-        tableRows.push([`Acompte (${acomptePctPdf} %)`, `${frMoney(Math.round(Number(pForm.price)*acomptePctPdf/100))} € — dû à la signature`]);
-        tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${frMoney(Math.round(Number(pForm.price)*(100-acomptePctPdf)/100))} € — dû à la livraison`]);
+        tableRows.push([`Acompte (${acomptePctPdf} %)`, `${fmtEuro(pricing.acompte)} € — dû à la signature`]);
+        tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${fmtEuro(pricing.solde)} € — dû à la livraison`]);
       }
       tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant" ? "Comptant à la commande" : `${pForm.paymentTerms} jours nets`]);
       tableRows.push(["Révisions incluses", `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
-      tableRows.push(["Pénalités de retard", pForm.latePaymentPenalty ? (pForm.typeClient === "particulier" ? "Oui — Taux d'intérêt légal (consommateur)" : "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)") : "Non stipulées"]);
+      if (pricing.b2c) tableRows.push(["Intérêts de retard", pForm.latePaymentPenalty ? "Oui — Taux d'intérêt légal, après mise en demeure" : "Non stipulés"]);
+      else tableRows.push(["Pénalités de retard", pForm.latePaymentPenalty ? "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)" : "Non stipulées"]);
 
 
       // En-tête tableau bleu
@@ -2391,7 +2461,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       cy += 8;
 
       tableRows.forEach((row, ri) => {
-        const isTotal = row[0] === "Honoraires HT";
+        const isTotal = row[0].startsWith("Honoraires");
         const bg = isTotal ? NAVYLT : (ri % 2 === 0 ? [252,252,252] : WHITE);
         doc.setFillColor(...bg); doc.rect(ML, cy, cw, 8, "F");
         doc.setDrawColor(...GREYLT); doc.setLineWidth(0.15); doc.rect(ML, cy, cw, 8);
@@ -2418,8 +2488,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       // Ligne TOTAL grasse
       doc.setFillColor(...NAVY); doc.rect(ML, cy, cw, 10, "F");
       doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...WHITE);
-      doc.text("TOTAL HT", ML + 4, cy + 7);
-      doc.text(`${frMoney(pForm.price)} €`, PW - MR, cy + 7, { align:"right" });
+      doc.text(`TOTAL ${pricing.unit}`, ML + 4, cy + 7);
+      doc.text(`${fmtEuro(pricing.total)} €`, PW - MR - 4, cy + 7, { align:"right" });
       cy += 14;
 
       // Note de bas de page de garde
@@ -2562,7 +2632,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.setFont("helvetica","normal"); doc.setFontSize(8.2);
       doc.setTextColor(...DARK);
       doc.text("Les soussignés déclarent avoir lu et approuvé l'intégralité des clauses du présent contrat.", ML, y);
-      doc.text("Ils s'engagent à en respecter les termes et conditions. Parapher chaque page.", ML, y + 5.5);
+      doc.text("Ils s'engagent à en respecter les termes et conditions.", ML, y + 5.5);
       y += 14;
 
       const bw = (cw - 10) / 2;
@@ -2575,11 +2645,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.setFillColor(...NAVY); doc.rect(ML, y, bw, 9, "F");
       doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
       doc.text("LE PRESTATAIRE", ML + 4, y + 6.5);
-      // Badge scellé vert (simulé)
-      doc.setFillColor(...GREEN); doc.circle(ML + bw - 10, y + 4.5, 5.5, "F");
-      doc.setDrawColor(255,255,255); doc.setLineWidth(0.8); doc.circle(ML + bw - 10, y + 4.5, 5.5);
-      doc.setFont("helvetica","bold"); doc.setFontSize(6); doc.setTextColor(...WHITE);
-      doc.text("✓", ML + bw - 10, y + 5.8, { align:"center" });
+      // Badge vert : uniquement quand le prestataire a réellement signé
+      if (pFreelanceSig) {
+        doc.setFillColor(...GREEN); doc.circle(ML + bw - 10, y + 4.5, 5.5, "F");
+        doc.setDrawColor(255,255,255); doc.setLineWidth(0.8); doc.circle(ML + bw - 10, y + 4.5, 5.5);
+        drawCheck(ML + bw - 10, y + 4.5, 4.2, WHITE);
+      }
       // Infos
       doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
       doc.text(pForm.freelanceName, ML + 4, y + 17);
@@ -2591,7 +2662,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       if (pFreelanceSig) {
         try { doc.addImage(pFreelanceSig, "PNG", ML + 4, y + 33, bw - 8, 16); } catch(e) {}
         doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
-        doc.text("✓ Signé électroniquement", ML + 4, y + 55.5);
+        drawCheck(ML + 5.6, y + 54.4, 2.6, GREEN);
+        doc.text("Signé électroniquement", ML + 8.5, y + 55.5);
       } else {
         doc.setDrawColor(...NAVY); doc.setLineWidth(0.6);
         doc.line(ML + 4, y + 50, ML + bw - 4, y + 50);
@@ -2613,8 +2685,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       if (pClientSig) {
         doc.setFillColor(...GREEN); doc.circle(cx3 + bw - 10, y + 4.5, 5.5, "F");
         doc.setDrawColor(255,255,255); doc.setLineWidth(0.8); doc.circle(cx3 + bw - 10, y + 4.5, 5.5);
-        doc.setFont("helvetica","bold"); doc.setFontSize(6); doc.setTextColor(...WHITE);
-        doc.text("✓", cx3 + bw - 10, y + 5.8, { align:"center" });
+        drawCheck(cx3 + bw - 10, y + 4.5, 4.2, WHITE);
       }
       // Infos client
       doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...DARK);
@@ -2631,7 +2702,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         try { doc.addImage(pClientSig, "PNG", cx3 + 4, y + 33, bw - 8, 16); } catch(e) {}
         doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
         const signedLabel = pSignedAt ? new Date(pSignedAt).toLocaleDateString("fr-FR") : today;
-        doc.text(`✓ Signé électroniquement le ${signedLabel}`, cx3 + 4, y + 55.5);
+        drawCheck(cx3 + 5.6, y + 54.4, 2.6, GREEN);
+        doc.text(`Signé électroniquement le ${signedLabel}`, cx3 + 8.5, y + 55.5);
       } else {
         doc.setDrawColor(...DARK); doc.setLineWidth(0.6);
         doc.line(cx3 + 4, y + 50, cx3 + bw - 4, y + 50);
@@ -2650,8 +2722,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           doc.setFillColor(...GREEN); doc.circle(ML + 2.5, y - 1.3, 2, "F");
           doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREEN);
           doc.text(pForm.contenuNumeriquePret
-            ? `✓ Perte du droit de rétractation acceptée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`
-            : `✓ Démarrage avant la fin du délai de rétractation demandé le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
+            ? `Perte du droit de rétractation acceptée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`
+            : `Démarrage avant la fin du délai de rétractation demandé le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
         } else {
           doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
           doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
@@ -2665,7 +2737,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       // Mention finale
       doc.setFont("helvetica","italic"); doc.setFontSize(7);
       doc.setTextColor(...GREY);
-      doc.text(`Contrat en ${1} exemplaire originaux. Droit français applicable. Freeley — ${today}`, ML, y);
+      doc.text(doc.splitTextToSize(pFreelanceSig && pClientSig
+        ? `Contrat signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie. Droit français applicable. Freeley — ${today}`
+        : `Contrat en attente de signature. Droit français applicable. Freeley — ${today}`, cw), ML, y);
 
       // ── Annexe : information officielle sur la rétractation + formulaire (clients particuliers) ──
       if (pForm.typeClient === "particulier") {
@@ -3595,6 +3669,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       {loading ? (
         <ContractLivePreview
           form={form}
+          profile={profile}
           phase={loadingPhase}
           apiReady={animDone && !!apiReadyRef.current}
           streamingText={streamingText}
@@ -3784,6 +3859,15 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               </div>
 
               <Field label="Prix total HT (€) *" value={form.price} onChange={v=>update("price",v)} placeholder="800" type="number" error={errors.price} delay={2} prefix="€" />
+              {form.typeClient === "particulier" && Number(form.price) > 0 && (() => {
+                const pr = contractPricing(form, profile);
+                return (
+                  <div style={{ fontFamily:T.body, fontSize:11.5, color:"#1E40AF", lineHeight:1.5, marginTop:-10, marginBottom:16 }}>
+                    Client particulier : le contrat affichera le prix toutes taxes comprises, soit <strong>{fmtEuro(pr.total)} € TTC</strong>
+                    {pr.tvaApplicable ? " (TVA à 20 % incluse)." : " (TVA non applicable, art. 293 B du CGI)."}
+                  </div>
+                );
+              })()}
               <div className="fade-up fade-up-3" style={{ marginBottom:4 }}>
                 <ToggleGroup label="Acompte à la commande (optionnel)" options={["0","10","20","30","40","50"]} labels={["Aucun (0%)","10%","20%","30%","40%","50%"]} value={form.acomptePourcentage} onChange={v=>update("acomptePourcentage",v)} tooltip="Pourcentage payé par le client avant le début de la mission pour valider la commande." />
                 <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5, marginTop:-8, marginBottom:14 }}>
@@ -5898,7 +5982,7 @@ function LegalTooltip({ text }) {
 }
 
 /* ══════════════════════════════════════════ LIVE PREVIEW ══ */
-function ContractLivePreview({ form, phase, onAnimationDone, apiReady, streamingText }) {
+function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, streamingText }) {
   const { useState: _useState, useEffect: _useEffect, useRef: _useRef } = { useState, useEffect, useRef };
   const [dotCount, setDotCount] = _useState(1);
   const doneTriggeredRef = _useRef(false);
@@ -6026,11 +6110,11 @@ function ContractLivePreview({ form, phase, onAnimationDone, apiReady, streaming
           borderBottom:`1px solid ${C.border}`,
         }}>
           {[
-            ["Montant", form.price ? `${Number(form.price).toLocaleString("fr-FR")} € HT` : "—"],
+            ["Montant", form.price ? (() => { const pr = contractPricing(form, profile); return `${fmtEuro(pr.total)} € ${pr.unit}`; })() : "—"],
             ["Période", `${d1} → ${d2}`],
             ["Paiement", form.paymentTerms === "Comptant" ? "Comptant" : `${form.paymentTerms}j`],
             ["Révisions", form.revisions],
-            ["Pénalités", form.latePaymentPenalty ? "✓ BCE+10pts" : "—"],
+            [form.typeClient === "particulier" ? "Intérêts de retard" : "Pénalités", form.latePaymentPenalty ? (form.typeClient === "particulier" ? "Taux légal" : "BCE + 10 pts") : "—"],
           ].map(([k, v]) => (
             <div key={k}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.1em", color:C.textL, fontWeight:600 }}>{k.toUpperCase()}</div>
@@ -14040,7 +14124,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
             <div>
               <div style={{ fontFamily:T.display, fontSize:19, color:C.white, fontWeight:600 }}>Signature électronique sécurisée</div>
               <div style={{ fontFamily:T.body, fontSize:12, color:"#8BA3C0", marginTop:2 }}>
-                {form.missionTitle} · {Number(form.price||0).toLocaleString("fr-FR")} € HT
+                {form.missionTitle} · {Number(form.price||0).toLocaleString("fr-FR")} € {contractPricing(form, profile).enteredUnit}
               </div>
             </div>
           </div>
@@ -14297,7 +14381,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                     <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>Montant</span>
-                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.navy }}>{Number(form.price||0).toLocaleString("fr-FR")} € HT</span>
+                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.navy }}>{Number(form.price||0).toLocaleString("fr-FR")} € {contractPricing(form, profile).enteredUnit}</span>
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between" }}>
                     <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>
@@ -14436,8 +14520,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   <div style={{ fontFamily:T.display, fontSize:28, color:"#15803D", fontWeight:700 }}>{acompte.toLocaleString("fr-FR")} €</div>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#166534" }}>
                     {isComptant
-                      ? `100% du total · ${Number(form.price||0).toLocaleString("fr-FR")} € HT`
-                      : `${acomptePct}% du total · ${Number(form.price||0).toLocaleString("fr-FR")} € HT`
+                      ? `100% du total · ${Number(form.price||0).toLocaleString("fr-FR")} € ${contractPricing(form, profile).enteredUnit}`
+                      : `${acomptePct}% du total · ${Number(form.price||0).toLocaleString("fr-FR")} € ${contractPricing(form, profile).enteredUnit}`
                     }
                   </div>
                 </div>
