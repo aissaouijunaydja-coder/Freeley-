@@ -1294,17 +1294,25 @@ async function streamClaude(messages, maxTokens, onDelta) {
    les clauses à reprendre mot pour mot) + le texte déjà écrit. Avant, seule la partie écrite était
    renvoyée : la fin du contrat était rédigée sans les consignes, et les clauses validées par la
    juriste disparaissaient (bonne conduite, préavis, article des litiges, article des signatures). */
-const CONTINUE_INSTRUCTION = `Ta réponse précédente s'est arrêtée avant la fin du contrat (limite de longueur atteinte). Continue EXACTEMENT à partir de l'endroit où ton texte s'arrête, y compris en terminant le mot ou la phrase en cours, jusqu'à la fin du contrat. Pour tous les articles qui restent, applique strictement les consignes de ma demande initiale et reprends mot pour mot les clauses qu'elle impose. Garde la même mise en forme et la même numérotation. Réponds UNIQUEMENT avec la suite du texte, sans rien répéter de ce qui précède, sans introduction ni commentaire.`;
+const CONTINUE_INSTRUCTION = `Ta réponse précédente s'est arrêtée avant la fin du contrat (limite de longueur atteinte). Le texte ci-dessus se termine à la fin d'une ligne complète : continue directement avec la ligne suivante, jusqu'à la fin du contrat, sans rien répéter de ce qui précède. Pour tous les articles qui restent, applique strictement les consignes de ma demande initiale et reprends mot pour mot les clauses qu'elle impose. Garde la même mise en forme et la même numérotation. Réponds UNIQUEMENT avec la suite du texte, sans introduction ni commentaire.`;
+
+// Avant de demander la suite, on retire la dernière ligne, souvent coupée au milieu d'un mot : la suite
+// repart ainsi d'une ligne entière. Sans ça, la jonction pouvait souder deux mots (vu : « du présition »).
+const cutAtLastLine = (t) => {
+  const i = t.lastIndexOf("\n");
+  return i > 0 ? t.slice(0, i).replace(/\s+$/, "") + "\n\n" : t;
+};
 
 async function generateLongText(prompt, { maxTokens = 8000, maxAttempts = 3, looksComplete = () => true, onText } = {}) {
   let fullText = "";
   let stopReason = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) fullText = cutAtLastLine(fullText);
     const messages = (attempt === 1 || !fullText.trim())
       ? [{ role: "user", content: prompt }]
       : [
           { role: "user", content: prompt },
-          { role: "assistant", content: fullText },
+          { role: "assistant", content: fullText.replace(/\s+$/, "") },
           { role: "user", content: CONTINUE_INSTRUCTION },
         ];
     const before = fullText;
@@ -1316,7 +1324,7 @@ async function generateLongText(prompt, { maxTokens = 8000, maxAttempts = 3, loo
       // Filet de sécurité : si la conversation en plusieurs messages était refusée (erreur 400),
       // on redemande la suite en un seul message, qui contient lui aussi TOUTES les consignes.
       if (messages.length === 1 || !/^HTTP 400/.test(String(e?.message))) throw e;
-      const single = `${prompt}\n\n══════════════════════════════════════════════\nDÉBUT DE TA RÉPONSE, DÉJÀ RÉDIGÉ (ne le répète pas) :\n"""\n${fullText}\n"""\n\n${CONTINUE_INSTRUCTION}`;
+      const single = `${prompt}\n\n══════════════════════════════════════════════\nDÉBUT DE TA RÉPONSE, DÉJÀ RÉDIGÉ (ne le répète pas) :\n"""\n${fullText.replace(/\s+$/, "")}\n"""\n\n${CONTINUE_INSTRUCTION}`;
       r = await streamClaude([{ role: "user", content: single }], maxTokens, onDelta);
     }
     fullText = before + r.text;
@@ -1885,6 +1893,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setErrors({});
     if (step < 2) { setStep(s => s + 1); return; }
+    // Avant de générer, on revérifie aussi les étapes précédentes : un brouillon restauré directement
+    // à l'étape « Paiement » pouvait les sauter (ex. téléphone manquant pour un client particulier).
+    for (const s of [0, 1]) {
+      const prev = validate(s, form);
+      if (Object.keys(prev).length) { setErrors(prev); setStep(s); return; }
+    }
     generateContract();
   };
 
