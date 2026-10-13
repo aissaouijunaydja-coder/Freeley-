@@ -367,6 +367,37 @@ const getRetractationWaiverText = (isDigital) => isDigital ? RETRACTATION_WAIVER
 // ⚠️ Les mêmes textes existent dans api/retraction.js : si tu modifies l'un, modifie l'autre.
 // Numéro français à 10 chiffres écrit par paires (0767475077 → 07 67 47 50 77) ; tout autre format est laissé tel quel
 const fmtPhone = (v) => { const d = String(v || "").replace(/[\s.\-]/g, ""); return /^0\d{9}$/.test(d) ? d.replace(/(\d{2})(?=\d)/g, "$1 ") : String(v || ""); };
+/* ── Mise en forme uniforme du texte du contrat ──
+   Le modèle varie parfois sa présentation : « 1.1 » au lieu de « 1.1. », guillemets recopiés autour des
+   clauses imposées, astérisques ou dièses. On remet tout au même format, sans toucher au fond du texte.
+   Appliqué à chaque contrat rédigé ou révisé, et au moment de faire le PDF (anciens contrats compris). */
+const normalizeContractText = (raw) => {
+  if (!raw) return raw;
+  let t = String(raw).replace(/\r\n?/g, "\n");
+  t = t.replace(/\*\*/g, "").replace(/^[ \t]*#{1,6}[ \t]+/gm, "");
+  // Numéros de sous-articles : « 4.1 Texte » devient « 4.1. Texte »
+  t = t.replace(/^([ \t]*)(\d{1,2}\.\d{1,2})(?![.\d])[ \t\u00A0]+/gm, "$1$2. ");
+  // Guillemets droits ou anglais recopiés autour d'une clause entière
+  const Q = /["\u201C\u201D]/g;
+  const count = (x) => (x.match(Q) || []).length;
+  t = t.split(/\n{2,}/).map((block) => {
+    let b = block.trim();
+    const n = count(b);
+    const opens = /^["\u201C]/.test(b);
+    const closes = /["\u201D]\.?$/.test(b);
+    if ((n === 2 && opens && closes) || (n === 1 && (opens || closes))) {
+      b = b.replace(/^["\u201C][ \t]*/, "").replace(/[ \t]*["\u201D](\.?)$/, "$1");
+      return b;
+    }
+    return block.split("\n").map((line) => {
+      const l = line.trim();
+      if (count(l) !== 2) return line;
+      const m = l.match(/^(\d{1,2}\.\d{1,2}\.[ \t]+(?:[^"\u201C\u201D]{0,80}?\.[ \t]+)?)?["\u201C](.+)["\u201D](\.?)$/);
+      return m ? (m[1] || "") + m[2] + m[3] : line;
+    }).join("\n");
+  }).join("\n\n");
+  return t.replace(/\n{3,}/g, "\n\n").trim();
+};
 const retractationCoords = (f = {}) => [f.freelanceName, f.freelanceAddress, fmtPhone(f.freelancePhone), f.freelanceEmail].map(v => (v || "").trim()).filter(Boolean).join(", ");
 const RETRACTATION_ONLINE_REF = "la page de votre contrat sur Freeley, accessible par le lien reçu par courriel";
 const buildRetractationNotice = (f = {}, where = RETRACTATION_ONLINE_REF) => {
@@ -1961,7 +1992,7 @@ DONNÉES DE LA MISSION
 Prestataire        : ${form.freelanceName}
 Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + form.freelanceSiret : ""}
 Adresse Prestataire: ${form.freelanceAddress}
-Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + form.freelancePhone : ""}
+Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + fmtPhone(form.freelancePhone) : ""}
 
 Client             : ${form.clientName}${form.clientCompany ? " — " + form.clientCompany : ""}
 Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}
@@ -2001,7 +2032,7 @@ Rédige une clause affirmant EXPLICITEMENT que :
 Cite l'article L1221-1 du Code du travail et la jurisprudence Soc. 13 nov. 1996 sur le faisceau d'indices.
 
 ARTICLE 2 — OBJET DU CONTRAT ET DESCRIPTION DE LA MISSION
-Objet général + description détaillée de la mission et des livrables attendus.
+Objet général, puis la description de la mission et des livrables, reprise FIDÈLEMENT depuis la description fournie par le Prestataire. Tu peux la reformuler dans un style juridique et la présenter en énumération, mais n'ajoute AUCUN livrable, AUCUNE prestation, AUCUNE exclusion, AUCUNE quantité, AUCUNE fréquence et AUCUN délai qui n'y figure pas.
 
 ARTICLE 3 — DÉLAIS, PLANNING ET PROCÉDURE DE VALIDATION (RECETTE)
 Rédige les dates de début/fin. Puis inclus OBLIGATOIREMENT cette clause de recette :
@@ -2091,15 +2122,23 @@ Bloc de signature avec : "Lu et approuvé — Bon pour accord", Nom, Qualité �
 CONSIGNES DE RÉDACTION
 ══════════════════════════════════════════════
 - Commence DIRECTEMENT par l'en-tête du contrat, sans introduction ni commentaire.
-- Rédige chaque article avec des sous-paragraphes numérotés (ex : 4.1, 4.2…) pour la lisibilité.
+- Rédige chaque article avec des sous-paragraphes numérotés. Chaque sous-paragraphe est sur sa propre ligne et commence par son numéro suivi d'un point et d'une espace : « 4.1. », « 4.2. ». Chaque titre d'article est seul sur sa ligne, sous la forme « ARTICLE 4 — TITRE ». Pour une énumération, une ligne par élément, commençant par « a) », « b) », « c) ».
 - Utilise un registre juridique français précis, sans jargon inutile mais avec la rigueur d'un acte d'avocat.
-- Cite systématiquement les fondements légaux (articles de loi) entre parenthèses.
+- Cite les fondements légaux (articles de loi) entre parenthèses, uniquement quand ils sont certains.
 - Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
 - Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.
 - MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € ${U}"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
 - Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").
 - Ne cite un article de loi que si tu es certain de son numéro exact. N'écris JAMAIS de numéro d'article incomplet ou approximatif (par exemple « L221-... ») : dans le doute, ne cite pas d'article.
-- N'ajoute aucune clause qui contredit ou affaiblit les clauses imposées ci-dessus, et ne remplace jamais une clause imposée par ta propre formulation.`;
+- N'ajoute aucune clause qui contredit ou affaiblit les clauses imposées ci-dessus, et ne remplace jamais une clause imposée par ta propre formulation.
+
+══════════════════════════════════════════════
+RÈGLES ABSOLUES — À RESPECTER À LA LETTRE
+══════════════════════════════════════════════
+1. Suis la structure ci-dessus exactement : 13 articles, dans cet ordre, avec ces titres. N'ajoute aucun article. Dans chaque article, n'écris que ce que sa consigne demande.
+2. N'invente AUCUNE information absente des données de la mission : pas de moyen de paiement, de lieu, de délai, de montant, de fréquence, de garantie, de pénalité ni d'obligation supplémentaire. Si une information n'est pas fournie, ne l'évoque pas.
+3. Les clauses imposées « mot pour mot » sont recopiées exactement, SANS guillemets autour, sans reformulation et sans phrase ajoutée au milieu.
+4. Ne commente pas ta réponse et n'ajoute aucune note, aucun conseil ni aucun avertissement en dehors du contrat.`;
 
       setStreamingText("");
 
@@ -2115,7 +2154,7 @@ CONSIGNES DE RÉDACTION
         onText: (t) => setStreamingText(t),
       });
 
-      const text = fullText.trim();
+      const text = normalizeContractText(fullText.trim());
       if (!text) throw new Error("Réponse vide");
 
       // Filet de sécurité final : si malgré les tentatives de continuation le contrat reste incomplet,
@@ -2216,7 +2255,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       // et on refuse d'enregistrer une version coupée (elle remplacerait le contrat entier).
       const looksComplete = (t) => /ARTICLE 1[23]|voie électronique/i.test(t);
       const { text: revised, stopReason } = await generateLongText(prompt, { maxTokens: 8000, maxAttempts: 3, looksComplete });
-      const newContract = revised.trim();
+      const newContract = normalizeContractText(revised.trim());
       if (!newContract) throw new Error("Réponse vide");
       if (stopReason === "max_tokens" || !looksComplete(newContract)) throw new Error("Révision incomplète");
       setContract(newContract);
@@ -2268,7 +2307,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true, clauseInterlocuteur: true, clausePreavis: true, preavisJours: "30",
       ...rawForm,
     };
-    const pContract = overrideContract || contract;
+    const pContract = normalizeContractText(overrideContract || contract);
     const pFreelanceSig = overrideFreelanceSig || null;
     const pClientSig = overrideClientSig || null;
     const pSignedAt = overrideSignedAt || null;
@@ -2577,7 +2616,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           if (!t) { y += 2.5; return; }
 
           const isArticleTitle = /^ARTICLE\s+\d+\s*[-–—]/i.test(t);
-          const isSubTitle = /^\d+\.\d+[\s\u00A0]/.test(t) || (/^[A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ][A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ\s·]{4,}[:.]/.test(t) && t.length < 90);
+          // Un vrai sous-titre est court (« 4.1. Honoraires »). Une ligne numérotée plus longue est un
+          // paragraphe : elle doit passer à la ligne (avant, sa fin sortait de la page par la droite).
+          const isNumbered = /^\d+\.\d+\.?[\s\u00A0]/.test(t);
+          const isSubTitle = (isNumbered && t.length <= 60) || (/^[A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ][A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ\s·]{4,}[:.]/.test(t) && t.length < 90);
 
           if (isArticleTitle) {
             checkY(20);
@@ -2598,10 +2640,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             // Sous-titre en bleu accent avec soulignement fin
             doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
             doc.setTextColor(...NAVYL);
-            doc.text(t, ML, y);
             doc.setDrawColor(...NAVYL); doc.setLineWidth(0.25);
-            const tw = doc.getTextWidth(t);
-            doc.line(ML, y + 1.2, ML + Math.min(tw, cw), y + 1.2);
+            doc.splitTextToSize(t, cw).forEach((l, i) => {
+              if (i > 0) { y += 5; checkY(6); }
+              doc.text(l, ML, y);
+              doc.line(ML, y + 1.2, ML + Math.min(doc.getTextWidth(l), cw), y + 1.2);
+            });
             y += 7;
           } else {
             // Corps de texte
