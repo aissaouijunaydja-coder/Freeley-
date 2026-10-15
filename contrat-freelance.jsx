@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "./supabase.js";
 
 /* ── LOGO FREELEY (base64) ── */
@@ -237,6 +238,9 @@ const getHistory = async () => {
       retractationWaivedAt: content.retractationWaivedAtServer || content.retractationWaivedAt || contenu.retractationWaivedAt || null,
       retractationWaiverText: content.retractationWaiverText || contenu.retractationWaiverText || null,
       retractationConfirmationSentAt: content.retractationConfirmationSentAt || contenu.retractationConfirmationSentAt || null,
+      retractationExercisedAt: content.retractationExercisedAtServer || content.retractationExercisedAt || null,
+      signatureLocation: content.signatureLocation || null,
+      earlyPaymentAck: content.earlyPaymentAck ? { ...content.earlyPaymentAck, atServer: content.earlyPaymentAckAtServer || null } : null,
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
       paymentStatus: row.payment_status || "pending",
@@ -361,6 +365,55 @@ const RETRACTATION_WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la 
 const RETRACTATION_WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
 const getRetractationWaiverText = (isDigital) => isDigital ? RETRACTATION_WAIVER_TEXT_DIGITAL : RETRACTATION_WAIVER_TEXT_SERVICE;
 
+// ── Délais légaux, au jour près, heure de Paris (même calcul que dans api/retraction.js) ──
+// Rétractation : 14 jours après le jour de la signature, jusqu'à la fin de la journée ; prolongé au
+// premier jour ouvrable s'il finit un samedi, un dimanche ou un jour férié (art. L221-19 C. conso).
+// Paiement d'un contrat signé hors établissement : rien avant la fin d'un délai de 7 jours (art. L221-10).
+const easterSunday = (y) => {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const n = h + l - 7 * m + 114;
+  return Date.UTC(y, Math.floor(n / 31) - 1, (n % 31) + 1);
+};
+const isFrenchHoliday = (dayUtc) => {
+  const d = new Date(dayUtc), md = `${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+  if (["1-1", "5-1", "5-8", "7-14", "8-15", "11-1", "11-11", "12-25"].includes(md)) return true;
+  const e = easterSunday(d.getUTCFullYear()), DAY = 86400000;
+  return [e + DAY, e + 39 * DAY, e + 50 * DAY].includes(dayUtc); // lundi de Pâques, Ascension, lundi de Pentecôte
+};
+const parisDayUtc = (iso, plusDays = 0) => {
+  const s = new Date(iso);
+  if (isNaN(s.getTime())) return null;
+  const [y, mo, d] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(s).split("-").map(Number);
+  return Date.UTC(y, mo - 1, d + plusDays);
+};
+// Dernier jour pour se rétracter (midi UTC, pour afficher la bonne date)
+const retractationLastDay = (signedIso) => {
+  let day = signedIso ? parisDayUtc(signedIso, 14) : null;
+  if (day == null) return null;
+  while ([0, 6].includes(new Date(day).getUTCDay()) || isFrenchHoliday(day)) day += 86400000;
+  return new Date(day + 12 * 3600000);
+};
+// Fin exacte du délai : fin de ce dernier jour à Paris (calcul généreux, jamais plus court)
+const retractationDeadline = (signedIso) => {
+  const d = retractationLastDay(signedIso);
+  return d ? new Date(d.getTime() + 11 * 3600000) : null;
+};
+// Contrat signé hors établissement : premier jour où un paiement peut être reçu (le 8e jour)
+const paymentAllowedFrom = (signedIso) => {
+  const d = signedIso ? parisDayUtc(signedIso, 8) : null;
+  return d == null ? null : new Date(d);
+};
+const frDate = (d) => d ? new Date(d).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" }) : "";
+
+// Lieu de la signature en présence avec un particulier, déclaré par le freelance
+const SIGNATURE_LOCATIONS = {
+  locaux: "Dans mes locaux (bureau, atelier ou boutique où je travaille habituellement)",
+  hors_etablissement: "Chez le client ou ailleurs (domicile, café, salon, chantier…)",
+  urgence: "Chez le client, pour une réparation urgente qu'il m'a demandée",
+};
+
 // ── Information légale sur la rétractation : modèle officiel (annexe à l'article R221-3 du Code de la
 // consommation), complété avec les coordonnées du freelance, qui est le professionnel du contrat.
 // Formulaire : modèle officiel (annexe à l'article R221-1). Textes repris mot pour mot.
@@ -428,29 +481,140 @@ const buildRetractationForm = (f = {}) => [
 ].join("\n\n");
 const RETRACTATION_BOX_STYLE = { maxHeight:200, overflowY:"auto", whiteSpace:"pre-wrap", fontSize:10.5, color:"#334155", lineHeight:1.55, background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:10, padding:"10px 12px", marginBottom:12, textAlign:"left" };
 
+// Appel au serveur de Freeley (api/retraction.js). Le client n'a pas de compte : c'est le serveur qui
+// enregistre ses actions avec tous les droits, puis relit la base pour vérifier.
+const callRetractionApi = async (payload) => {
+  try {
+    const res = await fetch("/api/retraction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok && !!data.ok, status: res.status, data };
+  } catch (e) {
+    console.error("api/retraction injoignable:", e);
+    return { ok: false, status: 0, data: {} };
+  }
+};
+
+// ── Paiement demandé avant la fin des 7 jours (contrat signé hors établissement, art. L221-10) ──
+// Freeley ne bloque pas : il rappelle la loi, le freelance décide, et sa réponse est enregistrée dans
+// le contrat avec la date et l'heure (heure de son appareil, puis heure du serveur en plus).
+const EARLY_PAYMENT_ACK_TEXT = "J'ai compris, je demande quand même le paiement, sous ma responsabilité.";
+
+const saveEarlyPaymentAck = async (contractId, { action, allowedFrom }) => {
+  if (!contractId) return null;
+  try {
+    const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+    if (e1 || !existing) throw e1 || new Error("Contrat introuvable");
+    const content = parseContent(existing.content);
+    if (content.earlyPaymentAck) return content.earlyPaymentAck; // déjà accepté pour ce contrat
+    const ack = {
+      at: new Date().toISOString(),
+      text: EARLY_PAYMENT_ACK_TEXT,
+      action: action || "",
+      paymentAllowedFrom: allowedFrom ? new Date(allowedFrom).toISOString() : null,
+    };
+    const { error: e2 } = await supabase.rpc("update_contract_content", {
+      p_contract_id: contractId,
+      p_new_content: JSON.stringify({ ...content, earlyPaymentAck: ack }),
+      p_new_status: existing.status,
+    });
+    if (e2) throw e2;
+    callRetractionApi({ action: "stamp-early-payment", contractId }); // heure du serveur, en plus
+    return ack;
+  } catch (e) {
+    console.error("[Freeley] Enregistrement de l'accord pour un paiement avant 7 jours :", e);
+    return null;
+  }
+};
+
+// Date et heure lisibles, heure de Paris : « 13 octobre 2026 à 15:30 »
+const frDateTime = (d) => d ? `${frDate(d)} à ${new Date(d).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}` : "";
+
+// Fenêtre de confirmation, affichée par-dessus tout le reste (portail vers le body)
+function EarlyPaymentConfirmModal({ payNotBefore, saving, error, onCancel, onConfirm }) {
+  const [checked, setChecked] = useState(false);
+  return createPortal(
+    <div
+      onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget && !saving) onCancel(); }}
+      style={{ position:"fixed", inset:0, zIndex:10050, background:"rgba(10,20,40,0.6)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+    >
+      <div role="dialog" aria-modal="true" style={{ background:C.white, borderRadius:16, width:"100%", maxWidth:440, maxHeight:"90vh", overflowY:"auto", padding:"20px 20px 18px", boxShadow:"0 24px 60px rgba(0,0,0,0.3)", fontFamily:T.body, textAlign:"left" }}>
+        <div style={{ fontSize:16, fontWeight:800, color:"#92400E", marginBottom:10, lineHeight:1.4 }}>⚠️ Paiement avant le {frDate(payNotBefore)}</div>
+        <p style={{ fontSize:13, color:C.text, lineHeight:1.6, margin:"0 0 10px" }}>
+          Ce contrat a été signé chez le client ou ailleurs que dans tes locaux. Pour ce type de contrat, la loi interdit d'exiger ou de recevoir un paiement, même un acompte, avant le <strong>{frDate(payNotBefore)}</strong> (article L221-10 du Code de la consommation).
+        </p>
+        <p style={{ fontSize:13, color:C.text, lineHeight:1.6, margin:"0 0 10px" }}>
+          Exiger ou obtenir un paiement avant cette date est puni de deux ans d'emprisonnement et de {"150\u00A0000\u00A0€"} d'amende (article L242-7 du Code de la consommation).
+        </p>
+        <p style={{ fontSize:12.5, color:C.textM, lineHeight:1.6, margin:"0 0 14px" }}>
+          Freeley ne bloque pas : c'est ta décision et ta responsabilité. Ta réponse sera enregistrée dans le contrat, avec la date et l'heure.
+        </p>
+        <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", borderRadius:10, cursor:"pointer", background: checked ? "#FFFBEB" : "#F8FAFC", border:`1.5px solid ${checked ? "#F59E0B" : C.border}`, marginBottom:14 }}>
+          <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} style={{ marginTop:3, flexShrink:0 }} />
+          <span style={{ fontSize:13, fontWeight:700, color:C.text, lineHeight:1.5 }}>{EARLY_PAYMENT_ACK_TEXT}</span>
+        </label>
+        {error && <div style={{ fontSize:12, color:"#B91C1C", marginBottom:10, lineHeight:1.5 }}>{error}</div>}
+        <div style={{ display:"flex", gap:10 }}>
+          <button onClick={onCancel} disabled={saving} style={{ flex:1, padding:"11px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.textM }}>Annuler</button>
+          <button onClick={onConfirm} disabled={!checked || saving} style={{ flex:1, padding:"11px 12px", background: (!checked || saving) ? "#E5E7EB" : "#92400E", border:"none", borderRadius:10, cursor: (!checked || saving) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color: (!checked || saving) ? C.textL : "#fff" }}>{saving ? "Enregistrement…" : "Continuer"}</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// Logique commune : pendant les 7 jours, le premier clic sur un bouton de paiement ouvre la fenêtre ;
+// une fois la réponse enregistrée, l'action demandée continue, et on ne redemande plus pour ce contrat.
+function useEarlyPaymentGuard({ contractId, payNotBefore, active, savedAck }) {
+  const [ask, setAsk] = useState(null);       // { action, run } en attente de confirmation
+  const [localAck, setLocalAck] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const ackRef = useRef(false);
+  const ack = localAck || savedAck || null;
+  const guard = (action, run) => (...args) => {
+    if (active && !ack && !ackRef.current) { setError(""); setAsk({ action, run: () => run(...args) }); return; }
+    return run(...args);
+  };
+  const confirm = async () => {
+    if (!ask || saving) return;
+    setSaving(true); setError("");
+    const saved = await saveEarlyPaymentAck(contractId, { action: ask.action, allowedFrom: payNotBefore });
+    setSaving(false);
+    if (!saved) { setError("Ta réponse n'a pas pu être enregistrée. Vérifie ta connexion, puis réessaie."); return; }
+    ackRef.current = true;
+    setLocalAck(saved);
+    const run = ask.run;
+    setAsk(null);
+    run();
+  };
+  const modal = ask ? (
+    <EarlyPaymentConfirmModal payNotBefore={payNotBefore} saving={saving} error={error} onCancel={() => { if (!saving) setAsk(null); }} onConfirm={confirm} />
+  ) : null;
+  return { guard, ack, modal };
+}
+
 // Le client (particulier) demande expressément le démarrage avant la fin du délai de rétractation de 14 jours
 const submitRetractationWaiver = async (contractId, waiverText) => {
+  const text = waiverText || RETRACTATION_WAIVER_TEXT_SERVICE; // preuve : texte exact vu et accepté par le client
+  const r = await callRetractionApi({ action: "client-waive", contractId, waiverText: text });
+  if (r.ok) return true;
+  console.error("Case de démarrage refusée par le serveur:", r.status, r.data);
+  // Repli : ancien chemin direct (fonctionne quand le freelance est connecté, signature en présence)
   const existing = await readContractForUpdate(contractId);
   if (!existing) return false;
-  const newContent = {
-    ...existing.content,
-    retractationWaivedAt: new Date().toISOString(),
-    retractationWaiverText: waiverText || RETRACTATION_WAIVER_TEXT_SERVICE, // preuve : texte exact vu et accepté par le client
-  };
+  const newContent = { ...existing.content, retractationWaivedAt: new Date().toISOString(), retractationWaiverText: text };
   const { error: e2 } = await supabase.rpc("update_contract_content", {
     p_contract_id: contractId,
     p_new_content: JSON.stringify(newContent),
     p_new_status: existing.status,
   });
   if (e2) { console.error(e2); return false; }
-  // Date enregistrée aussi par le serveur (horloge serveur, plus fiable que celle du téléphone du client)
-  try {
-    await fetch("/api/retraction", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "stamp-waiver", contractId }),
-    });
-  } catch (e3) { console.error("Erreur horodatage serveur de la case:", e3); }
+  callRetractionApi({ action: "stamp-waiver", contractId });
   return true;
 };
 
@@ -474,38 +638,23 @@ const submitRetractationConfirmationSent = async (contractId) => {
 };
 
 // Le client (particulier, dans les 14 jours) exerce son droit de rétractation.
-// Enregistre la date en base (la preuve légale la plus importante), puis déclenche l'envoi
-// automatique de l'accusé de réception — obligation depuis le 19 juin 2026 (art. D221-5 C.conso).
-// L'email est envoyé côté serveur (pas mailto) car il doit partir sans intervention du freelance.
+// Tout passe par le serveur : il vérifie le délai, enregistre la date en base (la preuve légale), relit
+// pour vérifier, puis envoie l'accusé de réception au client et l'alerte au freelance (art. D221-5 C. conso).
+// Avant, la page du client écrivait elle-même en base, et la base le lui refusait (contrat déjà signé).
 const submitRetractationExercise = async (contractId) => {
-  // On relit via get_contract_for_signing plutôt qu'une lecture directe de la table :
-  // le client n'est jamais connecté avec un compte, la lecture directe est bloquée pour lui
-  // par les règles de sécurité, alors que cette fonction est déjà autorisée pour un visiteur anonyme.
-  const existing = await getContractForSigning(contractId);
-  if (!existing) { console.error("Contrat introuvable pour la rétractation"); return false; }
-  const newContent = { ...parseContent(existing.content), retractationExercisedAt: new Date().toISOString() };
-  const { error: e2 } = await supabase.rpc("update_contract_content", {
-    p_contract_id: contractId,
-    p_new_content: JSON.stringify(newContent),
-    p_new_status: existing.status,
-  });
-  if (e2) { console.error(e2); return false; }
-  try {
-    await fetch("/api/retraction", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "confirm", contractId }),
-    });
-  } catch (e) {
-    console.error("Erreur envoi accusé de réception:", e);
-    // On ne bloque jamais le client si l'email échoue : la date en base est la preuve légale,
-    // l'email est une confirmation en plus.
-  }
-  return true;
+  const r = await callRetractionApi({ action: "confirm", contractId });
+  if (r.ok) return { ok: true, exercisedAt: r.data.exercisedAt || new Date().toISOString() };
+  console.error("Rétractation refusée par le serveur:", r.status, r.data);
+  return { ok: false, reason: r.data.error || "" };
 };
 
-// Le client signe : on enregistre sa signature et on passe le statut à "signed"
+// Le client signe à distance : le serveur enregistre la signature, passe le contrat en « signé », puis
+// envoie la confirmation du contrat par email (support durable).
 const submitClientSignature = async (contractId, clientSignature) => {
+  const r = await callRetractionApi({ action: "client-sign", contractId, signature: clientSignature });
+  if (r.ok) return true;
+  console.error("Signature refusée par le serveur:", r.status, r.data);
+  // Repli : ancien chemin direct
   const existing = await readContractForUpdate(contractId);
   if (!existing) return false;
   const newContent = { ...existing.content, clientSignature, signedByClientAt: new Date().toISOString() };
@@ -515,16 +664,7 @@ const submitClientSignature = async (contractId, clientSignature) => {
     p_new_status: "signed",
   });
   if (e2) { console.error(e2); return false; }
-  // Confirmation du contrat sur support durable : email automatique envoyé par le serveur, avec le texte
-  // du contrat et, pour un particulier, l'information officielle sur la rétractation et le formulaire.
-  // Ne bloque jamais la signature si l'envoi échoue.
-  try {
-    await fetch("/api/retraction", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "send-link", contractId }),
-    });
-  } catch (e3) { console.error("Erreur envoi confirmation du contrat:", e3); }
+  callRetractionApi({ action: "send-link", contractId });
   return true;
 };
 
@@ -2055,7 +2195,8 @@ ${form.latePaymentPenalty
     : `- La clause légale de pénalités de retard réservée aux professionnels : "Conformément à l'article L441-10 du Code de commerce, toute somme non réglée à l'échéance porte, de plein droit et sans qu'un rappel soit nécessaire, des pénalités de retard au taux d'intérêt appliqué par la Banque centrale européenne à son opération de refinancement la plus récente, majoré de dix (10) points de pourcentage, sauf stipulation d'un autre taux conforme aux limites légales. Les pénalités sont exigibles à compter du jour suivant la date de règlement figurant sur la facture. En sus, tout professionnel en situation de retard de paiement est de plein droit débiteur de l'indemnité forfaitaire pour frais de recouvrement fixée à quarante euros (40 €) par l'article D441-5 du Code de commerce. Lorsque les frais de recouvrement exposés sont supérieurs à ce montant, le Prestataire peut demander une indemnisation complémentaire sur justification."`)
   : `- Indique explicitement : "Pénalités de retard : Non stipulées."`}
 ${pricing.b2c
-  ? `- Le Client étant un consommateur, le prix doit OBLIGATOIREMENT être exprimé toutes taxes comprises : n'écris jamais « HT » ni « hors taxes » dans le contrat, et n'écris jamais qu'une taxe s'ajoutera au prix. Inclus cette phrase : "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent aux montants que le Client aura effectivement à payer (${pricing.taxNote})."`
+  ? `- Inclus OBLIGATOIREMENT, mot pour mot, la phrase suivante : "Lorsque le présent contrat est conclu hors établissement, aucun paiement ne peut être exigé ni reçu du Client avant l'expiration d'un délai de sept jours à compter de sa conclusion, sauf pour des travaux d'entretien ou de réparation à réaliser en urgence au domicile du Client et expressément sollicités par lui, dans la limite des pièces de rechange et travaux strictement nécessaires pour répondre à l'urgence (article L221-10 du Code de la consommation)."
+- Le Client étant un consommateur, le prix doit OBLIGATOIREMENT être exprimé toutes taxes comprises : n'écris jamais « HT » ni « hors taxes » dans le contrat, et n'écris jamais qu'une taxe s'ajoutera au prix. Inclus cette phrase : "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent aux montants que le Client aura effectivement à payer (${pricing.taxNote})."`
   : `- Toutes les sommes sont exprimées hors taxes ; la TVA applicable, le cas échéant, sera ajoutée au taux en vigueur.`}
 ${form.clauseSuspension ? `- Inclus OBLIGATOIREMENT la clause de suspension suivante : "En cas de retard de paiement de toute somme exigible au titre du présent contrat persistant plus de huit (8) jours après une mise en demeure adressée par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception, restée sans effet, le Prestataire peut suspendre l'exécution de la mission jusqu'au complet règlement des sommes dues. Cette suspension ne constitue pas une faute du Prestataire et n'ouvre pas droit à indemnité au profit du Client. Les délais d'exécution affectés par la suspension sont eux-mêmes suspendus et prorogés d'une durée correspondant à la période de suspension, sans que le retard qui en résulte puisse être imputé au Prestataire."` : ""}
 
@@ -3534,7 +3675,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           setProfile={setProfile}
           depositPct={invoiceDepositPct}
           contractId={signingContractId || history[0]?.id}
-          onClose={() => { setShowTactileSign(false); setSigningContractId(null); }}
+          contractText={(signingContractId ? history.find(h => h.id === signingContractId)?.contract : contract) || history[0]?.contract || ""}
+          onClose={async () => {
+            setShowTactileSign(false); setSigningContractId(null);
+            // Recharge les contrats : l'aperçu derrière la fenêtre affiche alors les deux signatures
+            try { setHistory(await getHistory()); } catch (e) { console.error("[Freeley] Rechargement des contrats après signature :", e); }
+          }}
           onGoToProfile={() => { setShowTactileSign(false); goToScreen("profile"); }}
           onGoToProfileTva={goToProfileFacturation}
           authUser={authUser}
@@ -10042,8 +10188,24 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   const [soldeLinkGenerating, setSoldeLinkGenerating] = useState(false);
   const [soldeRelanceSent, setSoldeRelanceSent] = useState(false);
 
+  // Contrat signé chez le client ou ailleurs (hors établissement) : la loi interdit tout paiement pendant
+  // 7 jours. Freeley ne bloque pas : au premier clic sur un bouton de paiement, une fenêtre rappelle la
+  // loi, et la réponse du freelance est enregistrée dans le contrat.
+  const payNotBefore = entry?.signatureLocation === "hors_etablissement" && entry?.signedByClientAt ? paymentAllowedFrom(entry.signedByClientAt) : null;
+  const earlyWindow = !!payNotBefore && Date.now() < payNotBefore.getTime() && !paid;
+  const early = useEarlyPaymentGuard({ contractId: entry?.id, payNotBefore, active: earlyWindow, savedAck: entry?.earlyPaymentAck });
+
   // Un contrat sans prix n'a rien à encaisser — ne rien afficher plutôt qu'un bloc acompte à 0€
   if (!rawPrice || rawPrice <= 0) return null;
+
+  // Le client s'est rétracté : plus aucun paiement à demander, et ce qui a été payé doit être remboursé
+  if (entry?.retractationExercisedAt) {
+    return (
+      <div className="fade-up" style={{ marginBottom:24, background:"#FEF2F2", border:"1.5px solid #FECACA", borderRadius:14, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
+        ⛔ <strong>Le client s'est rétracté le {frDate(entry.retractationExercisedAt)}.</strong> Ne lui demande plus aucun paiement. S'il t'a déjà payé quelque chose, tu dois le rembourser au plus tard 14 jours après sa rétractation, par le même moyen de paiement.
+      </div>
+    );
+  }
 
   const ensureSoldePaymentLink = async () => {
     if (soldeStripeLinkUrl) return soldeStripeLinkUrl;
@@ -10192,6 +10354,16 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   return (
     <div className="fade-up" style={{ marginBottom: 24 }}>
 
+      {/* Contrat hors établissement, moins de 7 jours : rappel de la loi (les boutons restent utilisables) */}
+      {earlyWindow && (
+        <div style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:14, padding:"14px 18px", marginBottom:14, fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
+          ⏳ <strong>Pas de paiement avant le {frDate(payNotBefore)}, d'après la loi.</strong> Ce contrat a été signé chez le client ou ailleurs que dans tes locaux. La loi interdit d'exiger ou de recevoir un paiement pendant 7 jours après la signature (article L221-10 du Code de la consommation).{" "}
+          {early.ack
+            ? <>Tu as choisi de demander {paymentWordArticleLe} avant cette date, sous ta responsabilité (réponse enregistrée le {frDateTime(early.ack.atServer || early.ack.at)}).</>
+            : <>Freeley ne bloque pas les boutons : si tu les utilises avant cette date, ce sera sous ta responsabilité.</>}
+        </div>
+      )}
+
       {/* Rappel visible du statut Stripe Connect, où qu'on soit dans l'app */}
       {!stripeConnectReady && (
         <div style={{
@@ -10267,7 +10439,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               }}>
                 {paid
                   ? `${paymentWordCap} sécurisé sur Stripe ! Vous pouvez démarrer la production l'esprit tranquille.`
-                  : `Mission suspendue : En attente du ${paymentWord} (${depositAmt.toLocaleString("fr-FR")} €)`
+                  : `Mission suspendue : En attente ${isComptant ? "du paiement" : "de l'acompte"} (${depositAmt.toLocaleString("fr-FR")} €)`
                 }
               </div>
               <div style={{
@@ -10412,7 +10584,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
           }}>
             {/* Copier lien paiement */}
             <button
-              onClick={handleCopyLink}
+              onClick={early.guard("lien-carte", handleCopyLink)}
               disabled={linkGenerating}
               style={{
                 flex: 1, minWidth: 200,
@@ -10441,7 +10613,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 
             {/* Relancer le client */}
             <button
-              onClick={handleRelance}
+              onClick={early.guard("relance", handleRelance)}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -10468,7 +10640,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 
             {/* Télécharger la facture — pour la réclamer, même avant paiement */}
             <button
-              onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte")}
+              onClick={early.guard("facture", () => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte"))}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -10552,6 +10724,9 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
           </div>
         </div>
       )}
+
+      {/* Fenêtre de confirmation : paiement demandé pendant les 7 jours */}
+      {early.modal}
     </div>
   );
 }
@@ -13956,7 +14131,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
 /* ══════════════════════════════════════════ DEPOSIT INVOICE MODAL ══ */
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
-function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, authUser, onGoToHistory, stripeConnectAccountId, stripeConnectReady, onConnectStripe, connectingStripe }) {
+function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, contractText, authUser, onGoToHistory, stripeConnectAccountId, stripeConnectReady, onConnectStripe, connectingStripe }) {
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -13979,6 +14154,19 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const clientName = form.clientName || "Jean Dupont";
   const [showDepositInvoiceModal, setShowDepositInvoiceModal] = useState(false);
   const isParticulier = form.typeClient === "particulier";
+  // Lieu de la signature (particulier uniquement), déclaré par le freelance : la loi permet un paiement
+  // tout de suite (dans ses locaux, ou réparation urgente demandée par le client) ou seulement après
+  // 7 jours (contrat hors établissement, art. L221-10 C. conso). Freeley ne bloque pas : pendant les
+  // 7 jours, le premier clic sur un bouton de paiement ouvre une fenêtre de confirmation.
+  const [signLocation, setSignLocation] = useState(null);
+  const [signLocationAt, setSignLocationAt] = useState(null);
+  const chooseSignLocation = (key) => { setSignLocation(key); setSignLocationAt(new Date().toISOString()); };
+  const paymentNotBefore = isParticulier && signLocation === "hors_etablissement" ? paymentAllowedFrom(new Date().toISOString()) : null;
+  const paymentEarly = !!paymentNotBefore;
+  const early = useEarlyPaymentGuard({ contractId, payNotBefore: paymentNotBefore, active: paymentEarly, savedAck: null });
+  const canValidateFreelance = freelanceHasStrokes && (!isParticulier || !!signLocation);
+  const [showContractText, setShowContractText] = useState(false);
+  const profileIncomplete = !(profile?.firstName && profile?.lastName && profile?.jobTitle);
   const [tactileRetractationChecked, setTactileRetractationChecked] = useState(false);
   const [tactileRetractationWaiving, setTactileRetractationWaiving] = useState(false);
   const [tactileRetractationDone, setTactileRetractationDone] = useState(false);
@@ -14084,7 +14272,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   };
 
   const handleValidateFreelance = () => {
-    if (!freelanceHasStrokes) return;
+    if (!canValidateFreelance) return;
     // Capture immédiatement l'image dessinée — le canevas disparaît de l'écran dès l'étape suivante
     setFreelanceSigCapture(freelanceCanvasRef.current?.toDataURL("image/png") || null);
     setFreelanceSigned(true);
@@ -14105,7 +14293,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           const clientSig = clientCanvasRef.current?.toDataURL("image/png") || null;
           const { data: existing, error: e1 } = await supabase.from("contracts").select("content").eq("id", contractId).single();
           if (e1) throw e1;
-          const newContent = { ...parseContent(existing.content), freelanceSignature: freelanceSig, clientSignature: clientSig, signedByClientAt: new Date().toISOString() };
+          const newContent = {
+            ...parseContent(existing.content),
+            freelanceSignature: freelanceSig, clientSignature: clientSig, signedByClientAt: new Date().toISOString(),
+            ...(isParticulier && signLocation ? { signatureLocation: signLocation, signatureLocationLabel: SIGNATURE_LOCATIONS[signLocation], signatureLocationDeclaredAt: signLocationAt } : {}),
+          };
           const { error: e2 } = await supabase.rpc("update_contract_content", {
             p_contract_id: contractId,
             p_new_content: JSON.stringify(newContent),
@@ -14205,8 +14397,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   {freelanceSigned ? "SIGNÉ" : "EN ATTENTE"}
                 </span>
               </div>
-              <div style={{ fontFamily:T.body, fontSize:12, color:C.white, fontWeight:600 }}>Prestataire (Vous)</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#6A8AB0", marginTop:2 }}>{form.freelanceName || "Vous"}</div>
+              <div style={{ fontFamily:T.body, fontSize:12, color:C.white, fontWeight:600 }}>Prestataire (toi)</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#6A8AB0", marginTop:2 }}>{form.freelanceName || "Toi"}</div>
             </div>
 
             {/* Arrow */}
@@ -14243,6 +14435,28 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           {/* ────────── ÉTAPE 0 : Freelance signe ────────── */}
           {step === 0 && (
             <div style={{ animation:"fadeUp 0.35s ease both" }}>
+              {isParticulier && (
+                <div style={{ marginBottom:20 }}>
+                  <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:6 }}>Où signes-tu ce contrat ?</div>
+                  <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:10 }}>
+                    Ton client est un particulier. La loi ne fixe pas les mêmes règles de paiement selon l'endroit où le contrat est signé. Choisis la réponse qui correspond à la réalité : elle sera enregistrée dans le contrat, avec la date et l'heure, et elle engage ta responsabilité.
+                  </div>
+                  {[
+                    { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement.", rule:"Le client peut payer l'acompte tout de suite." },
+                    { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un salon, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander." },
+                    { key:"urgence", title:"Chez le client, pour une réparation urgente qu'il m'a demandée", sub:"Par exemple un dépannage urgent à son domicile, à sa demande.", rule:"La loi autorise alors le paiement tout de suite, mais seulement pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-10, 4°, du Code de la consommation). Si ta mission comprend autre chose, comme un contrat d'entretien, choisis plutôt « Chez le client ou ailleurs »." },
+                  ].map(opt => (
+                    <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor:"pointer", background: signLocation === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${signLocation === opt.key ? "#6366F1" : C.border}` }}>
+                      <input type="radio" name="signLocation" checked={signLocation === opt.key} onChange={() => chooseSignLocation(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
+                      <span style={{ fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.55 }}>
+                        <strong>{opt.title}</strong><br />
+                        <span style={{ color:C.textM }}>{opt.sub}</span><br />
+                        <span style={{ color: opt.key === "hors_etablissement" ? "#92400E" : "#166534" }}>{opt.rule}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
               <div style={{
                 fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy,
                 marginBottom:14, display:"flex", alignItems:"center", gap:8,
@@ -14252,8 +14466,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   background:C.navy, color:C.white,
                   display:"inline-flex", alignItems:"center", justifyContent:"center",
                   fontSize:12, fontWeight:700, flexShrink:0,
-                }}>1</span>
-                Apposez votre signature
+                }}>{isParticulier ? 2 : 1}</span>
+                Appose ta signature
               </div>
 
               {/* Canvas zone */}
@@ -14284,7 +14498,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   }}>
                     <div style={{ fontSize:28, marginBottom:8, opacity:0.25 }}>✍️</div>
                     <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, textAlign:"center", lineHeight:1.5 }}>
-                      Signez avec votre doigt<br/>directement sur l'écran
+                      Signe avec ton doigt<br/>directement sur l'écran
                     </div>
                   </div>
                 )}
@@ -14306,23 +14520,26 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 >🗑 Effacer</button>
                 <button
                   onClick={handleValidateFreelance}
-                  disabled={!freelanceHasStrokes}
+                  disabled={!canValidateFreelance}
                   style={{
                     flex:2, padding:"11px",
-                    background: freelanceHasStrokes
+                    background: canValidateFreelance
                       ? "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)"
                       : C.creamDD,
                     border:"none", borderRadius:9,
-                    cursor: freelanceHasStrokes ? "pointer" : "not-allowed",
+                    cursor: canValidateFreelance ? "pointer" : "not-allowed",
                     fontFamily:T.body, fontSize:13, fontWeight:700,
-                    color: freelanceHasStrokes ? C.white : C.textL,
+                    color: canValidateFreelance ? C.white : C.textL,
                     transition:"all 0.2s",
-                    boxShadow: freelanceHasStrokes ? "0 4px 14px #6366F140" : "none",
+                    boxShadow: canValidateFreelance ? "0 4px 14px #6366F140" : "none",
                   }}
-                  onMouseOver={e=>{ if (freelanceHasStrokes) { e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 20px #6366F160"; }}}
-                  onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow= freelanceHasStrokes ? "0 4px 14px #6366F140" : "none"; }}
+                  onMouseOver={e=>{ if (canValidateFreelance) { e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 20px #6366F160"; }}}
+                  onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow= canValidateFreelance ? "0 4px 14px #6366F140" : "none"; }}
                 >✅ Valider ma signature</button>
               </div>
+              {isParticulier && !signLocation && freelanceHasStrokes && (
+                <div style={{ fontFamily:T.body, fontSize:11.5, color:"#92400E", marginTop:8, textAlign:"center" }}>Choisis d'abord où tu signes ce contrat, juste au-dessus.</div>
+              )}
             </div>
           )}
 
@@ -14337,9 +14554,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               }}>
                 <span style={{ fontSize:20 }}>✅</span>
                 <div>
-                  <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#15803D" }}>Votre signature a bien été enregistrée !</div>
+                  <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#15803D" }}>Ta signature a bien été enregistrée !</div>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginTop:1 }}>
-                    Passe maintenant l'appareil à <strong>{clientName}</strong> pour qu'il/elle signe ci-dessous :
+                    Passe maintenant l'appareil à <strong>{clientName}</strong> pour qu'il ou elle lise le contrat et signe ci-dessous :
                   </div>
                 </div>
               </div>
@@ -14365,11 +14582,21 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   👋 Bonjour {clientName}, voici votre contrat à signer
                 </div>
 
+                {/* Le client doit pouvoir lire tout le contrat avant de signer */}
+                <button
+                  onClick={() => setShowContractText(v => !v)}
+                  style={{ width:"100%", marginBottom:12, padding:"10px 14px", background:C.white, border:"1.5px solid #93C5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#1D4ED8" }}
+                >{showContractText ? "Masquer le contrat" : "📄 Lire le contrat complet"}</button>
+                {showContractText && (
+                  <div style={{ maxHeight:300, overflowY:"auto", whiteSpace:"pre-wrap", fontFamily:T.body, fontSize:11.5, color:"#2C3E50", lineHeight:1.65, background:C.white, border:"1px solid #DBEAFE", borderRadius:10, padding:"12px 14px", marginBottom:12, textAlign:"left" }}>
+                    {contractText ? normalizeContractText(contractText) : "Le texte du contrat n'est pas disponible sur cet écran. Ouvre-le depuis « Mes contrats » pour le montrer au client."}
+                  </div>
+                )}
+
                 {isParticulier && !tactileRetractationDone ? (
                   <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:"#1D4ED8", marginBottom:8 }}>Droit de rétractation</div>
                     <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
-                      En tant que particulier, la loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si {form.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
+                      En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si {form.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
                     </div>
                     <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(form)}{"\n\n"}{buildRetractationForm(form)}</div>
                     <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
@@ -14382,51 +14609,23 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       style={{ width:"100%", marginTop:12, padding:"11px 16px", background: !tactileRetractationWaiving ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:8, cursor: !tactileRetractationWaiving ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
                     >{tactileRetractationWaiving ? "Enregistrement…" : (tactileRetractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
                     <div style={{ fontSize:10, color:"#6B7280", marginTop:10, lineHeight:1.5, textAlign:"center" }}>
-                      Que tu coches ou non, tu accèdes à la signature. Si tu coches, ta demande est horodatée et conservée.
+                      Que vous cochiez ou non, vous accédez ensuite à la signature. Si vous cochez, votre demande est datée et conservée.
                     </div>
                   </div>
                 ) : (
                 <>
-                {/* ── Bannière confiance client ── */}
-                {(() => {
-                  const clientEmail = form.clientEmail || "";
-                  const rating = clientEmail ? getClientRating(clientEmail) : null;
-                  if (rating && rating.avg >= 4) {
-                    return (
-                      <div style={{
-                        background:"linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)",
-                        border:"1.5px solid #6EE7B7",
-                        borderRadius:10, padding:"10px 13px", marginBottom:12,
-                        display:"flex", alignItems:"center", gap:8,
-                        animation:"fadeUp 0.3s ease both",
-                      }}>
-                        <span style={{ fontSize:16, flexShrink:0 }}>🛡️</span>
-                        <div style={{ flex:1 }}>
-                          <div style={{ fontFamily:T.body, fontSize:11, fontWeight:700, color:"#065F46", marginBottom:1 }}>
-                            Vos prestataires vous adorent ! Vous avez une note de ⭐ {rating.avg}/5.
-                          </div>
-                          <div style={{ fontFamily:T.body, fontSize:10, color:"#047857", lineHeight:1.5 }}>
-                            Créez un compte gratuit pour suivre tous vos contrats scellés.
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  // Bannière neutre pour les nouveaux clients sans historique
-                  return (
-                    <div style={{
-                      background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)",
-                      border:"1.5px solid #C7D2FE",
-                      borderRadius:10, padding:"10px 13px", marginBottom:12,
-                      display:"flex", alignItems:"center", gap:8,
-                    }}>
-                      <span style={{ fontSize:16, flexShrink:0 }}>🛡️</span>
-                      <div style={{ fontFamily:T.body, fontSize:10, color:"#4338CA", lineHeight:1.55, fontWeight:500 }}>
-                        Contrat sécurisé et horodaté par Freeley. Créez un compte pour suivre toutes vos missions.
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* ── Bandeau d'information du client ── */}
+                <div style={{
+                  background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)",
+                  border:"1.5px solid #C7D2FE",
+                  borderRadius:10, padding:"10px 13px", marginBottom:12,
+                  display:"flex", alignItems:"center", gap:8,
+                }}>
+                  <span style={{ fontSize:16, flexShrink:0 }}>🛡️</span>
+                  <div style={{ fontFamily:T.body, fontSize:10.5, color:"#4338CA", lineHeight:1.55, fontWeight:500 }}>
+                    Signature horodatée par Freeley.{form.clientEmail ? " Vous recevrez une copie du contrat par email." : ""}
+                  </div>
+                </div>
 
                 {/* Recap card */}
                 <div style={{
@@ -14443,7 +14642,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between" }}>
                     <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>
-                      {isComptant ? "Paiement comptant à régler" : "Acompte à régler"}
+                      {paymentEarly
+                        ? `${isComptant ? "Paiement" : "Acompte"} (payable à partir du ${frDate(paymentNotBefore)})`
+                        : (isComptant ? "Paiement comptant à régler" : "Acompte à régler")}
                     </span>
                     <span style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#7C3AED" }}>
                       {acompte.toLocaleString("fr-FR")} € ({acomptePct}%)
@@ -14552,18 +14753,30 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 <div style={{
                   fontFamily:T.display, fontSize:22, color:"#4ADE80", fontWeight:700, marginBottom:6,
                   animation:"fadeUp 0.4s ease 0.2s both",
-                }}>Contrat 100% Scellé & Sécurisé</div>
+                }}>Contrat signé et horodaté</div>
                 <div style={{
                   fontFamily:T.body, fontSize:13, color:"#86EFAC", lineHeight:1.65,
                   animation:"fadeUp 0.4s ease 0.3s both",
                 }}>
                   Contrat signé par les deux parties.<br/>
-                  {isComptant
-                    ? <>Il reste à régler <strong style={{ color:"#4ADE80" }}>la totalité (100%)</strong> par virement bancaire (IBAN sur la facture).</>
-                    : <>Il reste à régler l'acompte de <strong style={{ color:"#4ADE80" }}>{acomptePct}%</strong> par virement bancaire (IBAN sur la facture).</>
+                  {paymentEarly
+                    ? <>Signé hors établissement : d'après la loi, pas de paiement avant le <strong style={{ color:"#4ADE80" }}>{frDate(paymentNotBefore)}</strong>.</>
+                    : isComptant
+                      ? <>Il reste à régler <strong style={{ color:"#4ADE80" }}>la totalité (100 %)</strong>, par virement (IBAN sur la facture) ou par carte.</>
+                      : <>Il reste à régler l'acompte de <strong style={{ color:"#4ADE80" }}>{acomptePct} %</strong>, par virement (IBAN sur la facture) ou par carte.</>
                   }
                 </div>
               </div>
+
+              {/* Contrat signé hors établissement : rappel de la loi des 7 jours (les boutons restent utilisables) */}
+              {paymentEarly && (
+                <div style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, padding:"14px 16px", marginBottom:20, textAlign:"left", fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
+                  ⏳ <strong>Pas de paiement avant le {frDate(paymentNotBefore)}, d'après la loi.</strong> Tu as signé chez le client ou ailleurs que dans tes locaux. La loi interdit d'exiger ou de recevoir un paiement pendant 7 jours après la signature (article L221-10 du Code de la consommation).{" "}
+                  {early.ack
+                    ? <>Tu as choisi de demander {isComptant ? "le paiement" : "l'acompte"} avant cette date, sous ta responsabilité (réponse enregistrée le {frDateTime(early.ack.at)}).</>
+                    : <>Freeley ne bloque pas les boutons ci-dessous : si tu les utilises avant cette date, ce sera sous ta responsabilité.</>}
+                </div>
+              )}
 
               {/* Acompte card */}
               <div style={{
@@ -14573,7 +14786,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               }}>
                 <div style={{ textAlign:"left" }}>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", letterSpacing:"0.1em", fontWeight:700, marginBottom:4 }}>
-                    {isComptant ? "PAIEMENT COMPTANT À RÉGLER PAR LE CLIENT" : "ACOMPTE À RÉGLER PAR LE CLIENT"}
+                    {paymentEarly
+                      ? `${isComptant ? "PAIEMENT" : "ACOMPTE"} PAYABLE À PARTIR DU ${frDate(paymentNotBefore).toUpperCase()}`
+                      : (isComptant ? "PAIEMENT COMPTANT À RÉGLER PAR LE CLIENT" : "ACOMPTE À RÉGLER PAR LE CLIENT")}
                   </div>
                   <div style={{ fontFamily:T.display, fontSize:28, color:"#15803D", fontWeight:700 }}>{acompte.toLocaleString("fr-FR")} €</div>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#166534" }}>
@@ -14595,7 +14810,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
 
               {/* ── Bouton Facture d'acompte ── */}
               <button
-                onClick={() => setShowDepositInvoiceModal(true)}
+                onClick={early.guard("facture", () => setShowDepositInvoiceModal(true))}
                 style={{
                   width:"100%", marginBottom:14,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:8,
@@ -14627,7 +14842,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               <div style={{ marginBottom:20 }}>
                 {!tactilePaymentLink ? (
                   <button
-                    onClick={handleGetTactilePaymentLink}
+                    onClick={early.guard("lien-carte", handleGetTactilePaymentLink)}
                     disabled={tactilePaymentLoading}
                     style={{
                       width:"100%", padding:"12px", borderRadius:10, border:"none",
@@ -14646,17 +14861,21 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:6, textAlign:"center" }}>Carte bancaire (Stripe) — ou par virement avec l'IBAN sur la facture</div>
               </div>
 
-              {/* Confirm message */}
+              {/* Quand la mission peut commencer : d'après le contrat, la case cochée et la règle des 7 jours */}
               <div style={{
-                background:"#F0FDF4", border:"1px solid #86EFAC",
+                background: (isParticulier && !tactileRetractationChecked) ? "#FFFBEB" : "#F0FDF4",
+                border: `1px solid ${(isParticulier && !tactileRetractationChecked) ? "#FCD34D" : "#86EFAC"}`,
                 borderRadius:10, padding:"12px 16px", marginBottom:20,
-                fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.6,
+                fontFamily:T.body, fontSize:12, color: (isParticulier && !tactileRetractationChecked) ? "#92400E" : "#166534", lineHeight:1.6,
                 textAlign:"left",
               }}>
-                🚀 <strong>Les travaux peuvent démarrer !</strong> Vous recevrez une confirmation par email dès que {isComptant ? "le paiement comptant sera encaissé" : "l'acompte sera encaissé"}.
+                {(isParticulier && !tactileRetractationChecked)
+                  ? <>⏳ <strong>Le client n'a pas coché la case de démarrage anticipé.</strong> Pour être sûr d'être payé de ton travail, attends la fin du délai de rétractation (après le {frDate(retractationLastDay(new Date().toISOString()))}) et la réception {isComptant ? "du paiement" : "de l'acompte"} avant de commencer.</>
+                  : <>🗓️ <strong>La mission pourra commencer dès réception {isComptant ? "du paiement" : "de l'acompte"}</strong>{paymentEarly ? <>, que la loi permet de demander à partir du {frDate(paymentNotBefore)}</> : null}.</>}
               </div>
 
-              {/* ── Conseil Pro Freeley ── */}
+              {/* ── Conseil Pro Freeley (seulement si le profil n'est pas encore complet) ── */}
+              {profileIncomplete && (
               <div style={{
                 background:"linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)",
                 border:"1.5px solid #FCD34D",
@@ -14670,7 +14889,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:11, fontWeight:800, color:"#92400E", letterSpacing:"0.12em", marginBottom:5 }}>CONSEIL PRO FREELEY</div>
                     <div style={{ fontFamily:T.body, fontSize:12.5, color:"#78350F", lineHeight:1.65 }}>
-                      Gagnez du temps pour vos prochains contrats ! Sauvegardez votre nom, votre métier et vos liens pros. Avoir un profil complété renforce votre crédibilité et rassure vos futurs clients.
+                      Gagne du temps pour tes prochains contrats ! Enregistre ton nom, ton métier et tes liens pros. Un profil complet renforce ta crédibilité et rassure tes futurs clients.
                     </div>
                   </div>
                 </div>
@@ -14689,9 +14908,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   onMouseOver={e=>{ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 7px 20px rgba(146,64,14,0.35)"; }}
                   onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 4px 14px rgba(146,64,14,0.25)"; }}
                 >
-                  💾 Créer mon profil <span style={{ fontWeight:400, opacity:0.75, fontSize:11 }}>(Optionnel)</span>
+                  💾 Compléter mon profil <span style={{ fontWeight:400, opacity:0.75, fontSize:11 }}>(optionnel)</span>
                 </button>
               </div>
+              )}
 
               <div style={{ display:"flex", gap:10 }}>
                 <button onClick={onClose} style={{
@@ -14732,6 +14952,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           contractId={contractId}
         />
       )}
+
+      {/* Fenêtre de confirmation : paiement demandé pendant les 7 jours (hors établissement) */}
+      {early.modal}
     </div>
   );
 }
@@ -15593,18 +15816,20 @@ function ClientSignaturePage({ contractId }) {
     const ok = await submitRetractationWaiver(contractId, getRetractationWaiverText(!!contractData?.content?.form?.contenuNumeriquePret));
     setRetractationWaiving(false);
     if (ok) setRetractationDoneLocally(true);
-    else setError("Erreur lors de l'enregistrement. Réessaie.");
+    else setError("Votre choix n'a pas pu être enregistré. Réessayez dans quelques instants.");
   };
 
   const handleConfirmRetractationExercise = async () => {
     setRetractSubmitting(true);
-    const ok = await submitRetractationExercise(contractId);
+    const r = await submitRetractationExercise(contractId);
     setRetractSubmitting(false);
-    if (ok) {
-      setContractData(prev => ({ ...prev, content: { ...prev.content, retractationExercisedAt: new Date().toISOString() } }));
+    if (r.ok) {
+      setContractData(prev => ({ ...prev, content: { ...prev.content, retractationExercisedAt: r.exercisedAt, retractationExercisedAtServer: r.exercisedAt } }));
       setRetractConfirming(false);
+    } else if (r.reason === "deadline_passed") {
+      setError("Le délai de rétractation de 14 jours est dépassé : la rétractation en ligne n'est plus possible.");
     } else {
-      setError("Erreur lors de l'enregistrement. Réessaie.");
+      setError("Votre rétractation n'a pas pu être enregistrée. Réessayez dans quelques instants. Si le problème continue, envoyez votre décision au prestataire par email, avec le formulaire de rétractation reçu par email.");
     }
   };
 
@@ -15646,7 +15871,7 @@ function ClientSignaturePage({ contractId }) {
     const ok = await submitClientSignature(contractId, sig);
     setSigning(false);
     if (ok) setDone(true);
-    else setError("Erreur lors de l'enregistrement. Réessaie.");
+    else setError("Votre signature n'a pas pu être enregistrée. Réessayez dans quelques instants.");
   };
 
   const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
@@ -15667,14 +15892,14 @@ function ClientSignaturePage({ contractId }) {
       <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
         <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Contrat signé !</div>
-        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Ta signature a bien été enregistrée. Le prestataire en est informé et recevra le contrat signé.</div>
+        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. Le prestataire en est informé.</div>
         {contractData?.content?.form?.clientEmail && (
           <div style={{ fontSize:13, color:"#1D4ED8", background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"10px 12px", marginTop:14, lineHeight:1.5 }}>
-            📧 Un email de confirmation avec ton contrat vient de t'être envoyé. Si tu ne le vois pas d'ici quelques minutes, regarde dans tes spams.
+            📧 Un email de confirmation avec votre contrat vient de vous être envoyé. Si vous ne le voyez pas d'ici quelques minutes, regardez dans vos spams.
           </div>
         )}
         <div style={{ fontSize:11.5, color:"#9CA3AF", marginTop:16, lineHeight:1.5, borderTop:"1px solid #F0EEE6", paddingTop:14 }}>
-          Garde ce lien précieusement : il te permet de revoir ton contrat à tout moment. En cas de perte, tu peux le retrouver via freeley.fr/?trouver-contrat=1.
+          Gardez ce lien précieusement : il vous permet de revoir votre contrat à tout moment. En cas de perte, vous pouvez le retrouver via freeley.fr/?trouver-contrat=1.
         </div>
       </div>
     </div>
@@ -15691,8 +15916,8 @@ function ClientSignaturePage({ contractId }) {
   // Le lien reste la page permanente du client pendant 14 jours : consultation du contrat,
   // et bouton de rétractation si le client est particulier et que le délai n'est pas dépassé.
   if (contractData?.status === "signed" && !done) {
-    const signedAt = content.signedByClientAt ? new Date(content.signedByClientAt) : null;
-    const retractDeadline = signedAt ? new Date(signedAt.getTime() + 14 * 24 * 60 * 60 * 1000) : null;
+    // Fin du délai au jour près (fin de journée, prolongée après un week-end ou un jour férié)
+    const retractDeadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt);
     const withinRetractDeadline = retractDeadline ? (new Date() < retractDeadline) : false;
     const retractationExercised = !!content.retractationExercisedAt;
     const canRetract = isParticulier && withinRetractDeadline && !retractationExercised;
@@ -15702,7 +15927,7 @@ function ClientSignaturePage({ contractId }) {
         <div style={{ width:"100%", maxWidth:560 }}>
           <div style={{ textAlign:"center", marginBottom:20 }}>
             <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
-            <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Ton contrat signé</div>
+            <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Votre contrat signé</div>
           </div>
 
           {retractationExercised && (
@@ -15710,7 +15935,7 @@ function ClientSignaturePage({ contractId }) {
               <div style={{ fontSize:30, marginBottom:8 }}>✓</div>
               <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Rétractation enregistrée</div>
               <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
-                Ta demande a été reçue le {new Date(content.retractationExercisedAtServer || content.retractationExercisedAt).toLocaleDateString("fr-FR")}.{" "}{content.form?.clientEmail ? "Un email de confirmation t'a été envoyé." : "Garde une capture de cet écran comme preuve de ta demande."}
+                Votre demande a été reçue le {new Date(content.retractationExercisedAtServer || content.retractationExercisedAt).toLocaleDateString("fr-FR")}.{" "}{content.form?.clientEmail ? "Un email de confirmation vous a été envoyé." : "Gardez une capture de cet écran comme preuve de votre demande."}
               </div>
             </div>
           )}
@@ -15759,9 +15984,8 @@ function ClientSignaturePage({ contractId }) {
           <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Avant de signer le contrat</div>
         </div>
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Droit de rétractation</div>
           <div style={{ fontSize:12.5, color:"#5A6B80", lineHeight:1.6, marginBottom:16 }}>
-            En tant que particulier, la loi te donne un délai de 14 jours pour te rétracter, sans justification, quoi qu'il arrive. Tu peux signer le contrat dès maintenant si tu le souhaites : ce droit reste acquis. La case ci-dessous sert uniquement à dire si {content.form?.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
+            En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si {content.form?.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
           </div>
           <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(content.form || {})}{"\n\n"}{buildRetractationForm(content.form || {})}</div>
           <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
@@ -15774,7 +15998,7 @@ function ClientSignaturePage({ contractId }) {
             style={{ width:"100%", marginTop:16, padding:"12px 18px", background: !retractationWaiving ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: !retractationWaiving ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
           >{retractationWaiving ? "Enregistrement…" : (retractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:12, lineHeight:1.5, textAlign:"center" }}>
-            Que tu coches ou non, tu peux signer le contrat. Si tu coches, ta demande est horodatée et conservée.
+            Que vous cochiez ou non, vous pouvez ensuite signer le contrat. Si vous cochez, votre demande est datée et conservée.
           </div>
           <button onClick={() => { setContractReadForGate(false); window.scrollTo(0, 0); }} style={{ display:"block", margin:"10px auto 0", background:"none", border:"none", color:"#1B2E4B", fontSize:12, textDecoration:"underline", cursor:"pointer" }}>← Relire le contrat</button>
         </div>
@@ -15799,13 +16023,13 @@ function ClientSignaturePage({ contractId }) {
 
         {retractationPending ? (
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
-          <div style={{ fontSize:12.5, color:"#5A6B80", marginBottom:14, lineHeight:1.5 }}>Lis bien le contrat ci-dessus. L'étape suivante t'informe de ton droit de rétractation, avant la signature.</div>
+          <div style={{ fontSize:12.5, color:"#5A6B80", marginBottom:14, lineHeight:1.5 }}>Lisez bien le contrat ci-dessus. L'étape suivante vous informe de votre droit de rétractation, avant la signature.</div>
           <button onClick={() => { setContractReadForGate(true); window.scrollTo(0, 0); }} style={{ width:"100%", padding:"13px 18px", background:"#1B2E4B", border:"none", borderRadius:10, cursor:"pointer", fontSize:14, fontWeight:700, color:"#fff" }}>J'ai lu le contrat, continuer</button>
         </div>
         ) : (
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Ta signature</div>
-          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signe ci-dessous avec ton doigt (ou ta souris) pour accepter les termes de ce contrat.</div>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Votre signature</div>
+          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de ce contrat.</div>
           <canvas
             ref={canvasRef}
             width={520} height={180}
@@ -15822,7 +16046,7 @@ function ClientSignaturePage({ contractId }) {
             >{signing ? "Enregistrement…" : "✓ Signer le contrat"}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
-            En signant, tu acceptes les termes de ce contrat. Signature horodatée et conservée conformément au droit français.
+            En signant, vous acceptez les termes de ce contrat. Signature horodatée et conservée conformément au droit français.
           </div>
         </div>
         )}
@@ -15869,13 +16093,13 @@ function FindMyContractPage() {
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:30, marginBottom:10 }}>✉️</div>
               <div style={{ fontSize:13, color:"#1B2E4B", lineHeight:1.6 }}>
-                Si un contrat actif correspond à cette adresse, un email vient de t'être envoyé avec le lien pour y accéder.
+                Si un contrat actif correspond à cette adresse, un email vient de vous être envoyé avec le lien pour y accéder.
               </div>
             </div>
           ) : (
             <>
               <div style={{ fontSize:12.5, color:"#5A6B80", marginBottom:14, lineHeight:1.5 }}>
-                Entre l'adresse email que le freelance a utilisée pour t'envoyer ton contrat. Si un contrat existe, tu recevras un lien par email.
+                Entrez l'adresse email que le freelance a utilisée pour vous envoyer votre contrat. Si un contrat existe, vous recevrez un lien par email.
               </div>
               <input
                 type="email"
@@ -15944,7 +16168,7 @@ function NdaSignaturePage({ ndaId }) {
     const ok = await submitNdaSignature(ndaId, sig);
     setSigning(false);
     if (ok) setDone(true);
-    else setError("Erreur lors de l'enregistrement. Réessaie.");
+    else setError("Votre signature n'a pas pu être enregistrée. Réessayez dans quelques instants.");
   };
 
   const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
@@ -15965,7 +16189,7 @@ function NdaSignaturePage({ ndaId }) {
       <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
         <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>NDA signé !</div>
-        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Ta signature a bien été enregistrée. L'autre partie en est informée.</div>
+        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
       </div>
     </div>
   );
@@ -15988,8 +16212,8 @@ function NdaSignaturePage({ ndaId }) {
         </div>
 
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Ta signature</div>
-          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signe ci-dessous avec ton doigt (ou ta souris) pour accepter les termes de ce NDA.</div>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Votre signature</div>
+          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de ce NDA.</div>
           <canvas
             ref={canvasRef}
             width={520} height={180}
@@ -16006,7 +16230,7 @@ function NdaSignaturePage({ ndaId }) {
             >{signing ? "Enregistrement…" : "✓ Signer le NDA"}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
-            En signant, tu acceptes les termes de ce NDA. Signature horodatée et conservée conformément au droit français.
+            En signant, vous acceptez les termes de ce NDA. Signature horodatée et conservée conformément au droit français.
           </div>
         </div>
       </div>
@@ -16060,7 +16284,7 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
     const ok = await submitAvenantSignature(contractId, avenantNum, sig);
     setSigning(false);
     if (ok) setDone(true);
-    else setError("Erreur lors de l'enregistrement. Réessaie.");
+    else setError("Votre signature n'a pas pu être enregistrée. Réessayez dans quelques instants.");
   };
 
   const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
@@ -16081,7 +16305,7 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
       <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
         <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Avenant signé !</div>
-        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Ta signature a bien été enregistrée. L'autre partie en est informée.</div>
+        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
       </div>
     </div>
   );
@@ -16111,8 +16335,8 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
         )}
 
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Ta signature</div>
-          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signe ci-dessous avec ton doigt (ou ta souris) pour accepter les termes de cet avenant.</div>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Votre signature</div>
+          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de cet avenant.</div>
           <canvas
             ref={canvasRef}
             width={520} height={180}
@@ -16129,7 +16353,7 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
             >{signing ? "Enregistrement…" : "✓ Signer l'avenant"}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
-            En signant, tu acceptes les termes de cet avenant. Signature horodatée et conservée conformément au droit français.
+            En signant, vous acceptez les termes de cet avenant. Signature horodatée et conservée conformément au droit français.
           </div>
         </div>
       </div>

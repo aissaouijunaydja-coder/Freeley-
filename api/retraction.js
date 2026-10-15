@@ -5,6 +5,10 @@
 //   - action: "confirm"   → un client confirme sa rétractation (accusé de réception + notification freelance)
 //   - action: "find"      → un client cherche son contrat perdu par email
 //   - action: "stamp-waiver" → enregistre la date serveur de la case cochée par le client
+//   - action: "client-waive" → le client coche la case de démarrage anticipé (enregistrée par le serveur)
+//   - action: "client-sign"  → le client signe à distance (enregistrée par le serveur, puis confirmation)
+//   - action: "stamp-early-payment" → heure serveur de la réponse du freelance qui demande un paiement
+//                           pendant les 7 jours d'un contrat hors établissement (art. L221-10)
 //   - action: "send-link" → juste après la signature du client (en présence OU à distance) :
 //                           envoi automatique de la CONFIRMATION DU CONTRAT sur support durable (email),
 //                           avec le texte du contrat, et pour un client particulier l'information officielle
@@ -14,6 +18,12 @@
 // Variables d'environnement : VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY.
 // Version 202 : lecture du contrat sans la colonne contract_text (qui n'existe pas), et un email
 // refusé par Resend n'est plus jamais enregistré comme envoyé.
+// Version 203 : le client n'a pas de compte, et la base lui refuse de modifier un contrat déjà signé
+// (« Erreur lors de l'enregistrement » en se rétractant). Toutes les actions du client (rétractation,
+// case de démarrage anticipé, signature à distance) sont donc enregistrées ICI, par le serveur, avec la
+// clé de service, puis relues pour vérifier qu'elles sont bien en base. Téléphone écrit par paires.
+// Version 204 : heure serveur de la réponse « J'ai compris, je demande quand même le paiement » (contrat
+// hors établissement, moins de 7 jours) : Freeley ne bloque pas le paiement, il garde la preuve qu'il a prévenu.
 //
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
@@ -45,8 +55,14 @@ async function sendMail(msg) {
 
 // ── Textes officiels (Code de la consommation), repris mot pour mot ──
 // Information : annexe à l'article R221-3. Formulaire : annexe à l'article R221-1.
+// Numéro français à 10 chiffres écrit par paires (0767475077 → 07 67 47 50 77) ; tout autre format est laissé tel quel
+function fmtPhone(v) {
+  const d = String(v || "").replace(/[\s.\-]/g, "");
+  return /^0\d{9}$/.test(d) ? d.replace(/(\d{2})(?=\d)/g, "$1 ") : String(v || "");
+}
+
 function coords(f = {}) {
-  return [f.freelanceName, f.freelanceAddress, f.freelancePhone, f.freelanceEmail]
+  return [f.freelanceName, f.freelanceAddress, fmtPhone(f.freelancePhone), f.freelanceEmail]
     .map(s => (s || "").trim()).filter(Boolean).join(", ");
 }
 
@@ -82,16 +98,73 @@ function buildForm(f = {}) {
   ].join("\n\n");
 }
 
-async function saveContent(contractId, newContent, status) {
+// Enregistre le contenu d'un contrat avec la clé de service, puis RELIT la ligne pour vérifier.
+// D'abord une mise à jour directe de la table (la clé de service passe les règles de sécurité) ;
+// si elle échoue, on tente l'ancienne fonction update_contract_content. Renvoie true seulement si
+// le champ « check » est vraiment enregistré (sans « check », renvoie true après la tentative).
+async function saveContent(contractId, newContent, status, check) {
+  const payload = { content: JSON.stringify(newContent) };
+  if (status) payload.status = status;
+  let direct = false;
   try {
-    const { error } = await supabase.rpc("update_contract_content", {
-      p_contract_id: contractId,
-      p_new_content: JSON.stringify(newContent),
-      p_new_status: status,
-    });
-    if (error) console.error("retraction: échec enregistrement", error);
-  } catch (e) { console.error("retraction: échec enregistrement", e); }
+    const { data, error } = await supabase.from("contracts").update(payload).eq("id", contractId).select("id");
+    if (error) console.error("retraction: mise à jour directe refusée", error);
+    direct = !error && Array.isArray(data) && data.length > 0;
+  } catch (e) { console.error("retraction: mise à jour directe impossible", e); }
+  if (!direct) {
+    try {
+      const { error } = await supabase.rpc("update_contract_content", {
+        p_contract_id: contractId,
+        p_new_content: JSON.stringify(newContent),
+        p_new_status: status,
+      });
+      if (error) console.error("retraction: échec enregistrement (fonction)", error);
+    } catch (e) { console.error("retraction: échec enregistrement (fonction)", e); }
+  }
+  if (!check) return true;
+  try {
+    const { data: row } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+    const saved = parseContent(row && row.content);
+    return !!row && saved[check] === newContent[check] && (!status || row.status === status);
+  } catch (e) {
+    console.error("retraction: relecture impossible", e);
+    return false;
+  }
 }
+
+// ── Fin du délai de rétractation (même calcul que dans contrat-freelance.jsx) ──
+// 14 jours après le jour de la signature (le jour même ne compte pas), jusqu'à la fin de la journée,
+// heure de Paris. S'il se termine un samedi, un dimanche ou un jour férié, il passe au premier jour
+// ouvrable suivant (art. L221-19 C. conso). Calcul volontairement généreux, jamais plus court.
+function easterSunday(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const n = h + l - 7 * m + 114;
+  return Date.UTC(y, Math.floor(n / 31) - 1, (n % 31) + 1);
+}
+function isFrenchHoliday(dayUtc) {
+  const d = new Date(dayUtc), md = `${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+  if (["1-1", "5-1", "5-8", "7-14", "8-15", "11-1", "11-11", "12-25"].includes(md)) return true;
+  const e = easterSunday(d.getUTCFullYear()), DAY = 86400000;
+  return [e + DAY, e + 39 * DAY, e + 50 * DAY].includes(dayUtc); // lundi de Pâques, Ascension, lundi de Pentecôte
+}
+function parisDayUtc(iso, plusDays = 0) {
+  const s = new Date(iso);
+  if (isNaN(s.getTime())) return null;
+  const [y, mo, d] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(s).split("-").map(Number);
+  return Date.UTC(y, mo - 1, d + plusDays);
+}
+function retractationDeadline(signedIso) {
+  let day = signedIso ? parisDayUtc(signedIso, 14) : null;
+  if (day == null) return null;
+  while ([0, 6].includes(new Date(day).getUTCDay()) || isFrenchHoliday(day)) day += 86400000;
+  return new Date(day + 23 * 3600000); // fin de journée à Paris (23 h UTC = minuit en hiver, 1 h du matin en été)
+}
+
+// Textes exacts des cases que le client peut cocher (copie de contrat-freelance.jsx)
+const WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la fourniture du contenu numérique commence avant l'expiration du délai de rétractation de quatorze (14) jours et je reconnais qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution.";
+const WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
 
 async function getFreelanceAuthEmail(userId) {
   if (!userId) return null;
@@ -114,14 +187,22 @@ async function handleConfirm(contractId) {
   if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
 
   const content = parseContent(row.content);
-  if (content.retractationExercisedAtServer) return { status: 200, body: { ok: true, alreadyConfirmed: true } };
+  const already = content.retractationExercisedAtServer || content.retractationExercisedAt;
+  if (already) return { status: 200, body: { ok: true, alreadyConfirmed: true, exercisedAt: already } };
   const form = content.form || {};
+  if (row.status !== "signed") return { status: 400, body: { error: "not_signed" } };
+  if (form.typeClient !== "particulier") return { status: 400, body: { error: "not_particulier" } };
+  const deadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt);
+  if (deadline && Date.now() > deadline.getTime()) return { status: 400, body: { error: "deadline_passed" } };
   const clientEmail = form.clientEmail || content.clientEmail || "";
   const clientName = form.clientName || content.clientName || "";
   const freelanceName = form.freelanceName || "votre prestataire";
   const missionTitle = content.missionTitle || form.missionTitle || "votre mission";
   const exercisedAt = new Date().toISOString(); // horloge du serveur, au moment où la demande arrive
   const dateStr = new Date(exercisedAt).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
+  // La date en base est la preuve légale : elle est enregistrée AVANT les emails, et vérifiée
+  const saved = await saveContent(contractId, { ...content, retractationExercisedAt: exercisedAt, retractationExercisedAtServer: exercisedAt }, row.status, "retractationExercisedAtServer");
+  if (!saved) return { status: 500, body: { error: "save_failed" } };
 
   const freelanceEmail = (await getFreelanceAuthEmail(row.user_id)) || form.freelanceEmail || null;
   const results = { clientEmailSent: false, freelanceEmailSent: false };
@@ -148,8 +229,7 @@ async function handleConfirm(contractId) {
     } catch (e) { console.error("retraction/confirm: échec email freelance", e); }
   }
 
-  await saveContent(contractId, { ...content, retractationExercisedAtServer: exercisedAt }, row.status);
-  return { status: 200, body: { ok: true, ...results } };
+  return { status: 200, body: { ok: true, saved: true, exercisedAt, ...results } };
 }
 
 // ── action: "stamp-waiver" — date serveur de la case cochée par le client ──
@@ -160,6 +240,54 @@ async function handleStampWaiver(contractId) {
   if (!content.retractationWaivedAt || content.retractationWaivedAtServer) return { status: 200, body: { ok: true, stamped: false } };
   await saveContent(contractId, { ...content, retractationWaivedAtServer: new Date().toISOString() }, row.status);
   return { status: 200, body: { ok: true, stamped: true } };
+}
+
+// ── action: "stamp-early-payment" — heure du serveur de la réponse du freelance qui demande un paiement
+// pendant les 7 jours d'un contrat hors établissement (art. L221-10). N'ajoute que l'heure, une seule fois,
+// et seulement si la réponse du freelance est déjà enregistrée dans le contrat.
+async function handleStampEarlyPayment(contractId) {
+  const { data: row, error } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+  if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
+  const content = parseContent(row.content);
+  if (!content.earlyPaymentAck || content.earlyPaymentAckAtServer) return { status: 200, body: { ok: true, stamped: false } };
+  const nowIso = new Date().toISOString();
+  const saved = await saveContent(contractId, { ...content, earlyPaymentAckAtServer: nowIso }, row.status, "earlyPaymentAckAtServer");
+  if (!saved) return { status: 500, body: { error: "save_failed" } };
+  return { status: 200, body: { ok: true, stamped: true, stampedAt: nowIso } };
+}
+
+// ── action: "client-waive" — le client coche la case de démarrage avant la fin du délai ──
+async function handleClientWaive(contractId, waiverText) {
+  const { data: row, error } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+  if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
+  const content = parseContent(row.content);
+  if ((content.form || {}).typeClient !== "particulier") return { status: 400, body: { error: "not_particulier" } };
+  if (![WAIVER_TEXT_DIGITAL, WAIVER_TEXT_SERVICE].includes(waiverText)) return { status: 400, body: { error: "invalid_text" } };
+  if (content.retractationWaivedAt) return { status: 200, body: { ok: true, alreadyWaived: true } };
+  if (row.status === "signed") return { status: 400, body: { error: "already_signed" } };
+  const nowIso = new Date().toISOString();
+  const saved = await saveContent(contractId, { ...content, retractationWaiverText: waiverText, retractationWaivedAt: nowIso, retractationWaivedAtServer: nowIso }, row.status, "retractationWaivedAtServer");
+  if (!saved) return { status: 500, body: { error: "save_failed" } };
+  return { status: 200, body: { ok: true, saved: true, waivedAt: nowIso } };
+}
+
+// ── action: "client-sign" — signature du client à distance, puis confirmation du contrat ──
+async function handleClientSign(contractId, signature) {
+  if (typeof signature !== "string" || !signature.startsWith("data:image/png;base64,") || signature.length > 2000000) {
+    return { status: 400, body: { error: "invalid_signature" } };
+  }
+  const { data: row, error } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+  if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
+  if (row.status === "signed") return { status: 200, body: { ok: true, alreadySigned: true } };
+  if (row.status !== "pending_client") return { status: 400, body: { error: "not_pending" } };
+  const content = parseContent(row.content);
+  const nowIso = new Date().toISOString();
+  const saved = await saveContent(contractId, { ...content, clientSignature: signature, signedByClientAt: nowIso, signedByClientAtServer: nowIso }, "signed", "signedByClientAtServer");
+  if (!saved) return { status: 500, body: { error: "save_failed" } };
+  // Confirmation sur support durable (email) — ne bloque jamais la signature si l'envoi échoue
+  let confirmation = null;
+  try { confirmation = (await handleSendLink(contractId)).body; } catch (e) { console.error("retraction/client-sign: confirmation", e); }
+  return { status: 200, body: { ok: true, saved: true, signedAt: nowIso, confirmation } };
 }
 
 // ── action: "find" — retrouver un contrat perdu par email, toujours même réponse ──
@@ -277,7 +405,7 @@ async function handleSendLink(contractId) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { action, contractId, email } = req.body || {};
+  const { action, contractId, email, waiverText, signature } = req.body || {};
   let result;
 
   if (action === "confirm") {
@@ -288,9 +416,18 @@ export default async function handler(req, res) {
   } else if (action === "stamp-waiver") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
     result = await handleStampWaiver(contractId);
+  } else if (action === "stamp-early-payment") {
+    if (!contractId) return res.status(400).json({ error: "contractId manquant" });
+    result = await handleStampEarlyPayment(contractId);
   } else if (action === "send-link") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
     result = await handleSendLink(contractId);
+  } else if (action === "client-waive") {
+    if (!contractId) return res.status(400).json({ error: "contractId manquant" });
+    result = await handleClientWaive(contractId, waiverText);
+  } else if (action === "client-sign") {
+    if (!contractId) return res.status(400).json({ error: "contractId manquant" });
+    result = await handleClientSign(contractId, signature);
   } else {
     return res.status(400).json({ error: "action inconnue" });
   }
