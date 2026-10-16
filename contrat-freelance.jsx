@@ -481,6 +481,11 @@ const buildRetractationForm = (f = {}) => [
 ].join("\n\n");
 const RETRACTATION_BOX_STYLE = { maxHeight:200, overflowY:"auto", whiteSpace:"pre-wrap", fontSize:10.5, color:"#334155", lineHeight:1.55, background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:10, padding:"10px 12px", marginBottom:12, textAlign:"left" };
 
+// Adresse officielle de Freeley. Stripe y renvoie le client après un paiement (avant, sans adresse
+// fournie, le serveur le renvoyait vers l'ancienne adresse freeley-ten.vercel.app).
+const SITE_URL = "https://www.freeley.fr";
+const STRIPE_RETURN_URLS = { successUrl: `${SITE_URL}/?paiement=succes`, cancelUrl: `${SITE_URL}/?paiement=annule` };
+
 // Appel au serveur de Freeley (api/retraction.js). Le client n'a pas de compte : c'est le serveur qui
 // enregistre ses actions avec tous les droits, puis relit la base pour vérifier.
 const callRetractionApi = async (payload) => {
@@ -1890,6 +1895,30 @@ function AppInner() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Quand le freelance revient sur l'appli (onglet ou téléphone), on recharge ses contrats : une
+  // rétractation ou une signature faite par un client entre-temps apparaît tout de suite dans les alertes.
+  // Au plus une fois toutes les 20 secondes. Par sécurité, on ne remplace la liste que si aucun contrat
+  // déjà affiché n'en a disparu (un contrat tout juste créé ne doit jamais être perdu en route).
+  useEffect(() => {
+    if (!authUser?.id) return;
+    let last = 0;
+    const refresh = async () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - last < 20000) return;
+      last = now;
+      try {
+        const fresh = await getHistory();
+        if (!Array.isArray(fresh)) return;
+        const freshIds = new Set(fresh.map(h => String(h.id)));
+        setHistory(prev => (Array.isArray(prev) && prev.every(p => freshIds.has(String(p.id)))) ? fresh : prev);
+      } catch (e) { console.error("[Freeley] Rechargement des contrats au retour sur l'appli :", e); }
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => { document.removeEventListener("visibilitychange", refresh); window.removeEventListener("focus", refresh); };
+  }, [authUser?.id]);
+
   const loadUserData = async (user) => {
     // Ancien système d'abonnement neutralisé (en attente de refonte) — accès illimité pour tout le monde
     setPremium(true);
@@ -2113,10 +2142,25 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     try {
       const d1 = form.startDate ? new Date(form.startDate).toLocaleDateString("fr-FR") : "Non défini";
       const d2 = form.endDate   ? new Date(form.endDate).toLocaleDateString("fr-FR")   : "Non défini";
+      const acomptePct = Number(form.acomptePourcentage) || 0;
+      // Délai de paiement. « Comptant » sans acompte : tout est payé à la signature. Avec un acompte,
+      // l'acompte est payé à la signature et le solde dès réception de sa facture : on ne donne JAMAIS
+      // à l'IA la phrase « 100 % à la signature » dans ce cas, sinon le contrat se contredit.
       const paymentTermsLabel = form.paymentTerms === "Comptant"
         ? "comptant à la commande (100 % à la signature)"
         : `${form.paymentTerms} jours nets à compter de la date de facturation`;
-      const acomptePct = Number(form.acomptePourcentage) || 0;
+      const soldeTermsLabel = form.paymentTerms === "Comptant"
+        ? "dès réception de la facture de solde, sans délai"
+        : `à ${form.paymentTerms} jours nets à compter de la date de la facture de solde`;
+      // Fin de la clause de recette (article 3) : on ne parle de « solde » que s'il y en a un
+      const recetteEnd = acomptePct > 0
+        ? "valant recette tacite et ouvrant droit à la facturation du solde correspondant"
+        : form.paymentTerms === "Comptant"
+          ? "valant recette tacite"
+          : "valant recette tacite et ouvrant droit à la facturation des honoraires";
+      const paymentConditionsData = acomptePct > 0
+        ? `acompte de ${acomptePct} % à la signature ; solde à la livraison, payable ${soldeTermsLabel}`
+        : paymentTermsLabel;
       // Montants du contrat : TTC pour un particulier (obligatoire), HT pour un professionnel
       const pricing = contractPricing(form, profile);
       const U = pricing.unit;
@@ -2144,7 +2188,7 @@ Domaine d'activité : ${form.categorieMetier === "artisanat" ? "Métier manuel /
 Description        : ${form.missionDescription}
 Période            : du ${d1} au ${d2}
 ${pricing.b2c ? `Prix TTC           : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Honoraires HT      : ${form.price} €`}
-Conditions paiement: ${paymentTermsLabel}
+Conditions paiement: ${paymentConditionsData}
 Révisions incluses : ${form.revisions} aller(s)-retour(s)
 ${form.typeClient === "particulier"
   ? `Intérêts de retard : ${form.latePaymentPenalty ? "OUI (taux d'intérêt légal, après mise en demeure — art. 1231-6 C. civ.)" : "NON"}`
@@ -2176,7 +2220,7 @@ Objet général, puis la description de la mission et des livrables, reprise FID
 
 ARTICLE 3 — DÉLAIS, PLANNING ET PROCÉDURE DE VALIDATION (RECETTE)
 Rédige les dates de début/fin. Puis inclus OBLIGATOIREMENT cette clause de recette :
-"À compter de la livraison de chaque livrable, le Client dispose d'un délai de SEPT (7) JOURS OUVRÉS pour formuler par écrit (email avec accusé de réception) ses observations ou réserves motivées et circonstanciées. À l'expiration de ce délai sans retour écrit du Client, la prestation est réputée définitivement acceptée sans réserve, valant recette tacite et ouvrant droit à la facturation du solde correspondant. Les retours oraux ou non circonstanciés ne seront pas pris en compte."
+"À compter de la livraison de chaque livrable, le Client dispose d'un délai de SEPT (7) JOURS OUVRÉS pour formuler par écrit (email avec accusé de réception) ses observations ou réserves motivées et circonstanciées. À l'expiration de ce délai sans retour écrit du Client, la prestation est réputée définitivement acceptée sans réserve, ${recetteEnd}. Les retours oraux ou non circonstanciés ne seront pas pris en compte."
 ${form.clauseInterlocuteur ? (form.typeClient === "particulier"
   ? `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Le Client est l'interlocuteur de référence du Prestataire pour la validation des livrables et la transmission des instructions. S'il souhaite qu'un tiers intervienne pour son compte, il en informe préalablement le Prestataire par écrit en précisant l'identité et le rôle de cette personne. Les instructions d'un tiers non désigné ne sont opposables au Prestataire qu'après confirmation écrite du Client."`
   : `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Lorsque plusieurs personnes sont susceptibles d'intervenir pour le compte du Client dans le suivi de la mission, le Client désigne un interlocuteur unique, dûment habilité, chargé de la validation des livrables et de la transmission des instructions au Prestataire. Le Prestataire n'est tenu de prendre en compte que les observations, validations ou demandes de modification émanant de cet interlocuteur ou expressément confirmées par écrit par celui-ci. Toute instruction contradictoire émanant d'une autre personne intervenant pour le compte du Client ne peut engager le Prestataire ni justifier un dépassement du périmètre ou des délais convenus. L'identité et les coordonnées de l'interlocuteur sont précisées au contrat ou communiquées par écrit avant le commencement de la mission. Tout changement est notifié par écrit dans les meilleurs délais."`)
@@ -2187,7 +2231,7 @@ ${pricing.b2c ? `Montant total TTC : ${fmtEuro(pricing.total)} € (${pricing.ta
 Inclure OBLIGATOIREMENT :
 ${acomptePct > 0
   ? `- Un acompte de ${acomptePct} % soit ${fmtEuro(pricing.acompte)} € ${U} dû à la signature du présent contrat, dont le versement conditionne le démarrage de la mission (condition suspensive) ;
-- Le solde de ${100 - acomptePct} % soit ${fmtEuro(pricing.solde)} € ${U} exigible à la livraison/recette finale de la mission, payable selon le délai convenu (${paymentTermsLabel}). Ne JAMAIS indiquer que le solde est "comptant à la commande" ou "à la signature" puisqu'un acompte est demandé ;`
+- Le solde de ${100 - acomptePct} % soit ${fmtEuro(pricing.solde)} € ${U} exigible à la livraison/recette finale de la mission, payable ${soldeTermsLabel}. Seul l'acompte est dû à la signature : le solde n'est jamais payable à la commande ni à la signature ;`
   : `- Aucun acompte n'est demandé. La totalité des honoraires, soit 100 % du montant (${fmtEuro(pricing.total)} € ${U}), est due selon le délai de paiement convenu : ${paymentTermsLabel} ;`}
 ${form.latePaymentPenalty
   ? (form.typeClient === "particulier"
@@ -2197,7 +2241,9 @@ ${form.latePaymentPenalty
 ${pricing.b2c
   ? `- Inclus OBLIGATOIREMENT, mot pour mot, la phrase suivante : "Lorsque le présent contrat est conclu hors établissement, aucun paiement ne peut être exigé ni reçu du Client avant l'expiration d'un délai de sept jours à compter de sa conclusion, sauf pour des travaux d'entretien ou de réparation à réaliser en urgence au domicile du Client et expressément sollicités par lui, dans la limite des pièces de rechange et travaux strictement nécessaires pour répondre à l'urgence (article L221-10 du Code de la consommation)."
 - Le Client étant un consommateur, le prix doit OBLIGATOIREMENT être exprimé toutes taxes comprises : n'écris jamais « HT » ni « hors taxes » dans le contrat, et n'écris jamais qu'une taxe s'ajoutera au prix. Inclus cette phrase : "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent aux montants que le Client aura effectivement à payer (${pricing.taxNote})."`
-  : `- Toutes les sommes sont exprimées hors taxes ; la TVA applicable, le cas échéant, sera ajoutée au taux en vigueur.`}
+  : pricing.tvaApplicable
+    ? `- Toutes les sommes sont exprimées hors taxes ; la TVA s'y ajoute au taux en vigueur.`
+    : `- Le Prestataire bénéficie de la franchise en base de TVA. Inclus OBLIGATOIREMENT, mot pour mot, la phrase suivante : "TVA non applicable, article 293 B du Code général des impôts : les montants indiqués au présent contrat sont les montants effectivement dus par le Client." N'écris jamais qu'une TVA pourrait s'ajouter au prix.`}
 ${form.clauseSuspension ? `- Inclus OBLIGATOIREMENT la clause de suspension suivante : "En cas de retard de paiement de toute somme exigible au titre du présent contrat persistant plus de huit (8) jours après une mise en demeure adressée par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception, restée sans effet, le Prestataire peut suspendre l'exécution de la mission jusqu'au complet règlement des sommes dues. Cette suspension ne constitue pas une faute du Prestataire et n'ouvre pas droit à indemnité au profit du Client. Les délais d'exécution affectés par la suspension sont eux-mêmes suspendus et prorogés d'une durée correspondant à la période de suspension, sans que le retard qui en résulte puisse être imputé au Prestataire."` : ""}
 
 ARTICLE 5 — RÉVISIONS ET MODIFICATIONS DU PÉRIMÈTRE
@@ -2637,11 +2683,15 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         [`Honoraires ${pricing.unit}`, `${fmtEuro(pricing.total)} €`],
       ];
       if (pricing.b2c) tableRows.push(["TVA", pricing.tvaApplicable ? `Incluse : ${fmtEuro(pricing.total - pricing.ht)} € (20 %)` : "Non applicable — art. 293 B du CGI"]);
+      else tableRows.push(["TVA", pricing.tvaApplicable ? "En sus, au taux en vigueur" : "Non applicable — art. 293 B du CGI"]);
       if (acomptePctPdf > 0) {
         tableRows.push([`Acompte (${acomptePctPdf} %)`, `${fmtEuro(pricing.acompte)} € — dû à la signature`]);
         tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${fmtEuro(pricing.solde)} € — dû à la livraison`]);
       }
-      tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant" ? "Comptant à la commande" : `${pForm.paymentTerms} jours nets`]);
+      // Avec un acompte, « Comptant » veut dire : solde payé dès réception de sa facture (jamais « à la commande »)
+      tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant"
+        ? (acomptePctPdf > 0 ? "Solde dès réception de la facture" : "Comptant à la commande")
+        : `${pForm.paymentTerms} jours nets`]);
       tableRows.push(["Révisions incluses", `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
       if (pricing.b2c) tableRows.push(["Intérêts de retard", pForm.latePaymentPenalty ? "Oui — Taux d'intérêt légal, après mise en demeure" : "Non stipulés"]);
       else tableRows.push(["Pénalités de retard", pForm.latePaymentPenalty ? "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)" : "Non stipulées"]);
@@ -3034,6 +3084,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           userId: authUser.id,
           email: authUser.email,
           existingAccountId: stripeConnectAccountId || undefined,
+          // Retour sur l'adresse où le freelance est connecté (sinon il serait déconnecté au retour)
+          returnUrl: `${window.location.origin}/?stripe_connect=done`,
+          refreshUrl: `${window.location.origin}/?stripe_connect=refresh`,
         }),
       });
       const data = await res.json();
@@ -4079,9 +4132,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 </div>
               </div>
               <div className="fade-up fade-up-3">
-                <ToggleGroup label="Délai de paiement" options={["Comptant","15","30","45","60"]} labels={["Comptant","15 jours","30 jours","45 jours","60 jours"]} value={form.paymentTerms} onChange={v=>update("paymentTerms",v)} tooltip="Comptant = paiement immédiat à la commande. Sinon, délai après réception de facture. 30 jours est le standard en France (max 60 jours)." />
+                <ToggleGroup label="Délai de paiement" options={["Comptant","15","30","45","60"]} labels={["Comptant","15 jours","30 jours","45 jours","60 jours"]} value={form.paymentTerms} onChange={v=>update("paymentTerms",v)} tooltip="Comptant = sans délai : sans acompte, tout est payé à la signature ; avec un acompte, le solde est payé dès réception de sa facture. Les autres choix donnent un délai après réception de la facture : 30 jours est le standard en France (60 jours maximum)." />
                 <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5, marginTop:-8, marginBottom:14 }}>
-                  Temps accordé au client pour régler le solde restant une fois la mission terminée et la facture reçue.
+                  Temps accordé au client pour payer, une fois la mission terminée et ta facture reçue. Exception : « Comptant » sans acompte veut dire que tout est payé à la signature.
                 </div>
               </div>
               <div className="fade-up fade-up-4">
@@ -5289,6 +5342,7 @@ CONSIGNES :
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...STRIPE_RETURN_URLS,
           amount: effectiveAjustement,
           description: `Avenant n°${avenantNum} — ${form.missionTitle || "mission"}`,
           customerEmail: form.clientEmail || undefined,
@@ -7153,6 +7207,7 @@ function getRecouvrementCases(history) {
   const cases = [];
   history.forEach(c => {
     if (c.deleted || c.isStandaloneInvoice) return; // ni un contrat supprimé, ni une simple facture libre n'ont besoin d'être relancés ici
+    if (c.retractationExercisedAt) return; // le client s'est rétracté : le contrat est annulé, on ne lui réclame plus rien
     const basePrice = parseFloat(c.price) || 0;
     const baseIsPaid = c.paymentStatus === "paid";
     // Un acompte payé ne règle pas forcément le solde — on ne compte que ce qui reste vraiment dû
@@ -7201,6 +7256,7 @@ function getRecouvrementCases(history) {
 function buildAlertsFromHistory(history) {
   if (!Array.isArray(history) || !history.length) return [];
   const alerts = [];
+  const retractAlerts = []; // affichées en tête de liste : c'est l'alerte la plus importante
   const now = new Date();
 
   // Alertes recouvrement (avant + après échéance) — même logique que la liste dans Recouvrement Ferme
@@ -7258,7 +7314,7 @@ function buildAlertsFromHistory(history) {
     // Alerte 3 : confirmation de renonciation (contenu numérique déjà existant) pas encore envoyée.
     // Apparaît dès que le client a renoncé — mieux vaut l'envoyer tout de suite plutôt que d'attendre —
     // et passe en retard une fois le délai légal de 14 jours dépassé.
-    if (!c.deleted && c.form?.typeClient === "particulier" && c.form?.contenuNumeriquePret && c.retractationWaivedAt && !c.retractationConfirmationSentAt && c.signedByClientAt) {
+    if (!c.deleted && !c.retractationExercisedAt && c.form?.typeClient === "particulier" && c.form?.contenuNumeriquePret && c.retractationWaivedAt && !c.retractationConfirmationSentAt && c.signedByClientAt) {
       const deadline = new Date(c.signedByClientAt);
       deadline.setDate(deadline.getDate() + 14);
       const late = deadline < now;
@@ -7280,8 +7336,26 @@ function buildAlertsFromHistory(history) {
         contractId: c.id,
       });
     }
+
+    // Alerte 4 : le client s'est rétracté. Un clic ouvre directement le contrat dans « Mes contrats ».
+    if (!c.deleted && c.retractationExercisedAt) {
+      retractAlerts.push({
+        id: "retract_" + c.id,
+        read: false,
+        icon: "⛔",
+        accentBg: "#FEF5F5",
+        accentIcon: "#FEE2E2",
+        accentBorder: "#FCA5A5",
+        badgeBg: "#DC2626",
+        badgeText: "RÉTRACTATION",
+        title: "Un client s'est rétracté",
+        detail: `${c.clientName || "Ton client"} s'est rétracté le ${frDate(c.retractationExercisedAt)} pour la mission « ${c.missionTitle || "Sans titre"} ». Ne lui demande plus aucun paiement.`,
+        action: "mission",
+        contractId: c.id,
+      });
+    }
   });
-  return alerts;
+  return [...retractAlerts, ...alerts];
 }
 
 // Alerte "NDA signé" : une fois qu'un client a signé, prévient le freelance
@@ -8671,6 +8745,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...STRIPE_RETURN_URLS,
           amount: total,
           description: `Règlement mise en demeure — ${mission || clientName}`,
           customerEmail: clientEmail || undefined,
@@ -10164,6 +10239,11 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     ? Number(entry.form.acomptePourcentage) : null;
   // "Comptant" (0% d'acompte) veut dire 100% dû à la signature — ce n'est PAS "rien à payer"
   const isComptant = acomptePct === 0 && rawPrice > 0;
+  // Sauf si un délai de paiement est choisi (15 à 60 jours) : sans acompte, rien n'est alors dû à la
+  // signature. Le contrat prévoit le paiement de la totalité après la mission, à réception de la facture,
+  // donc la mission n'est pas suspendue en attendant ce paiement.
+  const paymentTermsDays = entry?.form?.paymentTerms && entry.form.paymentTerms !== "Comptant" ? entry.form.paymentTerms : null;
+  const payAfterDelivery = isComptant && !!paymentTermsDays;
   const depositAmt = isComptant ? rawPrice : (acomptePct ? Math.round(rawPrice * (acomptePct / 100)) || 0 : 0);
   const paymentWord = isComptant ? "paiement" : "acompte";
   const paymentWordCap = isComptant ? "Paiement" : "Acompte";
@@ -10214,6 +10294,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...STRIPE_RETURN_URLS,
         amount: soldeAmt,
         description: `Solde — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
@@ -10280,6 +10361,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...STRIPE_RETURN_URLS,
         amount: depositAmt,
         description: `${paymentWordCap} — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
@@ -10427,7 +10509,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               transition: "all 0.5s ease",
               animation: !paid ? "shimmer 2s infinite" : "none",
             }}>
-              {paid ? "🟢" : "⛔️"}
+              {paid ? "🟢" : payAfterDelivery ? "🗓️" : "⛔️"}
             </div>
 
             <div style={{ flex: 1 }}>
@@ -10438,8 +10520,12 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 transition: "color 0.4s",
               }}>
                 {paid
-                  ? `${paymentWordCap} sécurisé sur Stripe ! Vous pouvez démarrer la production l'esprit tranquille.`
-                  : `Mission suspendue : En attente ${isComptant ? "du paiement" : "de l'acompte"} (${depositAmt.toLocaleString("fr-FR")} €)`
+                  ? (payAfterDelivery
+                    ? `Paiement reçu (${depositAmt.toLocaleString("fr-FR")} €) : le contrat est entièrement payé.`
+                    : `${paymentWordCap} sécurisé sur Stripe ! Vous pouvez démarrer la production l'esprit tranquille.`)
+                  : payAfterDelivery
+                    ? `Paiement attendu après la mission (${depositAmt.toLocaleString("fr-FR")} €)`
+                    : `Mission suspendue : En attente ${isComptant ? "du paiement" : "de l'acompte"} (${depositAmt.toLocaleString("fr-FR")} €)`
                 }
               </div>
               <div style={{
@@ -10449,8 +10535,12 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 transition: "color 0.4s",
               }}>
                 {paid
-                  ? `${paymentWordArticleLeCap} a été reçu et confirmé. Le contrat est actif — la mission peut démarrer immédiatement.`
-                  : "Ne commencez pas la production. Le contrat stipule que le projet ne démarre qu'à réception des fonds."
+                  ? (payAfterDelivery
+                    ? "Le paiement a été reçu et confirmé."
+                    : `${paymentWordArticleLeCap} a été reçu et confirmé. Le contrat est actif — la mission peut démarrer immédiatement.`)
+                  : payAfterDelivery
+                    ? `Aucun acompte n'est prévu. Le contrat prévoit le paiement de la totalité ${paymentTermsDays} jours après réception de ta facture de fin de mission. Envoie-la quand la mission est terminée.`
+                    : "Ne commencez pas la production. Le contrat stipule que le projet ne démarre qu'à réception des fonds."
                 }
               </div>
             </div>
@@ -10488,7 +10578,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 }} />
               </div>
               <div style={{ fontFamily:T.body, fontSize:10, color:"#166534", marginTop:5, opacity:0.8 }}>
-                {paymentWordCap} reçu · Production démarrée
+                {payAfterDelivery ? "Paiement reçu" : `${paymentWordCap} reçu · Production démarrée`}
               </div>
               <button
                 onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte")}
@@ -10732,7 +10822,10 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 }
 
 /* ══════════════════════════════════════════ HISTORY PAGE ══ */
-function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenContract }) {
+function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHistory, onOpenContract }) {
+  // Un contrat annulé par la rétractation du client ne compte ni dans le chiffre d'affaires, ni dans les
+  // missions en cours, ni dans les meilleurs clients. Il reste visible dans l'activité récente.
+  const history = (allHistory || []).filter(c => !c.retractationExercisedAt);
   const total = history.length;
   let caTotal = 0, caPaid = 0, caPending = 0, nbPaid = 0, nbPending = 0, nbLate = 0;
   let caFromAvenants = 0, caFromAvenantsPaid = 0;
@@ -10860,7 +10953,7 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
   });
 
   // ── Activité récente (5 derniers, hors supprimés) ──
-  const recent = history.filter(c => !c.deleted && !c.isStandaloneInvoice).slice(0, 5);
+  const recent = (allHistory || []).filter(c => !c.deleted && !c.isStandaloneInvoice).slice(0, 5);
 
   const stat = (label, value, sub, color) => (
     <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06", flex:"1 1 200px", minWidth:0 }}>
@@ -11006,7 +11099,9 @@ function DashboardPage({ history, onBack, onNewContract, onOpenHistory, onOpenCo
                       <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName} · {c.date}</div>
                     </div>
                   </div>
-                  <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:700, flexShrink:0, marginLeft:8 }}>{fmt(parseFloat(c.price)||0)} €</span>
+                  {c.retractationExercisedAt
+                    ? <span style={{ fontFamily:T.body, fontSize:11.5, color:"#B91C1C", fontWeight:700, flexShrink:0, marginLeft:8 }}>Rétracté</span>
+                    : <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:700, flexShrink:0, marginLeft:8 }}>{fmt(parseFloat(c.price)||0)} €</span>}
                 </div>
               ))}
             </div>
@@ -11515,8 +11610,13 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
         </div>
       </div>
 
-      {/* Suivi du paiement */}
-      {(() => {
+      {/* Suivi du paiement — remplacé par une simple note si le client s'est rétracté (contrat annulé) */}
+      {historyView.retractationExercisedAt ? (
+        <div className="fade-up" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"18px 20px", marginBottom:24, boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.15em", color:C.gold, fontWeight:700, marginBottom:8 }}>SUIVI DU PAIEMENT</div>
+          <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, lineHeight:1.6 }}>Contrat annulé par la rétractation du client : il n'y a plus de paiement à suivre.</div>
+        </div>
+      ) : (() => {
         const st = historyView.paymentStatus || "pending";
         const options = [
           { key:"pending", label:"⏳ En attente", bg:"#FEF3C7", border:"#FCD34D", color:"#92400E" },
@@ -12016,8 +12116,11 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                     {!isLocked && (entry.signatureStatus === "pending_client" || entry.signatureStatus === "pending_signature") && (
                       <span style={{ fontFamily:T.body, fontSize:9, background:"#DBEAFE", color:"#1D4ED8", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>✍ SIGNATURE EN ATTENTE</span>
                     )}
-                    {!isLocked && entry.signatureStatus === "signed" && (
+                    {!isLocked && entry.signatureStatus === "signed" && !entry.retractationExercisedAt && (
                       <span style={{ fontFamily:T.body, fontSize:9, background:"#DCFCE7", color:"#15803D", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>✓ SIGNÉ</span>
+                    )}
+                    {!isLocked && entry.retractationExercisedAt && (
+                      <span style={{ fontFamily:T.body, fontSize:9, background:"#FEE2E2", color:"#B91C1C", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>⛔ RÉTRACTÉ</span>
                     )}
                   </div>
                 </div>
@@ -12384,6 +12487,7 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...STRIPE_RETURN_URLS,
           amount: amountNow,
           description: `${depositPct === 100 ? "Paiement" : "Acompte " + depositPct + "%"} — ${form.missionTitle || "Prestation Freeley"}`,
           customerEmail: form.clientEmail || undefined,
@@ -12494,6 +12598,7 @@ ${freelanceName}`;
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              ...STRIPE_RETURN_URLS,
               amount: amountForStripe,
               description: `${depositPct === 100 ? "Paiement" : "Acompte " + depositPct + "%"} — ${form.missionTitle || "Prestation Freeley"}`,
               customerEmail: form.clientEmail || undefined,
@@ -14150,6 +14255,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   // Utilise le vrai pourcentage configuré sur CE contrat — jamais un réglage générique d'un autre outil
   const acomptePct = form.acomptePourcentage != null && form.acomptePourcentage !== "" ? Number(form.acomptePourcentage) : 0;
   const isComptant = acomptePct === 0;
+  // Sans acompte mais avec un délai de paiement (15 à 60 jours) : rien n'est dû à la signature, la
+  // totalité se paie après la mission, à réception de la facture (c'est ce que dit le contrat).
+  const payAfterDelivery = isComptant && !!form.paymentTerms && form.paymentTerms !== "Comptant";
   const acompte = form.price ? (isComptant ? Number(form.price) : Math.round(Number(form.price) * (acomptePct / 100))) : 0;
   const clientName = form.clientName || "Jean Dupont";
   const [showDepositInvoiceModal, setShowDepositInvoiceModal] = useState(false);
@@ -14251,6 +14359,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...STRIPE_RETURN_URLS,
           amount: acompte,
           description: `${isComptant ? "Paiement" : "Acompte"} — ${form?.missionTitle || "Prestation Freeley"}`,
           customerEmail: form?.clientEmail || undefined,
@@ -14642,12 +14751,14 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between" }}>
                     <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>
-                      {paymentEarly
-                        ? `${isComptant ? "Paiement" : "Acompte"} (payable à partir du ${frDate(paymentNotBefore)})`
-                        : (isComptant ? "Paiement comptant à régler" : "Acompte à régler")}
+                      {payAfterDelivery
+                        ? `Paiement (${form.paymentTerms} jours après la facture de fin de mission)`
+                        : paymentEarly
+                          ? `${isComptant ? "Paiement" : "Acompte"} (payable à partir du ${frDate(paymentNotBefore)})`
+                          : (isComptant ? "Paiement comptant à régler" : "Acompte à régler")}
                     </span>
                     <span style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#7C3AED" }}>
-                      {acompte.toLocaleString("fr-FR")} € ({acomptePct}%)
+                      {acompte.toLocaleString("fr-FR")} € ({isComptant ? 100 : acomptePct}%)
                     </span>
                   </div>
                 </div>
@@ -14759,7 +14870,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   animation:"fadeUp 0.4s ease 0.3s both",
                 }}>
                   Contrat signé par les deux parties.<br/>
-                  {paymentEarly
+                  {payAfterDelivery
+                    ? <>Sans acompte : la totalité sera à régler <strong style={{ color:"#4ADE80" }}>{form.paymentTerms} jours</strong> après réception de ta facture de fin de mission.</>
+                    : paymentEarly
                     ? <>Signé hors établissement : d'après la loi, pas de paiement avant le <strong style={{ color:"#4ADE80" }}>{frDate(paymentNotBefore)}</strong>.</>
                     : isComptant
                       ? <>Il reste à régler <strong style={{ color:"#4ADE80" }}>la totalité (100 %)</strong>, par virement (IBAN sur la facture) ou par carte.</>
@@ -14786,7 +14899,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               }}>
                 <div style={{ textAlign:"left" }}>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", letterSpacing:"0.1em", fontWeight:700, marginBottom:4 }}>
-                    {paymentEarly
+                    {payAfterDelivery
+                      ? `PAIEMENT À ${form.paymentTerms} JOURS APRÈS LA FACTURE DE FIN DE MISSION`
+                      : paymentEarly
                       ? `${isComptant ? "PAIEMENT" : "ACOMPTE"} PAYABLE À PARTIR DU ${frDate(paymentNotBefore).toUpperCase()}`
                       : (isComptant ? "PAIEMENT COMPTANT À RÉGLER PAR LE CLIENT" : "ACOMPTE À RÉGLER PAR LE CLIENT")}
                   </div>
@@ -14870,8 +14985,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 textAlign:"left",
               }}>
                 {(isParticulier && !tactileRetractationChecked)
-                  ? <>⏳ <strong>Le client n'a pas coché la case de démarrage anticipé.</strong> Pour être sûr d'être payé de ton travail, attends la fin du délai de rétractation (après le {frDate(retractationLastDay(new Date().toISOString()))}) et la réception {isComptant ? "du paiement" : "de l'acompte"} avant de commencer.</>
-                  : <>🗓️ <strong>La mission pourra commencer dès réception {isComptant ? "du paiement" : "de l'acompte"}</strong>{paymentEarly ? <>, que la loi permet de demander à partir du {frDate(paymentNotBefore)}</> : null}.</>}
+                  ? <>⏳ <strong>Le client n'a pas coché la case de démarrage anticipé.</strong> Pour être sûr d'être payé de ton travail, attends la fin du délai de rétractation (après le {frDate(retractationLastDay(new Date().toISOString()))}){payAfterDelivery ? null : <> et la réception {isComptant ? "du paiement" : "de l'acompte"}</>} avant de commencer.</>
+                  : payAfterDelivery
+                    ? <>🗓️ <strong>La mission peut commencer.</strong> Le paiement de la totalité est dû {form.paymentTerms} jours après réception de ta facture de fin de mission.</>
+                    : <>🗓️ <strong>La mission pourra commencer dès réception {isComptant ? "du paiement" : "de l'acompte"}</strong>{paymentEarly ? <>, que la loi permet de demander à partir du {frDate(paymentNotBefore)}</> : null}.</>}
               </div>
 
               {/* ── Conseil Pro Freeley (seulement si le profil n'est pas encore complet) ── */}
@@ -16058,6 +16175,30 @@ function ClientSignaturePage({ contractId }) {
 // Page publique "j'ai perdu mon lien" : le client retrouve l'accès à son contrat par email,
 // sans jamais avoir besoin de créer de compte. Réponse toujours identique, qu'un contrat
 // corresponde ou non, pour ne jamais révéler si une adresse email est liée à un contrat.
+// Page affichée au client après un paiement par carte (retour de Stripe) : ?paiement=succes ou ?paiement=annule
+function PaymentReturnPage({ status }) {
+  const ok = status === "succes";
+  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+  return (
+    <div style={wrap}>
+      <div style={{ width:"100%", maxWidth:440 }}>
+        <div style={{ textAlign:"center", marginBottom:20 }}>
+          <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
+        </div>
+        <div style={{ background:"#fff", borderRadius:14, padding:"26px 22px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
+          <div style={{ fontSize:34, marginBottom:10 }}>{ok ? "✅" : "↩️"}</div>
+          <div style={{ fontSize:17, fontWeight:700, color:"#1B2E4B", marginBottom:8 }}>{ok ? "Paiement effectué" : "Paiement annulé"}</div>
+          <div style={{ fontSize:13.5, color:"#5A6B80", lineHeight:1.6 }}>
+            {ok
+              ? "Merci. Votre paiement par carte a bien été effectué. Vous pouvez fermer cette page."
+              : "Aucun montant n'a été débité. Pour payer plus tard, utilisez à nouveau le lien de paiement envoyé par votre prestataire."}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FindMyContractPage() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -16105,7 +16246,7 @@ function FindMyContractPage() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="ton@email.com"
+                placeholder="votre@email.com"
                 style={{ width:"100%", padding:"12px 14px", border:"1.5px solid #E8E0D0", borderRadius:10, fontSize:14, fontFamily:"'DM Sans', sans-serif", boxSizing:"border-box", marginBottom:14 }}
               />
               <button
@@ -16871,6 +17012,15 @@ export default function App() {
     return (
       <ErrorBoundary>
         <ClientSignaturePage contractId={signParam} />
+      </ErrorBoundary>
+    );
+  }
+  // Retour de Stripe après un paiement par carte : ?paiement=succes ou ?paiement=annule
+  const paymentParam = new URLSearchParams(window.location.search).get("paiement");
+  if (paymentParam === "succes" || paymentParam === "annule") {
+    return (
+      <ErrorBoundary>
+        <PaymentReturnPage status={paymentParam} />
       </ErrorBoundary>
     );
   }
