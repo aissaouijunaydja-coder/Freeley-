@@ -24,6 +24,8 @@
 // clé de service, puis relues pour vérifier qu'elles sont bien en base. Téléphone écrit par paires.
 // Version 204 : heure serveur de la réponse « J'ai compris, je demande quand même le paiement » (contrat
 // hors établissement, moins de 7 jours) : Freeley ne bloque pas le paiement, il garde la preuve qu'il a prévenu.
+// Version 205 : mention « EI » à côté du nom du freelance entrepreneur individuel dans les emails envoyés
+// au client (confirmation du contrat, information et formulaire de rétractation, accusé de réception).
 //
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
@@ -61,8 +63,20 @@ function fmtPhone(v) {
   return /^0\d{9}$/.test(d) ? d.replace(/(\d{2})(?=\d)/g, "$1 ") : String(v || "");
 }
 
+// Mention « EI » obligatoire à côté du nom d'un entrepreneur individuel (décret du 28 avril 2022).
+// Même règle que contractFreelanceName() dans contrat-freelance.jsx : seulement pour les contrats créés à
+// partir de la version 218 de l'appli, qui enregistrent le statut juridique du freelance (même vide).
+const COMPANY_STATUSES = ["EURL", "SASU", "SARL", "SAS"];
+function legalFreelanceName(f = {}) {
+  const n = String(f.freelanceName || "").trim();
+  if (!n || f.freelanceLegalStatus === undefined) return n;
+  if (COMPANY_STATUSES.includes(String(f.freelanceLegalStatus || "").trim())) return n;
+  if (/\bEI\b/.test(n) || /entrepreneur individuel/i.test(n)) return n;
+  return `${n} EI`;
+}
+
 function coords(f = {}) {
-  return [f.freelanceName, f.freelanceAddress, fmtPhone(f.freelancePhone), f.freelanceEmail]
+  return [legalFreelanceName(f), f.freelanceAddress, fmtPhone(f.freelancePhone), f.freelanceEmail]
     .map(s => (s || "").trim()).filter(Boolean).join(", ");
 }
 
@@ -196,7 +210,7 @@ async function handleConfirm(contractId) {
   if (deadline && Date.now() > deadline.getTime()) return { status: 400, body: { error: "deadline_passed" } };
   const clientEmail = form.clientEmail || content.clientEmail || "";
   const clientName = form.clientName || content.clientName || "";
-  const freelanceName = form.freelanceName || "votre prestataire";
+  const freelanceName = legalFreelanceName(form) || "votre prestataire";
   const missionTitle = content.missionTitle || form.missionTitle || "votre mission";
   const exercisedAt = new Date().toISOString(); // horloge du serveur, au moment où la demande arrive
   const dateStr = new Date(exercisedAt).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
@@ -339,7 +353,7 @@ async function handleSendLink(contractId) {
   if (!clientEmail) return { status: 200, body: { ok: true, sent: false, reason: "no_client_email" } };
 
   const clientName = form.clientName || content.clientName || "";
-  const freelanceName = form.freelanceName || "votre prestataire";
+  const freelanceName = legalFreelanceName(form) || "votre prestataire";
   const missionTitle = content.missionTitle || form.missionTitle || "votre mission";
   const isParticulier = form.typeClient === "particulier";
   const isDigital = !!form.contenuNumeriquePret;

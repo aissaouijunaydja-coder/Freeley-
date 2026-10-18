@@ -126,6 +126,7 @@ globalStyle.textContent = `
   .btn-secondary:hover { background: #F0EDE6 !important; border-color: #1B2E4B88 !important; }
   .plan-card { transition: transform .2s, box-shadow .2s; }
   .plan-card:hover { transform: translateY(-3px); box-shadow: 0 16px 48px #1B2E4B14 !important; }
+  body.freeley-window-open .freeley-floating { display: none !important; }
   @media (max-width: 480px) {
     body { font-size: 14px; }
     input, textarea, select { font-size: 16px !important; }
@@ -235,6 +236,7 @@ const getHistory = async () => {
       clientSignature: content.clientSignature || contenu.clientSignature || null,
       freelanceSignature: content.freelanceSignature || contenu.freelanceSignature || null,
       signedByClientAt: content.signedByClientAtServer || content.signedByClientAt || contenu.signedByClientAt || null,
+      signedByFreelanceAt: content.signedByFreelanceAt || null,
       retractationWaivedAt: content.retractationWaivedAtServer || content.retractationWaivedAt || contenu.retractationWaivedAt || null,
       retractationWaiverText: content.retractationWaiverText || contenu.retractationWaiverText || null,
       retractationConfirmationSentAt: content.retractationConfirmationSentAt || contenu.retractationConfirmationSentAt || null,
@@ -451,7 +453,7 @@ const normalizeContractText = (raw) => {
   }).join("\n\n");
   return t.replace(/\n{3,}/g, "\n\n").trim();
 };
-const retractationCoords = (f = {}) => [f.freelanceName, f.freelanceAddress, fmtPhone(f.freelancePhone), f.freelanceEmail].map(v => (v || "").trim()).filter(Boolean).join(", ");
+const retractationCoords = (f = {}) => [contractFreelanceName(f), f.freelanceAddress, fmtPhone(f.freelancePhone), f.freelanceEmail].map(v => (v || "").trim()).filter(Boolean).join(", ");
 const RETRACTATION_ONLINE_REF = "la page de votre contrat sur Freeley, accessible par le lien reçu par courriel";
 const buildRetractationNotice = (f = {}, where = RETRACTATION_ONLINE_REF) => {
   const parts = [
@@ -703,7 +705,7 @@ const submitAvenantSignature = async (contractId, avenantNum, clientSignature) =
 
 const initialForm = {
   freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "", freelancePhone: "",
-  freelanceEmail: "",
+  freelanceEmail: "", freelanceLegalStatus: "",
   clientName: "", clientCompany: "", clientAddress: "", clientSiret: "", clientEmail: "", clientPhone: "", typeClient: "professionnel",
   missionTitle: "", missionDescription: "", categorieMetier: "autre", startDate: "", endDate: "",
   price: "", paymentTerms: "Comptant", revisions: "2", latePaymentPenalty: true, acomptePourcentage: "0",
@@ -775,8 +777,78 @@ const contractPricing = (form, profile) => {
   return { b2c, tvaApplicable, ht, pct, total, acompte, solde, unit, taxNote, enteredUnit };
 };
 
+// Montant que le client paie vraiment : la TVA (20 %) s'ajoute au montant HT quand le freelance la
+// facture (numéro de TVA dans son profil). Sert aux liens de paiement Stripe et aux relances : sans ça,
+// un freelance qui facture la TVA encaissait le montant HT au lieu du TTC.
+const withTva = (amountHT, profile) => {
+  const ht = Number(amountHT) || 0;
+  const tva = !!(profile?.tvaNumber && String(profile.tvaNumber).trim());
+  return tva ? Math.round(ht * 1.2 * 100) / 100 : ht;
+};
+
+// Mention « EI » : depuis le 15 mai 2022, un entrepreneur individuel doit écrire « EI » (ou
+// « entrepreneur individuel ») juste avant ou après son nom, sur ses contrats, devis, factures et
+// courriers. Freeley l'ajoute tout seul, sauf si le profil indique une société.
+const COMPANY_STATUSES = ["EURL", "SASU", "SARL", "SAS"];
+const isEntrepreneurIndividuel = (legalStatus) => !COMPANY_STATUSES.includes(String(legalStatus || "").trim());
+const withEI = (name, legalStatus) => {
+  const n = String(name || "").trim();
+  if (!n || !isEntrepreneurIndividuel(legalStatus)) return n;
+  if (/\bEI\b/.test(n) || /entrepreneur individuel/i.test(n)) return n;
+  return `${n} EI`;
+};
+// Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
+// enregistrent le statut juridique (même vide) : on y ajoute « EI ». Les plus anciens restent tels
+// qu'ils ont été signés.
+const contractFreelanceName = (form) => {
+  const name = String(form?.freelanceName || "").trim();
+  return form && form.freelanceLegalStatus !== undefined ? withEI(name, form.freelanceLegalStatus) : name;
+};
+
+// Ce qu'écrit une facture liée à un contrat : le même texte partout (fenêtre de facture, Mes contrats,
+// archives, facture électronique), pour qu'un même acompte n'ait jamais deux versions différentes.
+const depositInvoiceSpec = (pct) => (pct <= 0 || pct >= 100)
+  ? { designation: "Paiement comptant", footNote: "Règlement à réception de facture. Ce paiement conditionne le démarrage de la mission.", dueDays: 0 }
+  : { designation: `Acompte ${pct} %`, footNote: `Acompte de ${pct} % conditionnant le démarrage de la mission. Le solde sera facturé à la livraison.`, dueDays: 0 };
+const contractInvoiceSpec = (form = {}, kind = "acompte") => {
+  const pct = Number(form?.acomptePourcentage) || 0;
+  const days = form?.paymentTerms && form.paymentTerms !== "Comptant" ? Number(form.paymentTerms) || 0 : 0;
+  if (kind === "solde") return { designation: "Solde", footNote: "Solde de la mission, après déduction de l'acompte déjà facturé.", dueDays: days };
+  // Sans acompte, avec un délai : la totalité se facture en fin de mission, payable à N jours
+  if (pct <= 0 && days > 0) return { designation: "Prestation", footNote: `Paiement à ${days} jours à compter de la date de la facture.`, dueDays: days };
+  return depositInvoiceSpec(pct);
+};
+
+// Une adresse postale sans code postal suivi d'une ville (« 12 rue de la Paix 75002 » ou « … Paris »
+// sans code) n'est pas complète : le contrat et le formulaire de rétractation en ont besoin.
+const addressLooksIncomplete = (addr) => {
+  const a = String(addr || "").trim();
+  return !!a && !/\b\d{5}\s+[A-Za-zÀ-ÿ'’-]{2,}/.test(a);
+};
+// Conseil affiché sous un champ d'adresse incomplète (null si l'adresse va bien)
+const addressHint = (addr, example, why = "") => {
+  if (!addressLooksIncomplete(addr)) return null;
+  const hasCode = /\b\d{5}\b/.test(String(addr));
+  return `${hasCode ? "Ajoute la ville après le code postal" : "Ajoute le code postal et la ville"} (par exemple ${example})${why}.`;
+};
+
+// Cache les bulles flottantes (aide et messages) pendant qu'une fenêtre est ouverte : sur téléphone,
+// elles recouvraient les boutons de la fenêtre (signature, facture…).
+let openWindowsCount = 0;
+function useHideFloatingBubbles() {
+  useEffect(() => {
+    openWindowsCount += 1;
+    document.body.classList.add("freeley-window-open");
+    return () => {
+      openWindowsCount = Math.max(0, openWindowsCount - 1);
+      if (openWindowsCount === 0) document.body.classList.remove("freeley-window-open");
+    };
+  }, []);
+}
+
 /* ══════════════════════════════════════════════════════════ CLIENT RATING MODAL ══ */
 function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, onSave }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [stars, setStars]   = useState(0);
   const [hovered, setHovered] = useState(0);
   const [badges, setBadges] = useState([]);
@@ -918,6 +990,7 @@ function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, on
 
 /* ══════════════════════════════════════════════════════════ RELANCE MODAL ══ */
 function RelanceModal({ msg, setMsg, onClose, onSend }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   return (
     <div
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
@@ -1049,6 +1122,7 @@ const HELP_FAQ = [
 ];
 
 function HelpModal({ onClose }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [expanded, setExpanded] = useState(null);
 
   return (
@@ -1941,9 +2015,13 @@ function AppInner() {
     if (fullName) setForm(f => ({ ...f, freelanceName: fullName }));
     if (profile.jobTitle) setForm(f => ({ ...f, freelanceActivity: profile.jobTitle }));
     if (profile.siret) setForm(f => ({ ...f, freelanceSiret: profile.siret }));
+    // Statut juridique : sert à écrire « EI » à côté du nom dans le contrat (vide = entrepreneur individuel)
+    setForm(f => ({ ...f, freelanceLegalStatus: profile.legalStatus || "" }));
+    // Adresse professionnelle du profil : pré-remplie seulement si le champ du contrat est encore vide
+    if (profile.address) setForm(f => (f.freelanceAddress || "").trim() ? f : ({ ...f, freelanceAddress: profile.address }));
     // Pré-remplit le prix avec le TJM seulement si le champ est encore vide (ne jamais écraser un prix déjà saisi)
     if (profile.tjm) setForm(f => f.price ? f : ({ ...f, price: profile.tjm }));
-  }, [profile.firstName, profile.lastName, profile.jobTitle, profile.siret, profile.tjm]);
+  }, [profile.firstName, profile.lastName, profile.jobTitle, profile.siret, profile.tjm, profile.legalStatus, profile.address]);
 
   const update = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
@@ -2173,7 +2251,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 ══════════════════════════════════════════════
 DONNÉES DE LA MISSION
 ══════════════════════════════════════════════
-Prestataire        : ${form.freelanceName}
+Prestataire        : ${contractFreelanceName(form)}
 Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + form.freelanceSiret : ""}
 Adresse Prestataire: ${form.freelanceAddress}
 Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + fmtPhone(form.freelancePhone) : ""}
@@ -2204,7 +2282,7 @@ Clause de préavis pour mission récurrente: ${form.clausePreavis ? `OUI (${form
 STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
 ══════════════════════════════════════════════
 
-EN-TÊTE : Titre "CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", puis la date suivante en toutes lettres, à utiliser EXACTEMENT telle quelle sans la modifier ni la recalculer : "${todayFull}". Numéro de contrat à utiliser EXACTEMENT tel quel, ne jamais en inventer un autre : ${contractRef}. Mention "ENTRE LES SOUSSIGNÉS".
+EN-TÊTE : Titre "CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", puis la date suivante en toutes lettres, à utiliser EXACTEMENT telle quelle sans la modifier ni la recalculer : "${todayFull}". Numéro de contrat à utiliser EXACTEMENT tel quel, ne jamais en inventer un autre : ${contractRef}. Mention "ENTRE LES SOUSSIGNÉS".${isEntrepreneurIndividuel(form.freelanceLegalStatus) ? ` Le Prestataire est un entrepreneur individuel : écris son nom EXACTEMENT comme dans « Prestataire » ci-dessus, avec la mention « EI » juste après son nom (obligatoire sur ses contrats), dans la présentation des parties comme dans les signatures.` : ""}
 
 ARTICLE 1 — INDÉPENDANCE DU PRESTATAIRE ET ABSENCE DE LIEN DE SUBORDINATION
 Rédige une clause affirmant EXPLICITEMENT que :
@@ -2639,7 +2717,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       doc.text("PRESTATAIRE", ML + 4, cy + 6.5);
       // Contenu
       doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...NAVY);
-      doc.text(pForm.freelanceName, ML + 4, cy + 17);
+      doc.text(contractFreelanceName(pForm), ML + 4, cy + 17);
       doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
       const actLines = doc.splitTextToSize(pForm.freelanceActivity, blockW - 8);
       actLines.forEach((l,i) => doc.text(l, ML + 4, cy + 24 + i*5));
@@ -2902,7 +2980,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       }
       // Infos
       doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-      doc.text(pForm.freelanceName, ML + 4, y + 17);
+      doc.text(contractFreelanceName(pForm), ML + 4, y + 17);
       doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
       const actLinesS = doc.splitTextToSize(pForm.freelanceActivity, bw - 8);
       actLinesS.forEach((l,i) => doc.text(l, ML + 4, y + 23 + i*5));
@@ -3229,6 +3307,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       freelanceName: fullName || "",
       freelanceActivity: profile.jobTitle || "",
       freelanceSiret: profile.siret || "",
+      freelanceAddress: profile.address || "",
+      freelanceLegalStatus: profile.legalStatus || "",
       price: profile.tjm || "",
     });
     setErrors({}); setApiError("");
@@ -3248,6 +3328,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       freelanceName: fullName || draft.form?.freelanceName || "",
       freelanceActivity: profile.jobTitle || draft.form?.freelanceActivity || "",
       freelanceSiret: profile.siret || draft.form?.freelanceSiret || "",
+      freelanceLegalStatus: profile.legalStatus || "",
     });
     setStep(draft.step || 0);
     goToScreen("app");
@@ -3655,6 +3736,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 
       {/* ── Bouton fixe Centre d'aide ── */}
       <button
+        className="freeley-floating"
         onClick={() => setShowHelp(true)}
         title="Centre d'aide"
         style={{
@@ -3683,7 +3765,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         />
       )}
       {showInvoiceModal && (
-        <InvoiceModal form={form} setForm={setForm} profile={profile} setProfile={setProfile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} authUser={authUser} />
+        <InvoiceModal form={form} setForm={setForm} profile={profile} setProfile={setProfile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} />
       )}
       {magicFillTarget && (
         <CameraCapture
@@ -3757,6 +3839,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           profile={profile}
           initialCase={recouvrementInitialCase}
           history={history}
+          stripeConnectAccountId={stripeConnectAccountId}
+          stripeConnectReady={stripeConnectReady}
+          onGoToProfileTva={() => { setShowRecouvrementModal(false); setRecouvrementInitialCase(null); goToProfileFacturation(); }}
         />
       )}
 
@@ -3997,7 +4082,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <Field label="Email professionnel *" value={form.freelanceEmail} onChange={v=>update("freelanceEmail",v)} placeholder="jean@example.com" type="email" error={errors.freelanceEmail} delay={4} />
               <Field label={form.typeClient === "particulier" ? "Téléphone professionnel *" : "Téléphone professionnel"} value={form.freelancePhone || ""} onChange={v=>update("freelancePhone",v)} placeholder="06 12 34 56 78" type="tel" error={errors.freelancePhone} delay={4} />
               <Field label="Numéro SIRET" value={form.freelanceSiret} onChange={v=>update("freelanceSiret",v)} placeholder="123 456 789 00012 (optionnel)" delay={5} />
-              <Field label="Adresse complète *" value={form.freelanceAddress} onChange={v=>update("freelanceAddress",v)} placeholder="12 rue de la Paix, 75001 Paris" error={errors.freelanceAddress} delay={5} />
+              <Field label="Adresse complète *" value={form.freelanceAddress} onChange={v=>update("freelanceAddress",v)} placeholder="12 rue de la Paix, 75001 Paris" error={errors.freelanceAddress} delay={5} hint={addressHint(form.freelanceAddress, "75001 Paris", " : ton adresse complète doit figurer dans le contrat")} />
               <SectionDivider label="Informations client" />
               <button
                 onClick={() => setShowRadarModal(true)}
@@ -4037,7 +4122,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                   </div>
                 );
               })()}
-              <Field label="Adresse du client (optionnel)" value={form.clientAddress} onChange={v=>update("clientAddress",v)} placeholder="5 avenue Victor Hugo, 69001 Lyon" error={errors.clientAddress} delay={4} />
+              <Field label="Adresse du client (optionnel)" value={form.clientAddress} onChange={v=>update("clientAddress",v)} placeholder="5 avenue Victor Hugo, 69001 Lyon" error={errors.clientAddress} delay={4} hint={addressHint(form.clientAddress, "69001 Lyon")} />
               <ToggleGroup
                 label="Type de client *"
                 options={["professionnel","particulier"]}
@@ -4745,6 +4830,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               freelanceSignature={history[0]?.freelanceSignature}
               clientSignature={history[0]?.clientSignature}
               signedByClientAt={history[0]?.signedByClientAt}
+              signedByFreelanceAt={history[0]?.signedByFreelanceAt}
               retractationWaivedAt={history[0]?.retractationWaivedAt}
             />
           </div>
@@ -4752,8 +4838,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         </div>
       )}
 
-      {/* ── Disclaimer global ── */}
-      <div style={{
+      {/* ── Disclaimer global ── (pas sur l'écran du contrat généré : le contrat affiche déjà le sien) */}
+      {step < 3 && <div style={{
         padding:"10px 20px 16px",
         textAlign:"center",
       }}>
@@ -4769,7 +4855,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         }}>
           Le document ne constitue pas une consultation juridique personnalisée. Il vous appartient de vérifier son adéquation à votre situation et, si nécessaire, de consulter un avocat, notamment pour toute activité réglementée. La responsabilité de Freeley ne saurait être engagée à raison d'une utilisation inadaptée, hors faute lourde ou dolosive.
         </p>
-      </div>
+      </div>}
 
     </Shell>
   );
@@ -4900,9 +4986,9 @@ const getOrReserveInvoiceNumber = async ({ authUser, contractId, key, avenantNum
 // numérotation ni la récupération du lien de paiement, pour rester simple et réutilisable partout.
 function renderInvoicePDF({
   invoiceNum, designation, missionTitle, montant,
-  freelanceName, freelanceSiret, freelanceEmail,
+  freelanceName, freelanceSiret, freelanceEmail, freelanceAddress,
   clientName, clientCompany, clientAddress, clientEmail,
-  profile, typeClient, qrBase64, footNote, filename,
+  profile, typeClient, qrBase64, footNote, filename, dueDays = 0,
 }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
@@ -4910,6 +4996,11 @@ function renderInvoicePDF({
   const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80], GREY = [110, 110, 110];
   const p = profile || {};
   const today = new Date().toLocaleDateString("fr-FR");
+  // Échéance : à réception, ou N jours après la date de la facture quand le contrat le prévoit (solde, paiement après la mission)
+  const days = Number(dueDays) || 0;
+  const dueLabel = days > 0
+    ? `${new Date(Date.now() + days * 86400000).toLocaleDateString("fr-FR")} (paiement à ${days} jours)`
+    : `${today} (paiement à réception)`;
   const fmt = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits:2, maximumFractionDigits:2 }).replace(/[\u202F\u00A0]/g, " ");
   let y = 18;
 
@@ -4919,7 +5010,7 @@ function renderInvoicePDF({
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
   doc.text(`N° ${invoiceNum}`, PW - MR, y + 15, { align: "right" });
   doc.text(`Date d'émission : ${today}`, PW - MR, y + 20, { align: "right" });
-  doc.text(`Date d'échéance : ${today} (paiement à réception)`, PW - MR, y + 25, { align: "right" });
+  doc.text(`Date d'échéance : ${dueLabel}`, PW - MR, y + 25, { align: "right" });
   y += 39;
 
   doc.setDrawColor(...GOLD); doc.setLineWidth(0.6); doc.line(ML, y, PW - MR, y);
@@ -4933,9 +5024,10 @@ function renderInvoicePDF({
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...DARK);
   let yL = y + 6, yR = y + 6;
   const line = (txt, x, yy) => { if (txt) { const ls = doc.splitTextToSize(String(txt), colW); doc.text(ls, x, yy); return ls.length * 4.6; } return 0; };
-  yL += line(p.companyName || freelanceName, ML, yL);
+  // Nom avec la mention « EI » pour un entrepreneur individuel ; adresse du contrat, sinon celle du profil
+  yL += line(withEI(p.companyName || freelanceName, p.legalStatus), ML, yL);
   yL += line(p.legalStatus, ML, yL);
-  yL += line(p.address, ML, yL);
+  yL += line(freelanceAddress || p.address, ML, yL);
   yL += line(freelanceSiret ? "SIRET : " + freelanceSiret : (p.siret ? "SIRET : " + p.siret : ""), ML, yL);
   yL += line(freelanceEmail, ML, yL);
   yL += line(p.tvaNumber ? "TVA : " + p.tvaNumber : "", ML, yL);
@@ -4984,42 +5076,46 @@ function renderInvoicePDF({
   }
   y += 8;
 
-  // Coordonnées de paiement (IBAN) + QR Stripe si un lien de paiement a été fourni
-  const payBoxH = p.iban ? 30 : 20;
-  const ibanBoxW = qrBase64 ? cw * 0.62 : cw;
-  doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, ibanBoxW, payBoxH, 2, 2, "F");
-  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-  doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 7);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
-  if (p.iban) {
-    doc.text(`IBAN : ${p.iban}`, ML + 4, y + 14);
-    if (p.bic) doc.text(`BIC : ${p.bic}`, ML + 4, y + 20);
-    if (p.bankName) doc.text(`Banque : ${p.bankName}`, ML + 4, y + 26);
-  } else {
-    doc.setTextColor(...GREY);
-    doc.text("Ajoute ton IBAN dans ton profil (onglet Facturation) pour l'afficher ici.", ML + 4, y + 14);
-  }
-  if (qrBase64) {
-    const qrBoxX = ML + ibanBoxW + 4;
-    const qrBoxW = cw - ibanBoxW - 4;
-    doc.setFillColor(248, 246, 240); doc.roundedRect(qrBoxX, y, qrBoxW, payBoxH, 2, 2, "F");
-    try { doc.addImage(qrBase64, "PNG", qrBoxX + (qrBoxW - payBoxH) / 2 + 2, y + 2, payBoxH - 4, payBoxH - 4); } catch(e) {}
-  }
-  y += payBoxH + 6;
-  if (qrBase64) {
-    doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
-    doc.text("Paiement par carte : scanner le code ci-dessus", ML, y);
+  // Coordonnées de paiement : l'IBAN s'il est renseigné, et le code QR Stripe s'il y en a un. Jamais de
+  // consigne destinée au freelance sur ce document : c'est le client qui le lit (la fenêtre de facture
+  // prévient le freelance quand son IBAN manque).
+  const hasIban = !!(p.iban && String(p.iban).trim());
+  if (hasIban || qrBase64) {
+    const payBoxH = hasIban ? 30 : 26;
+    const ibanBoxW = hasIban ? (qrBase64 ? cw * 0.62 : cw) : 0;
+    if (hasIban) {
+      doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, ibanBoxW, payBoxH, 2, 2, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+      doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 7);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
+      doc.text(`IBAN : ${p.iban}`, ML + 4, y + 14);
+      if (p.bic) doc.text(`BIC : ${p.bic}`, ML + 4, y + 20);
+      if (p.bankName) doc.text(`Banque : ${p.bankName}`, ML + 4, y + 26);
+    }
+    if (qrBase64) {
+      const qrBoxX = hasIban ? ML + ibanBoxW + 4 : ML;
+      const qrBoxW = hasIban ? cw - ibanBoxW - 4 : payBoxH + 6;
+      doc.setFillColor(248, 246, 240); doc.roundedRect(qrBoxX, y, qrBoxW, payBoxH, 2, 2, "F");
+      try { doc.addImage(qrBase64, "PNG", qrBoxX + (qrBoxW - payBoxH) / 2 + 2, y + 2, payBoxH - 4, payBoxH - 4); } catch(e) {}
+    }
+    y += payBoxH + 6;
+    if (qrBase64) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+      doc.text("Paiement par carte : scanner le code ci-dessus", ML, y);
+      y += 4;
+    }
     y += 4;
   }
-  y += 4;
 
   // Pied de page
   doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
   doc.text(doc.splitTextToSize(footNote || "Règlement à réception de facture.", cw), ML, y);
   y += 9;
   doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+  // Particulier : des « intérêts de retard » au taux légal, seulement après une mise en demeure (art. 1231-6
+  // C. civ.), comme le dit le contrat. Les « pénalités de plein droit » sont réservées aux professionnels.
   const penaltyMention = typeClient === "particulier"
-    ? "Pénalités de retard : en cas de paiement au-delà de la date d'échéance, des pénalités calculées au taux d'intérêt légal en vigueur applicable aux consommateurs seront appliquées de plein droit."
+    ? "Intérêts de retard : en cas de retard de paiement, des intérêts au taux d'intérêt légal pourront être appliqués à compter d'une mise en demeure (article 1231-6 du Code civil)."
     : "Pénalités de retard : taux BCE majoré de 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.";
   doc.text(doc.splitTextToSize(penaltyMention, cw), ML, y);
   y += (typeClient === "particulier" ? 10 : 14);
@@ -5029,33 +5125,40 @@ function renderInvoicePDF({
 }
 
 // Génère une vraie facture pour l'ajustement de prix d'un avenant — passe par le moteur commun
-const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId) => {
+const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, freelanceAddress) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: "avenant", avenantNum });
     renderInvoicePDF({
       invoiceNum, designation: `Avenant n°${avenantNum}`, missionTitle, montant,
-      freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
+      freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
       filename: `Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
-// Facture pour un acompte ou un solde — passe par le moteur commun
-const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, invoiceType) => {
+// Facture pour un acompte ou un solde — passe par le moteur commun. Avec « extra.form » (le formulaire du
+// contrat), le libellé, la phrase du bas et l'échéance sont ceux du contrat : exactement les mêmes que
+// dans la fenêtre de facture, et le même numéro (un acompte = une seule facture).
+const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, invoiceType, extra = {}) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const invoiceKey = invoiceType === "solde" ? "soldeInvoiceNumber" : "acompteInvoiceNumber";
     const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: invoiceKey });
+    const spec = extra.form ? contractInvoiceSpec(extra.form, invoiceType === "solde" ? "solde" : "acompte") : null;
+    const finalDesignation = spec ? spec.designation : designation;
     renderInvoicePDF({
-      invoiceNum, designation, missionTitle, montant,
-      freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
-      filename: `Facture_${designation.replace(/[^a-zA-Z0-9]/g,"_")}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
+      invoiceNum, designation: finalDesignation, missionTitle, montant,
+      freelanceName, freelanceSiret, freelanceEmail, freelanceAddress: extra.form?.freelanceAddress || "",
+      clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
+      footNote: spec ? spec.footNote : undefined, dueDays: spec ? spec.dueDays : 0,
+      filename: `Facture_${invoiceNum}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
-function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe }) {
+function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe, profile }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [mode, setMode]               = useState("magic"); // "magic" | "manuel"
   const [clientMessage, setClientMessage] = useState("");
   const [objet, setObjet]             = useState("");
@@ -5100,7 +5203,7 @@ function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCre
     setAjustementBudgetMagic(null);
     try {
       const manualAjustementLabel = ajustementMontant.trim()
-        ? `${Number(ajustementMontant) > 0 ? "+ " : ""}${ajustementMontant} € HT`
+        ? `${Number(ajustementMontant) > 0 ? "+ " : ""}${ajustementMontant} € ${contractPricing(form, profile).enteredUnit}`
         : "Aucun ajustement financier";
       // Date réelle calculée par l'app — jamais laissée à l'IA, qui pourrait en halluciner une fausse
       const todayFull = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
@@ -5115,9 +5218,9 @@ Un client a envoyé le message suivant à son prestataire :
 Contexte du contrat :
 - Numéro : ${contractNum || "non renseigné — ne pas en inventer un dans le texte"}
 - Mission : ${form?.missionTitle || "Prestation de services"}
-- Prestataire : ${form?.freelanceName || "Le prestataire"}
+- Prestataire : ${contractFreelanceName(form) || "Le prestataire"}
 - Client : ${form?.clientName || "Le client"}${form?.clientCompany ? " (" + form.clientCompany + ")" : ""}
-- Budget initial : ${basePrice ? `${basePrice} € HT` : "non renseigné sur ce contrat — ne jamais inventer de montant total"}
+- Budget initial : ${basePrice ? `${basePrice} € ${contractPricing(form, profile).enteredUnit}` : "non renseigné sur ce contrat — ne jamais inventer de montant total"}
 - Date à utiliser EXACTEMENT telle quelle, ne jamais la recalculer ni en inventer une autre : ${todayFull}
 
 Ta tâche : Analyse le message et réponds UNIQUEMENT en JSON valide (sans backticks, sans markdown), avec ce format exact :
@@ -5127,7 +5230,7 @@ Ta tâche : Analyse le message et réponds UNIQUEMENT en JSON valide (sans backt
 }` : `Tu es un juriste français expert en droit des contrats de prestation de services. Rédige un AVENANT au contrat ci-dessous, court, précis et juridiquement valide.
 
 CONTRAT DE RÉFÉRENCE : ${contractNum || "non communiqué — ne pas en inventer un dans le texte"}
-PARTIES : Prestataire ${form.freelanceName || "Prestataire"} / Client ${form.clientName || "Client"}${form.clientCompany ? " (" + form.clientCompany + ")" : ""}
+PARTIES : Prestataire ${contractFreelanceName(form) || "Prestataire"} / Client ${form.clientName || "Client"}${form.clientCompany ? " (" + form.clientCompany + ")" : ""}
 MISSION : ${form.missionTitle || "Prestation de services"}
 DATE À UTILISER EXACTEMENT TELLE QUELLE, ne jamais la recalculer ni en inventer une autre : ${todayFull}
 
@@ -5323,7 +5426,7 @@ CONSIGNES :
   };
 
   const handleDownloadAvenantPDF = () => {
-    downloadAvenantPDF(avenantText, avenantNum, contractNum, form.freelanceName, form.clientName, freelanceSigDataUrl, clientSigDataUrl);
+    downloadAvenantPDF(avenantText, avenantNum, contractNum, contractFreelanceName(form), form.clientName, freelanceSigDataUrl, clientSigDataUrl);
   };
 
   // Montant de l'ajustement, peu importe le mode utilisé pour générer l'avenant
@@ -5343,7 +5446,7 @@ CONSIGNES :
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...STRIPE_RETURN_URLS,
-          amount: effectiveAjustement,
+          amount: withTva(effectiveAjustement, profile),
           description: `Avenant n°${avenantNum} — ${form.missionTitle || "mission"}`,
           customerEmail: form.clientEmail || undefined,
           metadata: { contractId: contractId || "", paymentType: "avenant", avenantNum: String(avenantNum) },
@@ -5527,7 +5630,7 @@ CONSIGNES :
                     display:"block", fontFamily:T.body, fontSize:10,
                     letterSpacing:"0.14em", color:C.textL, fontWeight:700,
                     marginBottom:8, textTransform:"uppercase",
-                  }}>AJUSTEMENT DU PRIX (€ HT)</label>
+                  }}>AJUSTEMENT DU PRIX (€ {contractPricing(form, profile).enteredUnit})</label>
                   <input
                     type="number"
                     value={ajustementMontant}
@@ -5704,7 +5807,7 @@ CONSIGNES :
             {effectiveAjustement > 0 && (
               <div style={{ background:"#FFFBEB", border:"1.5px solid #FDE68A", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
                 <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:8 }}>
-                  💰 Cet avenant ajoute {effectiveAjustement} € HT au budget
+                  💰 Cet avenant ajoute {effectiveAjustement} € {contractPricing(form, profile).enteredUnit} au budget
                 </div>
                 {!avenantPaymentLink ? (
                   <button
@@ -5862,7 +5965,7 @@ CONSIGNES :
 }
 
 /* ══════════════════════════════════════════ MARKDOWN CONTRACT RENDERER ══ */
-function MarkdownContract({ text, form, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, retractationWaivedAt }) {
+function MarkdownContract({ text, form, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, signedByFreelanceAt, retractationWaivedAt }) {
   if (!text) return null;
 
   // ── Inline renderer: **bold** → <strong>
@@ -6080,7 +6183,7 @@ function MarkdownContract({ text, form, signatureStatus, freelanceSignature, cli
 
   const lines = text.split("\n");
   const today = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-  const freelanceName = form?.freelanceName || "Prestataire";
+  const freelanceName = contractFreelanceName(form) || "Prestataire";
   const clientName = form?.clientName || "Client";
 
   return (
@@ -6141,7 +6244,7 @@ function MarkdownContract({ text, form, signatureStatus, freelanceSignature, cli
                   <img src={freelanceSignature} alt="Signature Prestataire" style={{ maxWidth:160, height:44, objectFit:"contain", display:"block", marginBottom:8 }} />
                   <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 20, padding: "5px 12px" }}>
                     <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#16A34A" }} />
-                    <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>✓ Signé numériquement</span>
+                    <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>✓ Signé{signedByFreelanceAt ? ` le ${new Date(signedByFreelanceAt).toLocaleDateString("fr-FR")}` : " numériquement"}</span>
                   </div>
                 </>
               ) : (
@@ -6885,6 +6988,7 @@ function FeedbackBubble() {
   return (
     <>
       <button
+        className="freeley-floating"
         onClick={() => setOpen(o => !o)}
         aria-label="Signaler un problème ou une idée"
         style={{
@@ -6898,7 +7002,7 @@ function FeedbackBubble() {
       >💬</button>
 
       {open && (
-        <div style={{
+        <div className="freeley-floating" style={{
           position:"fixed", bottom:88, right:24, zIndex:9999,
           width:320, maxWidth:"calc(100vw - 40px)",
           background:"#fff", borderRadius:16, padding:18,
@@ -6970,6 +7074,7 @@ function FeedbackBubble() {
 // Vérifie l'existence et le statut d'une entreprise via l'API publique gratuite
 // de l'État (recherche-entreprises.api.gouv.fr) — aucune clé requise.
 function RadarClientModal({ onClose, onSelectCompany }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
@@ -8042,10 +8147,11 @@ function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientS
 }
 
 function NdaExpressModal({ onClose, profile, authUser }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [step, setStep]           = useState("form"); // "form" | "loading" | "result"
   const [partieA, setPartieA]     = useState(() => {
     const p = profile || {};
-    return p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" ") || "";
+    return withEI(p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" "), p.legalStatus) || "";
   });
   const [partieB, setPartieB]     = useState("");
   const [partieBEmail, setPartieBEmail] = useState("");
@@ -8419,7 +8525,8 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 const FORMAL_LETTER_ENABLED = false;
 // Vrai quand le courrier serait une mise en demeure formelle (échéance dépassée ou non renseignée)
 const isFormalLetterPath = (dueDate) => !(dueDate && Math.floor((new Date() - new Date(dueDate)) / (1000 * 60 * 60 * 24)) < 0);
-function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
+function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripeConnectAccountId, stripeConnectReady, onGoToProfileTva }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   /* ── State global ── */
   const [manualOpen, setManualOpen] = useState(false); // le mode manuel démarre toujours fermé et vide
   const recouvrementCases = useMemo(() => getRecouvrementCases(history), [history]);
@@ -8490,7 +8597,9 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
     const numAmount = parseFloat(amount) || 0;
     const numDays = Number(daysLate) || 0;
     const rate = isParticulier ? CURRENT_LEGAL_RATE_B2C : CURRENT_PENALTY_RATE_B2B;
-    const penaltyAmount = (numAmount * rate * numDays / 365).toFixed(2);
+    // Particulier : les intérêts de retard ne courent qu'à compter de la mise en demeure (art. 1231-6
+    // C. civ.), et le contrat Freeley le dit aussi. La lettre ne réclame donc rien pour le passé.
+    const penaltyAmount = isParticulier ? "0.00" : (numAmount * rate * numDays / 365).toFixed(2);
     const indemnite = isParticulier ? 0 : 40;
     const total = (numAmount + parseFloat(penaltyAmount) + indemnite).toFixed(2);
     return { rate, penaltyAmount, indemnite, total: parseFloat(total) };
@@ -8500,7 +8609,7 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history }) {
     const { rate, penaltyAmount, indemnite, total } = computeDueTotal(amount, daysLate, isParticulier);
 
     const p = profile || {};
-    const senderName = p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" ") || null;
+    const senderName = withEI(p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" "), p.legalStatus) || null;
     const senderAddress = p.address || null;
     const senderSiret = p.siret || null;
     const senderIban = p.iban ? `IBAN : ${p.iban}${p.bic ? " · BIC : " + p.bic : ""}${p.bankName ? " · " + p.bankName : ""}` : null;
@@ -8523,15 +8632,18 @@ IDENTITÉ DE L'ÉMETTEUR (le prestataire qui envoie la lettre) :
 IMPORTANT : utilise ces informations réelles TELLES QUELLES dans l'en-tête et la section paiement de la lettre quand elles sont fournies. Ne remplace JAMAIS une information réelle fournie ci-dessus par un placeholder générique entre crochets — les placeholders ne doivent apparaître que pour les champs explicitement marqués "Non renseigné(e)".
 
 CALCULS DÉJÀ EFFECTUÉS (à reprendre TELS QUELS dans la lettre, ne recalcule surtout pas toi-même — le taux légal change chaque semestre et tu n'as pas accès à sa valeur actuelle) :
-- Taux applicable : ${(rate * 100).toFixed(2)}% annuel ${isParticulier ? "(taux d'intérêt légal particuliers en vigueur ce semestre)" : "(taux BCE + 10 points en vigueur ce semestre, art. L441-10 C.com.)"}
+${isParticulier
+  ? `- Taux d'intérêt légal applicable aux particuliers ce semestre : ${(rate * 100).toFixed(2)} % par an
+- Aucun intérêt n'est réclamé pour la période déjà écoulée : pour un particulier, les intérêts de retard ne courent qu'à compter de la mise en demeure (article 1231-6 du Code civil).`
+  : `- Taux applicable : ${(rate * 100).toFixed(2)}% annuel (taux BCE + 10 points en vigueur ce semestre, art. L441-10 C.com.)
 - Montant des pénalités pour ${daysLate} jours : ${penaltyAmount} € (calcul : ${amount} € × ${(rate*100).toFixed(2)}% × ${daysLate}/365)
-${isParticulier ? "" : `- Indemnité forfaitaire de recouvrement : 40,00 € (art. D441-5 C.com.)`}
+- Indemnité forfaitaire de recouvrement : 40,00 € (art. D441-5 C.com.)`}
 - MONTANT TOTAL EXIGIBLE : ${total} €
 
 La lettre doit :
 ${isParticulier
   ? `1. Le débiteur étant un PARTICULIER, NE PAS appliquer le régime du Code de commerce (article L441-10) ni l'indemnité forfaitaire de 40 € — ce régime est réservé aux professionnels et son application à un consommateur serait juridiquement incorrecte.
-2. Reprendre TEL QUEL le montant des pénalités déjà calculé ci-dessus (taux d'intérêt légal particuliers), sans le recalculer.
+2. Ne réclamer AUCUN intérêt pour la période passée. Indiquer qu'à défaut de règlement dans le délai, des intérêts de retard au taux d'intérêt légal (${(rate * 100).toFixed(2)} % par an) courront à compter de la date de la présente mise en demeure (article 1231-6 du Code civil). N'emploie jamais le mot « pénalités » : pour un particulier, on parle d'« intérêts de retard ».
 3. Fixer un délai de 8 JOURS pour régulariser sous peine de poursuites judiciaires.
 4. Mentionner le recours possible à l'injonction de payer (art. 1405 CPC) devant le tribunal judiciaire compétent.
 5. Ton ferme mais mesuré, conforme au droit de la consommation.`
@@ -8555,7 +8667,7 @@ Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
   // Relance PRÉVENTIVE — pour une échéance pas encore dépassée. Ton amical, pas de menace, pas de pénalités (rien n'est dû, l'échéance n'est pas encore atteinte).
   const buildPreventivePrompt = (debtor, amount, dueDate, mission, clientEmail) => {
     const p = profile || {};
-    const senderName = p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" ") || "le prestataire";
+    const senderName = withEI(p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" "), p.legalStatus) || "le prestataire";
     return `Tu es un freelance qui envoie un rappel amical avant l'échéance d'un paiement. Rédige un court message de RELANCE PRÉVENTIVE, professionnel et cordial — PAS une mise en demeure, aucune menace, aucune mention de pénalités (rien n'est en retard).
 
 De la part de : ${senderName}
@@ -8580,7 +8692,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   // Ton neutre et posé, pas de menace, pas de pénalités — le but est juste de formaliser une trace écrite datée, utile si la situation se dégrade plus tard.
   const buildSilencePrompt = (debtor, mission, lastContactLabel, details) => {
     const p = profile || {};
-    const senderName = p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" ") || "le prestataire";
+    const senderName = withEI(p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" "), p.legalStatus) || "le prestataire";
     return `Tu es un freelance qui n'a plus de nouvelles d'un client en plein milieu d'une mission (silence prolongé, aucune réponse aux messages/appels). Rédige un court message de RELANCE, calme et professionnel — PAS une mise en demeure, aucune menace, aucune mention de pénalités ou de sommes dues.
 
 De la part de : ${senderName}
@@ -8737,8 +8849,19 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   };
 
   /* ── Result screen shared ── */
-  const handleGeneratePaymentLink = async (total, clientName, mission, clientEmail) => {
+  // Lien de paiement par carte : toujours sur le compte Stripe du freelance (jamais sur celui de Freeley).
+  // Sans compte Stripe connecté, pas de lien : le client paie par virement. « silent » : appelé pour le
+  // PDF, on n'affiche pas de message, la lettre se télécharge simplement sans code QR.
+  const handleGeneratePaymentLink = async (total, clientName, mission, clientEmail, silent = false) => {
     if (stripeLinkGenerating || !total || total <= 0) return;
+    if (!stripeConnectReady || !stripeConnectAccountId) {
+      if (!silent) {
+        if (window.confirm("⚠️ Pour proposer le paiement par carte, connecte d'abord ton compte Stripe (Profil → Facturation). Sans ça, l'argent de ton client n'arriverait pas chez toi.\n\nTon message reste utilisable : ton client peut payer par virement.\n\nOuvrir ton profil maintenant ?")) {
+          if (onGoToProfileTva) onGoToProfileTva();
+        }
+      }
+      return null;
+    }
     setStripeLinkGenerating(true);
     try {
       const res = await fetch("/api/create-payment", {
@@ -8747,8 +8870,9 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         body: JSON.stringify({
           ...STRIPE_RETURN_URLS,
           amount: total,
-          description: `Règlement mise en demeure — ${mission || clientName}`,
+          description: `Règlement — ${mission || clientName}`,
           customerEmail: clientEmail || undefined,
+          connectedAccountId: stripeConnectAccountId,
         }),
       });
       const data = await res.json();
@@ -8782,8 +8906,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     try {
       // 1. Récupérer (ou générer) le lien de paiement Stripe pour le montant dû — non pertinent pour une relance "silence prolongé"
       let payUrl = stripeLinkUrl;
-      if (!isSilence && !payUrl && total > 0) {
-        payUrl = await handleGeneratePaymentLink(total, clientName, mission, clientEmail);
+      if (!isSilence && !payUrl && total > 0 && stripeConnectReady) {
+        payUrl = await handleGeneratePaymentLink(total, clientName, mission, clientEmail, true);
       }
 
       // 2. Convertir le QR code en base64 pour l'intégrer au PDF
@@ -8839,7 +8963,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         const totalLabel = total && total.toFixed ? total.toFixed(2) : total;
         const boxText = isPreventive
           ? `Scanner ce code pour régler dès maintenant le montant de ${totalLabel} € avant l'échéance.`
-          : `Scanner ce code pour régler immédiatement le montant total de ${totalLabel} € (principal + pénalités + indemnité).`;
+          : `Scanner ce code pour régler immédiatement le montant total de ${totalLabel} € réclamé dans ce courrier.`;
         doc.text(doc.splitTextToSize(boxText, cw - 40), ML + 4, y + 15);
         try { doc.addImage(qrBase64, "PNG", ML + cw - 32, y + 3, 30, 30); } catch(e) {}
         y += boxH;
@@ -8867,7 +8991,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
         <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Faire régler {isPreventive ? "" : "le montant total "}({total ? total.toFixed(2) : "0.00"} €) par carte</div>
         <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:10 }}>
-          {isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien inclut le principal, les pénalités calculées et l'indemnité — le client règle tout en un clic."}
+          {isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien correspond au montant total réclamé dans la lettre : le client règle tout en un clic."}
         </div>
         <button
           onClick={() => handleGeneratePaymentLink(total, clientName || "Client", mission, clientEmail)}
@@ -9800,10 +9924,12 @@ function SectionDivider({ label }) {
   );
 }
 
-function Field({ label, value, onChange, placeholder, type="text", error, delay, prefix }) {
+function Field({ label, value, onChange, placeholder, type="text", error, delay, prefix, hint }) {
   const [focused, setFocused] = useState(false);
+  // Conseil (sans bloquer), affiché quand on a fini de taper
+  const showHint = !error && !!hint && !focused;
   return (
-    <div className={delay ? `fade-up fade-up-${delay}` : ""} style={{ marginBottom: error ? 6 : 20 }}>
+    <div className={delay ? `fade-up fade-up-${delay}` : ""} style={{ marginBottom: (error || showHint) ? 6 : 20 }}>
       <label style={{ display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>{label.toUpperCase()}</label>
       <div style={{ position:"relative" }}>
         {prefix && <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontFamily:T.body, color:C.textL, fontSize:14 }}>{prefix}</span>}
@@ -9819,6 +9945,7 @@ function Field({ label, value, onChange, placeholder, type="text", error, delay,
           onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} />
       </div>
       {error && <p style={{ fontFamily:T.body, color:C.error, fontSize:11, margin:"5px 0 10px" }}>⚠ {error}</p>}
+      {showHint && <p style={{ fontFamily:T.body, color:"#92400E", fontSize:11, margin:"5px 0 10px", lineHeight:1.5 }}>💡 {hint}</p>}
     </div>
   );
 }
@@ -10131,7 +10258,7 @@ function PricingCard({ icon, title, price, sub, features, color, cta, recommende
 }
 
 /* ══════════════════════════════════════════ CONTRACT TIMELINE ══ */
-function ContractTimeline({ entry }) {
+function ContractTimeline({ entry, profile }) {
   /* Événements réels du contrat — pour l'instant uniquement sa création. Le suivi enrichi (notes
      client, etc.) n'existe pas encore comme vraie fonctionnalité connectée — on n'affiche donc que
      ce qui s'est vraiment passé, jamais un événement simulé ou du texte codé en dur. */
@@ -10143,7 +10270,7 @@ function ContractTimeline({ entry }) {
       iconBg: "#DCFCE7",
       iconColor: "#15803D",
       label: "Contrat initial créé",
-      detail: `Par le freelance · ${Number(entry?.price || 0).toLocaleString("fr-FR")} € HT`,
+      detail: `Par le freelance · ${Number(entry?.price || 0).toLocaleString("fr-FR")} € ${contractPricing(entry?.form, profile).enteredUnit}`,
     },
   ];
 
@@ -10225,7 +10352,7 @@ function ContractTimeline({ entry }) {
         display:"flex", alignItems:"center", gap:6,
       }}>
         <span>🔒</span>
-        <span>Toutes les modifications sont horodatées et traçables pour protéger vos droits.</span>
+        <span>Toutes les modifications sont horodatées et traçables pour protéger tes droits.</span>
       </div>
     </div>
   );
@@ -10255,6 +10382,22 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   const hasSolde = !isComptant && acomptePct > 0 && acomptePct < 100;
   const soldeAmt = hasSolde ? Math.max(rawPrice - depositAmt, 0) : 0;
   const soldePaid = entry?.soldeStatus === "paid";
+  // Ce que le client paie vraiment : TTC si le freelance facture la TVA (liens Stripe, relances, montants affichés)
+  const depositDue = withTva(depositAmt, profile);
+  const soldeDue = withTva(soldeAmt, profile);
+  const dueUnit = depositDue !== depositAmt ? " TTC" : "";
+  const fmtDue = (n) => fmtEuro(n);
+  // Texte des factures de ce contrat (le même que dans la fenêtre de facture)
+  const acompteSpec = contractInvoiceSpec(entry?.form, "acompte");
+  // Ce qui manquerait sur les factures de ce contrat : on prévient le freelance, sans bloquer
+  const invoiceMissing = [
+    !(String(entry?.form?.freelanceSiret || "").trim() || String(profile?.siret || "").trim()) && "ton numéro SIRET",
+    !(String(entry?.form?.freelanceAddress || "").trim() || String(profile?.address || "").trim()) && "ton adresse",
+  ].filter(Boolean);
+  const ibanMissingForInvoice = !String(profile?.iban || "").trim();
+  const invoiceWarning = invoiceMissing.length
+    ? `Il manque ${invoiceMissing.join(" et ")} sur tes factures. ${invoiceMissing.length > 1 ? "Ce sont des mentions obligatoires." : "C'est une mention obligatoire."}${ibanMissingForInvoice ? " Ton IBAN manque aussi : sans lui, la facture n'indique pas à ton client où faire le virement." : ""}`
+    : ibanMissingForInvoice ? "Ton IBAN n'est pas renseigné : la facture n'indiquera pas à ton client où faire le virement." : "";
 
   const [linkCopied, setLinkCopied] = useState(false);
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
@@ -10295,7 +10438,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...STRIPE_RETURN_URLS,
-        amount: soldeAmt,
+        amount: soldeDue,
         description: `Solde — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
         metadata: { contractId: entry?.id || "", paymentType: "solde" },
@@ -10347,7 +10490,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       return;
     }
     const subject = `Solde à régler — ${entry?.missionTitle || "votre mission"}`;
-    const body = `Bonjour${entry?.clientName ? " " + entry.clientName : ""},\n\nL'acompte a bien été reçu, merci ! Il reste le solde de ${soldeAmt.toLocaleString("fr-FR")} € à régler pour cette mission.\n\nLien de paiement : ${url}\n\nMerci,\n${entry?.form?.freelanceName || ""}`;
+    const body = `Bonjour${entry?.clientName ? " " + entry.clientName : ""},\n\nL'acompte a bien été reçu, merci ! Il reste le solde de ${fmtDue(soldeDue)} €${dueUnit} à régler pour cette mission.\n\nLien de paiement : ${url}\n\nMerci,\n${entry?.form?.freelanceName || ""}`;
     window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     setSoldeRelanceSent(true);
     setTimeout(() => setSoldeRelanceSent(false), 4000);
@@ -10362,7 +10505,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...STRIPE_RETURN_URLS,
-        amount: depositAmt,
+        amount: depositDue,
         description: `${paymentWordCap} — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
         metadata: { contractId: entry?.id || "", paymentType: "contract" },
@@ -10416,7 +10559,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     const lines = [
       `Bonjour${entry?.clientName ? " " + entry.clientName : ""},`,
       ``,
-      `Petit rappel concernant ${paymentWordArticleLe} de ${depositAmt.toLocaleString("fr-FR")} € pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
+      `Petit rappel concernant ${paymentWordArticleLe} de ${fmtDue(depositDue)} €${dueUnit} pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
     ];
     if (link) lines.push(``, `Vous pouvez régler directement via ce lien sécurisé : ${link}`);
     lines.push(``, `Merci et à bientôt,`);
@@ -10454,7 +10597,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
           padding:"12px 16px", marginBottom:14,
         }}>
           <div style={{ fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.5 }}>
-            💳 <strong>Stripe pas encore connecté</strong> — l'argent de tes clients n'arrivera nulle part tant que ce n'est pas fait.
+            💳 <strong>Stripe pas encore connecté.</strong> Tes clients ne peuvent pas encore te payer par carte. Le virement reste possible.
           </div>
           <button
             onClick={onConnectStripe}
@@ -10521,11 +10664,11 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               }}>
                 {paid
                   ? (payAfterDelivery
-                    ? `Paiement reçu (${depositAmt.toLocaleString("fr-FR")} €) : le contrat est entièrement payé.`
-                    : `${paymentWordCap} sécurisé sur Stripe ! Vous pouvez démarrer la production l'esprit tranquille.`)
+                    ? `Paiement reçu (${fmtDue(depositDue)} €${dueUnit}) : le contrat est entièrement payé.`
+                    : `${paymentWordCap} reçu ! Tu peux démarrer la mission l'esprit tranquille.`)
                   : payAfterDelivery
-                    ? `Paiement attendu après la mission (${depositAmt.toLocaleString("fr-FR")} €)`
-                    : `Mission suspendue : En attente ${isComptant ? "du paiement" : "de l'acompte"} (${depositAmt.toLocaleString("fr-FR")} €)`
+                    ? `Paiement attendu après la mission (${fmtDue(depositDue)} €${dueUnit})`
+                    : `Mission suspendue : en attente ${isComptant ? "du paiement" : "de l'acompte"} (${fmtDue(depositDue)} €${dueUnit})`
                 }
               </div>
               <div style={{
@@ -10540,7 +10683,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                     : `${paymentWordArticleLeCap} a été reçu et confirmé. Le contrat est actif — la mission peut démarrer immédiatement.`)
                   : payAfterDelivery
                     ? `Aucun acompte n'est prévu. Le contrat prévoit le paiement de la totalité ${paymentTermsDays} jours après réception de ta facture de fin de mission. Envoie-la quand la mission est terminée.`
-                    : "Ne commencez pas la production. Le contrat stipule que le projet ne démarre qu'à réception des fonds."
+                    : `Ne commence pas la mission. Le contrat prévoit qu'elle démarre à la réception ${isComptant ? "du paiement" : "de l'acompte"}.`
                 }
               </div>
             </div>
@@ -10578,15 +10721,15 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 }} />
               </div>
               <div style={{ fontFamily:T.body, fontSize:10, color:"#166534", marginTop:5, opacity:0.8 }}>
-                {payAfterDelivery ? "Paiement reçu" : `${paymentWordCap} reçu · Production démarrée`}
+                {payAfterDelivery ? "Paiement reçu" : `${paymentWordCap} reçu · Mission démarrée`}
               </div>
               <button
-                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte")}
+                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte", { form: entry?.form })}
                 style={{ marginTop:10, padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
               >🧾 Télécharger la facture ({paymentWordCap.toLowerCase()})</button>
               <SendElectronicInvoiceButton
                 contractId={entry?.id} invoiceKey="acompteInvoiceNumber"
-                designation={paymentWordCap} montant={depositAmt} missionTitle={entry?.missionTitle}
+                designation={acompteSpec.designation} montant={depositAmt} missionTitle={entry?.missionTitle}
                 freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                 freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                 tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
@@ -10612,7 +10755,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   ✓ Solde également réglé — contrat entièrement payé
                 </div>
                 <button
-                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde")}
+                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form })}
                   style={{ padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
                 >🧾 Télécharger la facture (solde)</button>
                 <SendElectronicInvoiceButton
@@ -10628,7 +10771,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
             ) : (
               <>
                 <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:2, textTransform:"uppercase", letterSpacing:"0.05em" }}>Solde restant à encaisser</div>
-                <div style={{ fontFamily:T.display, fontSize:22, fontWeight:800, color:"#92400E", marginBottom:12 }}>{soldeAmt.toLocaleString("fr-FR")} €</div>
+                <div style={{ fontFamily:T.display, fontSize:22, fontWeight:800, color:"#92400E", marginBottom:12 }}>{fmtDue(soldeDue)} €{dueUnit}</div>
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                   <button onClick={handleCopySoldeLink} disabled={soldeLinkGenerating} style={{
                     padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8,
@@ -10643,7 +10786,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                     cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534",
                   }}>✓ Marquer le solde comme reçu</button>
                   <button
-                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde")}
+                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form })}
                     style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
                   >🧾 Télécharger la facture</button>
                 </div>
@@ -10672,6 +10815,15 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
             display: "flex", gap: 10, flexWrap: "wrap",
             animation: "fadeUp 0.3s ease both",
           }}>
+            {/* Mentions manquantes sur les factures : on prévient, on ne bloque pas */}
+            {invoiceWarning && (
+              <div style={{ flexBasis:"100%", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"9px 12px", fontFamily:T.body, fontSize:12, color:"#991B1B", lineHeight:1.55 }}>
+                ⚠️ {invoiceWarning}{" "}
+                {onGoToProfileTva && (
+                  <button onClick={onGoToProfileTva} style={{ background:"none", border:"none", padding:0, color:"#991B1B", fontWeight:700, textDecoration:"underline", cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Compléter mon profil</button>
+                )}
+              </div>
+            )}
             {/* Copier lien paiement */}
             <button
               onClick={early.guard("lien-carte", handleCopyLink)}
@@ -10730,7 +10882,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 
             {/* Télécharger la facture — pour la réclamer, même avant paiement */}
             <button
-              onClick={early.guard("facture", () => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte"))}
+              onClick={early.guard("facture", () => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte", { form: entry?.form }))}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -10744,7 +10896,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
             <div style={{ flexBasis:"100%" }}>
               <SendElectronicInvoiceButton
                 contractId={entry?.id} invoiceKey="acompteInvoiceNumber"
-                designation={paymentWordCap} montant={depositAmt} missionTitle={entry?.missionTitle}
+                designation={acompteSpec.designation} montant={depositAmt} missionTitle={entry?.missionTitle}
                 freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                 freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                 tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
@@ -11177,7 +11329,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {entry.isStandaloneInvoice && entry.paymentStatus === "paid" && <span style={{ fontSize:10, fontWeight:700, color:"#166534", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:20, padding:"2px 8px", marginRight:8, verticalAlign:"middle" }}>✓ PAYÉE</span>}
                       {entry.missionTitle || "Sans titre"}
                     </div>
-                    <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>{entry.clientName || "Client sans nom"} · {entry.date} · {Number(entry.price || 0).toLocaleString("fr-FR")} € HT</div>
+                    <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>{entry.clientName || "Client sans nom"} · {entry.date} · {Number(entry.price || 0).toLocaleString("fr-FR")} € {contractPricing(entry.form, profile).enteredUnit}</div>
                   </div>
                   <span style={{ fontSize:16, color:C.textL, flexShrink:0, transform: isOpen ? "rotate(90deg)" : "none", transition:"transform 0.2s" }}>›</span>
                 </div>
@@ -11217,12 +11369,12 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && acompteAmtA > 0 && (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte")}
+                            onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte", { form: entry.form })}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture {isComptantA ? "paiement" : "acompte"}</button>
                           <SendElectronicInvoiceButton compact
                             contractId={entry.id} invoiceKey="acompteInvoiceNumber"
-                            designation={isComptantA ? "Paiement" : "Acompte"} montant={acompteAmtA} missionTitle={entry.missionTitle}
+                            designation={contractInvoiceSpec(entry.form, "acompte").designation} montant={acompteAmtA} missionTitle={entry.missionTitle}
                             freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
                             freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
                             tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
@@ -11234,7 +11386,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && hasSoldeA && (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "solde")}
+                            onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "solde", { form: entry.form })}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture solde</button>
                           <SendElectronicInvoiceButton compact
@@ -11251,7 +11403,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && Array.isArray(entry.avenants) && entry.avenants.map(av => (
                         <React.Fragment key={av.num}>
                           <button
-                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id)}
+                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, entry.form?.freelanceAddress)}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture avenant n°{av.num}</button>
                           <SendElectronicInvoiceButton compact
@@ -11760,7 +11912,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
-        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} retractationWaivedAt={historyView.retractationWaivedAt} />
+        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} signedByFreelanceAt={historyView.signedByFreelanceAt} retractationWaivedAt={historyView.retractationWaivedAt} />
       </div>
 
       {/* Liste des avenants déjà créés sur ce contrat */}
@@ -11816,7 +11968,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                   {av.ajustementMontant > 0 && (
                     <div style={{ background: av.paymentReceived ? "#F0FDF4" : "#FFFBEB", border:`1px solid ${av.paymentReceived ? "#86EFAC" : "#FDE68A"}`, borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: (av.paymentLink || !av.paymentReceived) ? 8 : 0 }}>
-                        <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color: av.paymentReceived ? "#166534" : "#92400E" }}>💰 + {av.ajustementMontant} € HT</div>
+                        <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color: av.paymentReceived ? "#166534" : "#92400E" }}>💰 + {av.ajustementMontant} € {contractPricing(historyView.form, profile).enteredUnit}</div>
                         {av.paymentReceived && <span style={{ fontFamily:T.body, fontSize:11, fontWeight:700, color:"#166534" }}>✓ Payé</span>}
                       </div>
                       {av.paymentLink && !av.paymentReceived && (
@@ -11826,7 +11978,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                         </div>
                       )}
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
+                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id, historyView.form?.freelanceAddress)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
                         <SendElectronicInvoiceButton compact
                           contractId={historyView.id} invoiceKey="avenant" avenantNum={av.num}
                           designation={`Avenant n°${av.num}`} montant={av.ajustementMontant} missionTitle={historyView.missionTitle}
@@ -11843,7 +11995,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                     </div>
                   )}
 
-                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, historyView.form?.freelanceName, historyView.form?.clientName, av.freelanceSignature, av.clientSignature)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
+                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
                 </div>
               </details>
             );
@@ -11886,6 +12038,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
           contract={historyView.contract}
           avenantCount={historyView.avenants?.length || 0}
           contractId={historyView.id}
+          profile={profile}
           onClose={() => setShowAvenantModal(false)}
           onCreated={() => {}}
           stripeConnectAccountId={stripeConnectAccountId}
@@ -11953,7 +12106,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
       )}
 
       {/* 🕒 Historique du contrat — Timeline des modifications */}
-      <ContractTimeline entry={historyView} />
+      <ContractTimeline entry={historyView} profile={profile} />
     </div>
   );
 
@@ -12101,8 +12254,9 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
               onMouseOut={e=>{ e.currentTarget.style.boxShadow= isLocked ? "none" : "0 2px 8px #1B2E4B05"; e.currentTarget.style.transform="translateY(0)"; }}
               onClick={() => { if(!isLocked) setHistoryView(entry); }}
             >
-              {/* Left info */}
-              <div style={{ display:"flex", alignItems:"center", gap:14, flex:1, minWidth:0 }}>
+              {/* Left info — au moins 220 px : sur téléphone, les boutons passent à la ligne au lieu
+                  d'écraser le titre (il disparaissait et le texte se chevauchait) */}
+              <div style={{ display:"flex", alignItems:"center", gap:14, flex:"1 1 220px", minWidth:0 }}>
                 <div style={{
                   width:40, height:40, background: isLocked ? C.creamDD : C.creamD, borderRadius:8, flexShrink:0,
                   display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
@@ -12393,7 +12547,8 @@ function SendElectronicInvoiceButton({
   );
 }
 
-function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser, contractId }) {
+function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser, contractId, stripeConnectAccountId, stripeConnectReady }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [downloaded, setDownloaded] = useState(false);
   const [standaloneEntryId, setStandaloneEntryId] = useState(null);
   const [resumeCandidate, setResumeCandidate] = useState(null);
@@ -12456,11 +12611,23 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
   useEffect(() => {
     if (!authUser?.id) return;
     const year = new Date().getFullYear();
-    supabase.rpc("peek_next_invoice_number", { p_user_id: authUser.id, p_year: year }).then(({ data, error }) => {
+    let cancelled = false;
+    (async () => {
+      // Facture d'un contrat : si un numéro lui a déjà été attribué (fenêtre de facture ou Mes contrats),
+      // c'est celui-là qu'on affiche et qu'on réutilise : un acompte n'a qu'une seule facture.
+      if (contractId) {
+        try {
+          const { data: row } = await supabase.from("contracts").select("content").eq("id", contractId).single();
+          const existing = row ? parseContent(row.content).acompteInvoiceNumber : null;
+          if (existing) { if (!cancelled) setInvoiceNum(existing); return; }
+        } catch (e) { console.error("Erreur lecture numéro de facture du contrat:", e); }
+      }
+      const { data, error } = await supabase.rpc("peek_next_invoice_number", { p_user_id: authUser.id, p_year: year });
       if (error) { console.error("Erreur lecture numéro de facture:", error); return; }
-      setInvoiceNum(`FA-${year}-${String(data).padStart(4, "0")}`);
-    });
-  }, [authUser?.id]);
+      if (!cancelled) setInvoiceNum(`FA-${year}-${String(data).padStart(4, "0")}`);
+    })();
+    return () => { cancelled = true; };
+  }, [authUser?.id, contractId]);
 
   // Réserve définitivement le numéro (appelé au téléchargement) — atomique, garantit une suite continue sans trou ni doublon
   const reserveInvoiceNumber = async () => {
@@ -12476,25 +12643,40 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
     return finalNum;
   };
 
+  // Crée le lien de paiement par carte sur le compte Stripe DU FREELANCE (jamais sur celui de Freeley),
+  // pour le montant que le client paie vraiment (TTC si le freelance facture la TVA), relié au contrat
+  // pour qu'il passe en « payé » tout seul.
+  const createCardPaymentLink = async () => {
+    const res = await fetch("/api/create-payment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...STRIPE_RETURN_URLS,
+        amount: withTva(acompte, profile),
+        description: `${depositPct === 100 ? "Paiement" : "Acompte " + depositPct + " %"} — ${form.missionTitle || "Prestation Freeley"}`,
+        customerEmail: form.clientEmail || undefined,
+        metadata: { contractId: contractId || standaloneEntryId || "", paymentType: "contract" },
+        connectedAccountId: stripeConnectAccountId,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+    return data.url;
+  };
+
   const handleGenerateStripeLink = async () => {
     if (stripeLinkGenerating) return;
     const priceHTNow = parseFloat(form.price) || 0;
     const amountNow = priceHTNow * (depositPct / 100);
     if (!amountNow || amountNow <= 0) { alert("Renseigne d'abord le montant de la mission dans le champ ci-dessus."); return; }
+    if (!stripeConnectReady || !stripeConnectAccountId) {
+      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
+      if (onGoToProfileTva) onGoToProfileTva();
+      return;
+    }
     setStripeLinkGenerating(true);
     try {
-      const res = await fetch("/api/create-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...STRIPE_RETURN_URLS,
-          amount: amountNow,
-          description: `${depositPct === 100 ? "Paiement" : "Acompte " + depositPct + "%"} — ${form.missionTitle || "Prestation Freeley"}`,
-          customerEmail: form.clientEmail || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      const data = { url: await createCardPaymentLink() };
       setStripeLinkUrl(data.url);
       navigator.clipboard.writeText(data.url).catch(()=>{});
       setStripeLinkCopied(true);
@@ -12507,12 +12689,22 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
   };
 
   const priceHT = parseFloat(form.price) || 0;
-  const acompte = priceHT * (depositPct / 100);
+  // Facture d'un contrat : même montant que le contrat et que Mes contrats (acompte arrondi à l'euro),
+  // pour qu'un même acompte n'ait jamais deux montants différents. Facture libre : montant exact.
+  const acompte = contractId && depositPct > 0 && depositPct < 100 ? Math.round(priceHT * depositPct / 100) : priceHT * (depositPct / 100);
   const tvaApplicableUI = !!(profile?.tvaNumber && profile.tvaNumber.trim());
   const tva     = tvaApplicableUI ? acompte * 0.2 : 0;
   const ttc     = acompte + tva;
 
-  const hasSiret   = !!form.freelanceSiret?.trim();
+  const hasSiret   = !!(form.freelanceSiret?.trim() || profile?.siret?.trim());
+  // Adresse du freelance sur la facture : celle du contrat, sinon celle du profil
+  const freelanceAddressShown = (form.freelanceAddress || "").trim() || (profile?.address || "").trim();
+  const hasIban    = !!(profile?.iban && String(profile.iban).trim());
+  // Mentions obligatoires qui manqueraient sur la facture : on prévient le freelance, sans bloquer
+  const missingMentions = [
+    !hasSiret && "ton numéro SIRET",
+    !freelanceAddressShown && "ton adresse",
+  ].filter(Boolean);
   const hasMission = !!form.missionTitle?.trim();
   const hasClient  = !!form.clientName?.trim();
   const hasPrice   = priceHT > 0;
@@ -12574,10 +12766,12 @@ ${freelanceName}`;
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie dans un instant."); return; }
     setPdfGenerating(true);
     try {
-      // 0. Réutilise le numéro déjà attribué à cette facture précise s'il existe (contrat lié, ou
-      //    facture libre déjà sauvegardée dans cette session) — sinon en réserve un nouveau.
-      const existingId = contractId || standaloneEntryId;
-      let invoiceNum = null;
+      // 0. Facture d'un contrat : un seul numéro par acompte, enregistré dans le contrat (le même que
+      //    « Télécharger la facture » dans Mes contrats). Facture libre : réutilise le numéro déjà
+      //    attribué dans cette session, sinon en réserve un nouveau.
+      const existingId = contractId ? null : standaloneEntryId;
+      let invoiceNum = contractId ? await getOrReserveInvoiceNumber({ authUser, contractId, key: "acompteInvoiceNumber" }) : null;
+      if (contractId) setInvoiceNum(invoiceNum);
       if (existingId) {
         try {
           const { data: existingRow } = await supabase.from("contracts").select("content").eq("id", existingId).single();
@@ -12589,24 +12783,15 @@ ${freelanceName}`;
       }
       if (!invoiceNum) invoiceNum = await reserveInvoiceNumber();
 
-      // 1. Récupérer (ou réutiliser) le lien de paiement Stripe pour l'intégrer au PDF
+      // 1. Lien de paiement par carte pour le code QR du PDF : seulement si le freelance a connecté son
+      //    compte Stripe (l'argent va chez lui). Sinon, pas de code QR : le client paie par virement.
       let payUrl = stripeLinkUrl;
       const amountForStripe = priceHT * (depositPct / 100);
-      if (!payUrl && amountForStripe > 0) {
+      if (!payUrl && amountForStripe > 0 && stripeConnectReady && stripeConnectAccountId) {
         try {
-          const res = await fetch("/api/create-payment", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...STRIPE_RETURN_URLS,
-              amount: amountForStripe,
-              description: `${depositPct === 100 ? "Paiement" : "Acompte " + depositPct + "%"} — ${form.missionTitle || "Prestation Freeley"}`,
-              customerEmail: form.clientEmail || undefined,
-            }),
-          });
-          const data = await res.json();
-          if (res.ok && data.url) { payUrl = data.url; setStripeLinkUrl(data.url); }
-        } catch(e) { /* Le PDF se génère quand même sans le QR si Stripe échoue */ }
+          payUrl = await createCardPaymentLink();
+          setStripeLinkUrl(payUrl);
+        } catch(e) { payUrl = ""; /* Le PDF se génère quand même sans le QR si Stripe échoue */ }
       }
 
       // 2. Convertir le QR code (image distante) en base64 pour l'intégrer au PDF
@@ -12629,18 +12814,18 @@ ${freelanceName}`;
         } catch(e) { qrBase64 = null; /* Pas grave, le PDF s'en passe */ }
       }
 
-      const foot = isComptant
-        ? "Règlement à réception de facture. Ce paiement conditionne le démarrage de la mission."
-        : `Acompte de ${depositPct}% conditionnant le démarrage de la mission. Le solde sera facturé à la livraison.`;
+      // Même libellé et même phrase que la facture téléchargée depuis Mes contrats
+      const spec = depositInvoiceSpec(depositPct);
 
       renderInvoicePDF({
         invoiceNum,
-        designation: isComptant ? "Paiement comptant" : `Acompte ${depositPct}%`,
+        designation: spec.designation,
         missionTitle: form.missionTitle,
         montant: acompte,
         freelanceName: form.freelanceName,
         freelanceSiret: form.freelanceSiret,
         freelanceEmail: form.freelanceEmail,
+        freelanceAddress: form.freelanceAddress,
         clientName: form.clientName,
         clientCompany: form.clientCompany,
         clientAddress: form.clientAddress,
@@ -12648,7 +12833,8 @@ ${freelanceName}`;
         profile,
         typeClient: form.typeClient,
         qrBase64,
-        footNote: foot,
+        footNote: spec.footNote,
+        dueDays: spec.dueDays,
         filename: `Facture_${invoiceNum}.pdf`,
       });
       // Sauvegarde une fiche minimaliste pour pouvoir retrouver cette facture plus tard — uniquement
@@ -12685,7 +12871,9 @@ ${freelanceName}`;
   // Envoi de la facture au client via Super PDP — remplacé par le composant réutilisable
   // SendElectronicInvoiceButton, utilisé directement dans le JSX ci-dessous.
 
-  return (
+  // Affichée par-dessus tout le reste (portail vers le body) : ouverte depuis l'écran de signature, elle se
+  // retrouvait décalée vers le haut quand cet écran avait défilé (son flou d'arrière-plan « capturait » la fenêtre).
+  return createPortal(
     <div
       style={{ position:"fixed", inset:0, background:"#00000065", zIndex:400,
         display:"flex", alignItems:"flex-start", justifyContent:"center",
@@ -12755,6 +12943,20 @@ ${freelanceName}`;
             </div>
           )}
 
+          {/* Mentions obligatoires manquantes : on prévient, on ne bloque pas */}
+          {missingMentions.length > 0 && (
+            <div style={{
+              background:"#FEF2F2", border:"1px solid #FECACA",
+              borderRadius:8, padding:"10px 14px", marginBottom:16,
+              fontFamily:T.body, fontSize:12, color:"#991B1B", lineHeight:1.6,
+            }}>
+              ⚠️ <strong>Il manque {missingMentions.join(" et ")} sur cette facture.</strong> {missingMentions.length > 1 ? "Ce sont des mentions obligatoires." : "C'est une mention obligatoire."} Complète ton profil avant d'envoyer la facture à ton client.
+              {onGoToProfileTva && (
+                <button onClick={onGoToProfileTva} style={{ display:"block", marginTop:8, padding:"6px 12px", background:"#991B1B", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontSize:11.5, fontWeight:700, fontFamily:T.body }}>Compléter mon profil</button>
+              )}
+            </div>
+          )}
+
           {/* Numéro + date */}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18 }}>
             <div>
@@ -12771,7 +12973,7 @@ ${freelanceName}`;
           <div style={{ height:1, background:C.borderL, marginBottom:18 }} />
 
           {/* Prestataire / Client */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:12, marginBottom:18 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))", gap:12, marginBottom:18 }}>
             <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>PRESTATAIRE</div>
               <input
@@ -12782,8 +12984,12 @@ ${freelanceName}`;
                 onFocus={e=>e.target.style.borderBottomColor=C.navy}
                 onBlur={e=>e.target.style.borderBottomColor=C.border}
               />
+              {isEntrepreneurIndividuel(profile?.legalStatus) && !/\bEI\b/.test(form.freelanceName || "") && (
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:1 }}>EI (entrepreneur individuel), ajouté sur la facture</div>
+              )}
               {form.freelanceActivity && <div style={{ fontFamily:T.body, fontSize:11, color:C.textM }}>{form.freelanceActivity}</div>}
-              {hasSiret && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>SIRET : {form.freelanceSiret}</div>}
+              {freelanceAddressShown && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>{freelanceAddressShown}</div>}
+              {hasSiret && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>SIRET : {form.freelanceSiret || profile?.siret}</div>}
               {form.freelanceEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:2 }}>{form.freelanceEmail}</div>}
               {(profile?.linkedin || profile?.portfolio || profile?.github) && (
                 <div style={{ display:"flex", gap:8, marginTop:5, flexWrap:"wrap" }}>
@@ -12811,14 +13017,14 @@ ${freelanceName}`;
                 onFocus={e=>e.target.style.borderBottomColor=C.navy}
                 onBlur={e=>e.target.style.borderBottomColor=C.border}
               />
-              <input
+              {form.typeClient !== "particulier" && <input
                 value={form.clientCompany}
                 onChange={e => setForm(f => ({ ...f, clientCompany: e.target.value }))}
                 placeholder="Entreprise (si applicable)"
                 style={{ fontFamily:T.body, fontSize:11, color:C.textM, marginTop:2, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
                 onFocus={e=>e.target.style.borderBottomColor=C.navy}
                 onBlur={e=>e.target.style.borderBottomColor=C.border}
-              />
+              />}
               <input
                 value={form.clientAddress}
                 onChange={e => setForm(f => ({ ...f, clientAddress: e.target.value }))}
@@ -12981,7 +13187,7 @@ ${freelanceName}`;
             )}
             <div style={{ height:1, background:C.border, margin:"10px 0" }} />
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <span style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy }}>TOTAL TTC</span>
+              <span style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy }}>{tvaApplicableUI ? "TOTAL TTC" : "TOTAL À PAYER"}</span>
               <span style={{ fontFamily:T.display, fontSize:22, fontWeight:700, color:C.navy }}>
                 {hasPrice ? `${fmt(ttc)} €` : "—"}
               </span>
@@ -12994,10 +13200,8 @@ ${freelanceName}`;
             padding:"10px 14px", marginBottom:20,
             fontFamily:T.body, fontSize:11, color:"#15803D", lineHeight:1.6,
           }}>
-            {depositPct === 100
-              ? "✓ Paiement comptant intégral à la commande · Paiement par virement bancaire"
-              : "✓ Acompte à régler à la commande · Paiement par virement bancaire"
-            }
+            {depositPct === 100 ? "✓ Paiement comptant intégral à la commande" : "✓ Acompte à régler à la commande"}
+            {hasIban && stripeConnectReady ? " · Paiement par virement ou par carte" : hasIban ? " · Paiement par virement bancaire" : stripeConnectReady ? " · Paiement par carte" : ""}
           </div>
           {/* Mention informative */}
           <div style={{
@@ -13005,7 +13209,7 @@ ${freelanceName}`;
             fontFamily:T.body, fontSize:10, color:C.textL, lineHeight:1.6,
           }}>
             {form.typeClient === "particulier"
-              ? "Pénalités de retard : taux d'intérêt légal en vigueur applicable aux consommateurs, appliqué de plein droit en cas de paiement au-delà de l'échéance."
+              ? "Intérêts de retard : en cas de retard de paiement, des intérêts au taux d'intérêt légal pourront être appliqués à compter d'une mise en demeure (article 1231-6 du Code civil)."
               : "Pénalités de retard : taux BCE + 10 points (minimum légal : 3x le taux d'intérêt légal). Indemnité forfaitaire de recouvrement : 40€ (art. L441-10, D441-5 C. com.)."
             }
             <br/>Pas d'escompte pour paiement anticipé.
@@ -13054,7 +13258,7 @@ ${freelanceName}`;
                   value={profile?.bic || ""}
                   onChange={e => setProfile && setProfile(p => ({ ...p, bic: e.target.value }))}
                   placeholder="BIC"
-                  style={{ flex:1, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                  style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
                   onFocus={e=>e.target.style.borderColor="#B8965A"}
                   onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
                 />
@@ -13062,13 +13266,15 @@ ${freelanceName}`;
                   value={profile?.bankName || ""}
                   onChange={e => setProfile && setProfile(p => ({ ...p, bankName: e.target.value }))}
                   placeholder="Banque"
-                  style={{ flex:1, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                  style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
                   onFocus={e=>e.target.style.borderColor="#B8965A"}
                   onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
                 />
               </div>
-              {profile?.iban && (
+              {profile?.iban ? (
                 <div style={{ fontFamily:T.body, fontSize:9.5, color:"#8BA3C0" }}>✓ Sauvegardé automatiquement dans ton profil</div>
+              ) : (
+                <div style={{ fontFamily:T.body, fontSize:10.5, color:C.goldL, lineHeight:1.5 }}>⚠️ Sans IBAN, la facture n'indiquera pas à ton client où faire le virement. Il est enregistré dans ton profil dès que tu le tapes.</div>
               )}
             </div>
 
@@ -13093,6 +13299,7 @@ ${freelanceName}`;
                     ? <>Ton client règle la <span style={{ color:C.goldL, fontWeight:600 }}>totalité</span> par virement bancaire (IBAN ci-dessus) ou par <span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span> via le lien Stripe.</>
                     : <>Ton client règle l'acompte par virement bancaire (IBAN ci-dessus) ou par <span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span> via le lien Stripe.</>
                   }
+                  {!stripeConnectReady && <> Pour le paiement par carte, connecte d'abord ton compte Stripe (Profil → Facturation) : l'argent arrivera directement chez toi.</>}
                 </p>
                 {/* Bouton lien Stripe */}
                 <button
@@ -13169,7 +13376,7 @@ ${freelanceName}`;
           <SendElectronicInvoiceButton
             contractId={contractId || standaloneEntryId}
             invoiceKey="acompteInvoiceNumber"
-            designation={isComptant ? "Paiement comptant" : `Acompte ${depositPct}%`}
+            designation={depositInvoiceSpec(depositPct).designation}
             missionTitle={form.missionTitle}
             montant={acompte}
             freelanceName={form.freelanceName}
@@ -13201,13 +13408,13 @@ ${freelanceName}`;
           </div>
 
           <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:14 }}>
-            ⚠️ Pense d'abord à <strong>télécharger le PDF</strong> ci-dessous, pour pouvoir le joindre à ton message.
+            ⚠️ Pense d'abord à <strong>télécharger le PDF</strong> ci-dessus, pour pouvoir le joindre à ton message.
           </div>
 
           {(() => {
             const sendSubject = `${isComptant ? "Facture" : "Facture d'acompte"} n° ${invoiceNum} — ${form.missionTitle || "notre mission"}`;
-            const sendBody = `Bonjour ${clientFullName},\n\nVoici ta ${isComptant ? "facture" : "facture d'acompte"} n° ${invoiceNum} concernant notre mission « ${form.missionTitle || "prestation"} ».\n\nTu trouveras le PDF en pièce jointe.${stripeLinkUrl ? `\n\nTu peux régler directement par carte via ce lien sécurisé :\n${stripeLinkUrl}` : ""}\n\nMerci d'avance,\n${freelanceName}`;
-            const sendSms = `Bonjour ${clientFullName}, voici ta facture ${isComptant ? "" : "d'acompte "}n° ${invoiceNum}.${stripeLinkUrl ? ` Tu peux régler ici : ${stripeLinkUrl}` : " Le détail arrive par email."} Merci !`;
+            const sendBody = `Bonjour ${clientFullName},\n\nVoici votre ${isComptant ? "facture" : "facture d'acompte"} n° ${invoiceNum} concernant notre mission « ${form.missionTitle || "prestation"} ».\n\nVous trouverez le PDF en pièce jointe.${stripeLinkUrl ? `\n\nVous pouvez régler directement par carte via ce lien sécurisé :\n${stripeLinkUrl}` : ""}\n\nMerci d'avance,\n${freelanceName}`;
+            const sendSms = `Bonjour ${clientFullName}, voici votre facture ${isComptant ? "" : "d'acompte "}n° ${invoiceNum}.${stripeLinkUrl ? ` Vous pouvez régler ici : ${stripeLinkUrl}` : " Le détail arrive par email."} Merci !`;
             return (
               <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
                 <a
@@ -13248,7 +13455,8 @@ ${freelanceName}`;
           }}
         />
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -13374,6 +13582,7 @@ function CameraCapture({ onCapture, onClose }) {
 }
 
 function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [phase, setPhase]       = useState(initialResults ? "result" : "upload");   // "upload" | "loading" | "result"
 
   const [fileName, setFileName] = useState("");
@@ -14237,6 +14446,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
 function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, contractText, authUser, onGoToHistory, stripeConnectAccountId, stripeConnectReady, onConnectStripe, connectingStripe }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
   const [freelanceSigned, setFreelanceSigned] = useState(false);
@@ -14342,6 +14552,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   };
 
   const [freelanceSigCapture, setFreelanceSigCapture] = useState(null);
+  const [freelanceSignedAt, setFreelanceSignedAt] = useState(null); // date affichée sous la signature du freelance
   const [tactilePaymentLink, setTactilePaymentLink] = useState("");
   const [tactilePaymentLoading, setTactilePaymentLoading] = useState(false);
   const [tactilePaymentCopied, setTactilePaymentCopied] = useState(false);
@@ -14360,7 +14571,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...STRIPE_RETURN_URLS,
-          amount: acompte,
+          amount: withTva(acompte, profile),
           description: `${isComptant ? "Paiement" : "Acompte"} — ${form?.missionTitle || "Prestation Freeley"}`,
           customerEmail: form?.clientEmail || undefined,
           metadata: { contractId: contractId || "", paymentType: "contract" },
@@ -14384,6 +14595,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     if (!canValidateFreelance) return;
     // Capture immédiatement l'image dessinée — le canevas disparaît de l'écran dès l'étape suivante
     setFreelanceSigCapture(freelanceCanvasRef.current?.toDataURL("image/png") || null);
+    setFreelanceSignedAt(new Date().toISOString());
     setFreelanceSigned(true);
     setStep(1);
   };
@@ -14405,6 +14617,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           const newContent = {
             ...parseContent(existing.content),
             freelanceSignature: freelanceSig, clientSignature: clientSig, signedByClientAt: new Date().toISOString(),
+            signedByFreelanceAt: freelanceSignedAt || new Date().toISOString(),
             ...(isParticulier && signLocation ? { signatureLocation: signLocation, signatureLocationLabel: SIGNATURE_LOCATIONS[signLocation], signatureLocationDeclaredAt: signLocationAt } : {}),
           };
           const { error: e2 } = await supabase.rpc("update_contract_content", {
@@ -14677,9 +14890,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 borderRadius:14, padding:"18px 18px 16px",
                 position:"relative", overflow:"hidden",
               }}>
-                {/* "Écran client" badge */}
+                {/* "Écran client" badge — dans le flux du texte : en position absolue, il recouvrait « Bonjour … » sur téléphone */}
                 <div style={{
-                  position:"absolute", top:12, right:12,
+                  display:"inline-block", marginBottom:10,
                   background:"#3B82F6", color:C.white,
                   fontFamily:T.body, fontSize:9, fontWeight:700, letterSpacing:"0.1em",
                   padding:"3px 10px", borderRadius:20,
@@ -14741,15 +14954,15 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   background:C.white, borderRadius:10, padding:"12px 14px", marginBottom:14,
                   border:"1px solid #DBEAFE",
                 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                    <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>Mission</span>
-                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.navy }}>{form.missionTitle || "Mission freelance"}</span>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:6 }}>
+                    <span style={{ fontFamily:T.body, fontSize:11, color:C.textL, flexShrink:0 }}>Mission</span>
+                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.navy, textAlign:"right" }}>{form.missionTitle || "Mission freelance"}</span>
                   </div>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                    <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>Montant</span>
-                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.navy }}>{Number(form.price||0).toLocaleString("fr-FR")} € {contractPricing(form, profile).enteredUnit}</span>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:6 }}>
+                    <span style={{ fontFamily:T.body, fontSize:11, color:C.textL, flexShrink:0 }}>Montant</span>
+                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.navy, textAlign:"right" }}>{Number(form.price||0).toLocaleString("fr-FR")} € {contractPricing(form, profile).enteredUnit}</span>
                   </div>
-                  <div style={{ display:"flex", justifyContent:"space-between" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:12 }}>
                     <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>
                       {payAfterDelivery
                         ? `Paiement (${form.paymentTerms} jours après la facture de fin de mission)`
@@ -14758,7 +14971,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                           : (isComptant ? "Paiement comptant à régler" : "Acompte à régler")}
                     </span>
                     <span style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#7C3AED" }}>
-                      {acompte.toLocaleString("fr-FR")} € ({isComptant ? 100 : acomptePct}%)
+                      {acompte.toLocaleString("fr-FR")} € {contractPricing(form, profile).enteredUnit} ({isComptant ? 100 : acomptePct}%)
                     </span>
                   </div>
                 </div>
@@ -14923,8 +15136,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 </div>
               </div>
 
-              {/* ── Bouton Facture d'acompte ── */}
-              <button
+              {/* ── Bouton Facture d'acompte ── (pas de facture à la signature quand tout se paie après la mission) */}
+              {!payAfterDelivery && <button
                 onClick={early.guard("facture", () => setShowDepositInvoiceModal(true))}
                 style={{
                   width:"100%", marginBottom:14,
@@ -14942,8 +15155,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 onMouseOut={e=>{ e.currentTarget.style.background="linear-gradient(135deg,#FFFBEB 0%,#FEF9EE 100%)"; e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 2px 8px #F59E0B18"; }}
               >
                 <span style={{ fontSize:15 }}>📄</span>
-                Télécharger la facture d'acompte (PDF)
-              </button>
+                {isComptant ? "Télécharger la facture (PDF)" : "Télécharger la facture d'acompte (PDF)"}
+              </button>}
 
               {/* Rappel visible du statut Stripe Connect */}
               {!stripeConnectReady && (
@@ -15062,11 +15275,13 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           setForm={setForm}
           profile={profile}
           setProfile={setProfile}
-          depositPctProp={acomptePct}
+          depositPctProp={isComptant ? 100 : acomptePct}
           onClose={() => setShowDepositInvoiceModal(false)}
           onGoToProfileTva={onGoToProfileTva}
           authUser={authUser}
           contractId={contractId}
+          stripeConnectAccountId={stripeConnectAccountId}
+          stripeConnectReady={stripeConnectReady}
         />
       )}
 
@@ -15076,6 +15291,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   );
 }
 function SubscriptionModal({ onClose, onSubscribe }) {
+  useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [hovered, setHovered] = useState(null);
   return (
     <div style={{
@@ -16085,7 +16301,7 @@ function ClientSignaturePage({ contractId }) {
             <button
               onClick={() => setRetractConfirming(true)}
               style={{ width:"100%", padding:"13px 18px", background:"#fff", border:"1.5px solid #DC2626", borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:700, color:"#DC2626" }}
-            >Renoncer au contrat</button>
+            >Renoncer au contrat ici</button>
           )}
         </div>
       </div>
