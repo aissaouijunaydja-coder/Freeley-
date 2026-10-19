@@ -28,6 +28,9 @@
 // au client (confirmation du contrat, information et formulaire de rétractation, accusé de réception).
 // Version 206 : information sur la perte du droit de rétractation (démarrage anticipé, contenu numérique),
 // et « EI » repris du texte du contrat quand le formulaire enregistré n'a pas le statut juridique.
+// Version 207 : « Retrouver mon contrat » envoie UN seul email, vouvoyé, avec tous les contrats signés de
+// l'adresse (nom du prestataire et date de signature). L'email de confirmation signale que le client peut
+// télécharger son exemplaire signé (PDF) sur sa page.
 //
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
@@ -325,28 +328,49 @@ async function handleClientSign(contractId, signature) {
 }
 
 // ── action: "find" — retrouver un contrat perdu par email, toujours même réponse ──
-async function handleFind(email) {
+async function handleFind(rawEmail) {
+  const email = String(rawEmail || "").trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { status: 200, body: { ok: true } };
   }
   try {
     const { data: rows } = await supabase.from("contracts").select("id, content").eq("status", "signed");
-    const emailLower = email.trim().toLowerCase();
+    const emailLower = email.toLowerCase();
     const matches = (rows || []).filter(r => {
       const c = parseContent(r.content);
-      return (c.form?.clientEmail || c.clientEmail || "").toLowerCase() === emailLower;
+      return String(c.form?.clientEmail || c.clientEmail || "").trim().toLowerCase() === emailLower;
     });
-    for (const m of matches) {
-      const c = parseContent(m.content);
-      const link = `${SITE_URL}/?sign=${m.id}`;
-      const missionTitle = c.missionTitle || c.form?.missionTitle || "";
+    if (matches.length) {
+      // Un seul email, même avec plusieurs contrats (avant : un email par contrat, et tutoyé)
+      const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" }) : "";
+      const titles = [];
+      const items = matches.map(m => {
+        const c = parseContent(m.content);
+        const f = c.form || {};
+        const title = c.missionTitle || f.missionTitle || "votre mission";
+        titles.push(title);
+        const who = legalFreelanceName(f, c.contract || "");
+        const day = fmtDay(c.signedByClientAtServer || c.signedByClientAt);
+        return `« ${title} »${who ? `, conclu avec ${who}` : ""}${day ? `, signé le ${day}` : ""} :\n${SITE_URL}/?sign=${m.id}`;
+      });
+      const several = matches.length > 1;
+      const text = [
+        "Bonjour,",
+        several
+          ? "Vous avez demandé à retrouver vos contrats sur Freeley. Voici le lien vers chacun d'eux :"
+          : "Vous avez demandé à retrouver votre contrat sur Freeley. Voici le lien pour y accéder :",
+        items.join("\n\n"),
+        `Sur ${several ? "chaque" : "cette"} page, vous pouvez relire votre contrat et télécharger votre exemplaire signé (PDF). Si vous êtes un particulier, elle vous permet aussi d'exercer en ligne votre droit de rétractation, s'il s'applique et tant que le délai de 14 jours n'est pas écoulé.`,
+        "Si vous n'êtes pas à l'origine de cette demande, ignorez simplement ce message.",
+        "Cordialement,\nFreeley",
+      ].join("\n\n");
       try {
         await sendMail({
           from: FROM, to: email,
-          subject: `Retrouve ton contrat — ${missionTitle}`,
-          text: `Bonjour,\n\nVoici le lien vers ton contrat « ${missionTitle} » :\n${link}\n\nCordialement,\nFreeley`,
+          subject: several ? "Retrouvez vos contrats signés sur Freeley" : `Retrouvez votre contrat — ${titles[0]}`,
+          text,
         });
-      } catch (e) { console.error("retraction/find: échec email pour", m.id, e); }
+      } catch (e) { console.error("retraction/find: échec email", e); }
     }
   } catch (e) {
     console.error("retraction/find: erreur de recherche", e);
@@ -387,7 +411,7 @@ async function handleSendLink(contractId) {
   const blocks = [
     `Bonjour ${clientName},`,
     `Ce courriel constitue la confirmation, sur un support durable, de votre contrat « ${missionTitle} » conclu avec ${freelanceName} et signé le ${signedStr}.`,
-    `Vous pouvez consulter votre contrat à tout moment sur cette page :\n${link}`,
+    `Vous pouvez consulter votre contrat et télécharger votre exemplaire signé (PDF) à tout moment sur cette page :\n${link}`,
   ];
 
   if (isParticulier && waivedAt && content.retractationWaiverText) {

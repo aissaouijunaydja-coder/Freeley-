@@ -806,7 +806,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "219";
+const APP_VERSION = "220";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -1948,6 +1948,605 @@ async function generateLongText(prompt, { maxTokens = 8000, maxAttempts = 3, loo
   return { text: fullText, stopReason };
 }
 
+// Charge jsPDF à la demande : la page du client n'a pas le chargement fait par l'appli du freelance
+const JSPDF_URL = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+const loadJsPDF = () => new Promise((resolve, reject) => {
+  if (window.jspdf) { resolve(window.jspdf); return; }
+  const s = document.createElement("script");
+  s.src = JSPDF_URL;
+  s.onload = () => (window.jspdf ? resolve(window.jspdf) : reject(new Error("jsPDF indisponible")));
+  s.onerror = () => reject(new Error("jsPDF indisponible"));
+  document.head.appendChild(s);
+});
+
+// PDF signé téléchargé par le client depuis sa page : toujours relu en base, avec les deux signatures.
+// Mêmes données que le PDF du freelance dans « Mes contrats ».
+const downloadSignedContractForClient = async (contractId) => {
+  await loadJsPDF();
+  const fresh = await getContractForSigning(contractId);
+  if (!fresh || fresh.status !== "signed") throw new Error("not_signed");
+  const c = fresh.content || {};
+  const text = c.contract || "";
+  // Contrats rédigés avant la version 219 (sans la TVA enregistrée) : on la lit dans le texte du contrat
+  const tvaFromText = /293\s*B/.test(text) ? "" : (/TVA[^\n]{0,120}20\s*%/.test(text) ? "oui" : "");
+  const { doc, fileName } = buildContractPdfDoc({
+    form: c.form || {}, contract: text,
+    freelanceSignature: c.freelanceSignature || null, clientSignature: c.clientSignature || null,
+    signedAt: c.signedByClientAtServer || c.signedByClientAt || null,
+    retractationWaivedAt: c.retractationWaivedAtServer || c.retractationWaivedAt || null,
+    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null },
+    profile: { tvaNumber: tvaFromText },
+  });
+  doc.save(fileName);
+};
+
+// ── PDF du contrat ── (version 220 : fonction commune)
+// Le même PDF pour le freelance (écran du contrat, Mes contrats) et pour la page du client, qui peut
+// télécharger son exemplaire signé. jsPDF doit déjà être chargé (window.jspdf).
+function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSignature = null, clientSignature = null, signedAt = null, retractationWaivedAt = null, extra = null, profile = null } = {}) {
+  const pContract = normalizeContractText(contract || "");
+  // Si le formulaire n'a pas gardé le statut juridique, on suit le texte du contrat (« Nom EI »)
+  const pForm = resolveLegalStatus({
+    freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "", freelancePhone: "",
+    freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
+    clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
+    endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
+    acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true, clauseInterlocuteur: true, clausePreavis: true, preavisJours: "30",
+    ...rawForm,
+  }, pContract);
+  const pFreelanceSig = freelanceSignature || null;
+  const pClientSig = clientSignature || null;
+  const pSignedAt = signedAt || null;
+  const pRetractationWaivedAt = retractationWaivedAt || null;
+  // Date de signature du freelance, et lieu de signature déclaré (signature en présence d'un particulier)
+  const pExtra = extra || {};
+  const pFreelanceSignedAt = pExtra.signedByFreelanceAt || null;
+  const pPayFrom = pForm.typeClient === "particulier" && pExtra.signatureLocation === "hors_etablissement" && pSignedAt
+    ? paymentAllowedFrom(pSignedAt) : null;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  doc.setProperties({ title: `Contrat — ${pForm.missionTitle || "Mission"}`, creator: `Freeley ${APP_VERSION}` });
+  const PW = 210, PH = 297;
+  const ML = 22, MR = 22, cw = PW - ML - MR;
+  const HEADER_H = 16, FOOTER_H = 14, BODY_TOP = HEADER_H + 8, BODY_BOT = PH - FOOTER_H - 6;
+
+  // ── Palette document premium ──
+  const NAVY   = [26, 54, 93];    // #1a365d
+  const NAVYL  = [43, 108, 176];  // #2b6cb0
+  const NAVYLT = [235, 241, 250]; // fond bleu très clair
+  const DARK   = [44, 62, 80];    // #2c3e50
+  const GOLD   = [180, 140, 70];
+  const AMBER  = [255, 248, 230]; // fond encadré clause
+  const AMBER_BORDER = [214, 132, 49]; // bordure orange
+  const WHITE  = [255, 255, 255];
+  const GREY   = [140, 140, 140];
+  const GREYLT = [220, 220, 220];
+  const GREEN  = [39, 119, 63];   // badge scellé
+
+  const safe = s => (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9]+/g,"_").substring(0,25).replace(/^_+|_+$/g,"");
+  // Les polices standard de jsPDF n'ont pas le caractère ✓ (il s'affichait comme un point) :
+  // la coche est dessinée avec deux traits.
+  const drawCheck = (x, y, size, color) => {
+    doc.setDrawColor(...color); doc.setLineWidth(Math.max(0.35, size * 0.16));
+    doc.line(x - size * 0.42, y, x - size * 0.1, y + size * 0.32);
+    doc.line(x - size * 0.1, y + size * 0.32, x + size * 0.45, y - size * 0.38);
+  };
+  // TVA : celle enregistrée dans le contrat à sa rédaction (depuis la version 219), sinon le profil
+  const pricing = contractPricing(pForm, pForm.freelanceTvaNumber !== undefined ? { tvaNumber: pForm.freelanceTvaNumber } : profile);
+  const contractNumber = (String(pContract || "").match(/CP-\d{4}-\d{4}/) || [])[0] || "";
+  const d1 = pForm.startDate ? new Date(pForm.startDate).toLocaleDateString("fr-FR") : "Non défini";
+  const d2 = pForm.endDate   ? new Date(pForm.endDate).toLocaleDateString("fr-FR")   : "Non défini";
+  const today = new Date().toLocaleDateString("fr-FR");
+  // Date du contrat : celle écrite en tête du contrat, pas le jour où l'on télécharge le PDF
+  const contractDate = (String(pContract || "").slice(0, 900).match(/\d{1,2}(?:er)? (?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre) \d{4}/i) || [])[0] || today;
+  const payFromLabel = pPayFrom ? new Date(pPayFrom).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) : null;
+
+  /* ── HEADER (pages intérieures) ── */
+  const drawHeader = () => {
+    // Bande bleue marine fine en haut
+    doc.setFillColor(...NAVY);
+    doc.rect(0, 0, PW, HEADER_H, "F");
+    // Filet doré sous la bande
+    doc.setDrawColor(...GOLD); doc.setLineWidth(0.5);
+    doc.line(0, HEADER_H, PW, HEADER_H);
+    // Titre gauche
+    doc.setFont("helvetica","bold"); doc.setFontSize(7.5);
+    doc.setTextColor(...WHITE);
+    doc.text("CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", ML, 10.5);
+    // Marque droite
+    doc.setFont("helvetica","normal"); doc.setFontSize(7);
+    doc.setTextColor(180, 200, 230);
+    doc.text("Freeley", PW - MR, 10.5, { align:"right" });
+  };
+
+  /* ── FOOTER ── */
+  const drawFooter = (pageNum, total) => {
+    doc.setDrawColor(...GREYLT); doc.setLineWidth(0.3);
+    doc.line(ML, PH - FOOTER_H + 1, PW - MR, PH - FOOTER_H + 1);
+    doc.setFont("helvetica","italic"); doc.setFontSize(6.5);
+    doc.setTextColor(...GREY);
+    // Pas de « document indicatif » sur un contrat signé : le client pourrait croire qu'il ne l'engage pas
+    doc.text(`${contractNumber ? `Contrat ${contractNumber} — ` : ""}Document généré via Freeley le ${today}`, ML, PH - FOOTER_H + 6);
+    doc.setFont("helvetica","bold"); doc.setFontSize(7);
+    doc.setTextColor(...NAVYL);
+    doc.text(`Page ${pageNum} / ${total}`, PW - MR, PH - FOOTER_H + 6, { align:"right" });
+  };
+
+  /* ══════════════════════════════════════════
+     PAGE DE GARDE — STYLE PREMIUM
+  ══════════════════════════════════════════ */
+
+  // Fond blanc pur
+  doc.setFillColor(...WHITE); doc.rect(0, 0, PW, PH, "F");
+
+  // Bande bleue marine haute (40 mm)
+  doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 46, "F");
+
+  // Filet doré sous la bande
+  doc.setDrawColor(...GOLD); doc.setLineWidth(1.2);
+  doc.line(0, 46, PW, 46);
+
+  // Liseré latéral gauche bleu accent (toute la page)
+  doc.setFillColor(...NAVYL);
+  doc.rect(0, 0, 5, PH, "F");
+
+  // Marque Freeley (dans la bande)
+  doc.setFont("helvetica","bold"); doc.setFontSize(8);
+  doc.setTextColor(160, 190, 230);
+  doc.text("FREELEY", ML + 2, 14, { charSpace: 2 });
+  // Séparateur doré fin
+  doc.setDrawColor(...GOLD); doc.setLineWidth(0.3);
+  doc.line(ML + 2, 16.5, ML + 42, 16.5);
+
+  // Titre principal (dans la bande)
+  doc.setFont("helvetica","bold"); doc.setFontSize(22);
+  doc.setTextColor(...WHITE);
+  doc.text("CONTRAT DE PRESTATION", ML + 2, 29);
+  doc.setFontSize(16);
+  doc.setTextColor(180, 210, 240);
+  doc.text("DE SERVICES INDÉPENDANT", ML + 2, 38.5);
+
+  // Numéro de contrat (coin droit de la bande)
+  doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+  doc.setTextColor(160, 190, 230);
+  if (contractNumber) {
+    doc.text("Réf. document", PW - MR, 20, { align:"right" });
+    doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.setTextColor(...WHITE);
+    doc.text(contractNumber, PW - MR, 28, { align:"right" });
+  }
+  doc.setFont("helvetica","normal"); doc.setFontSize(7);
+  doc.setTextColor(180, 210, 240);
+  doc.text(`Fait le ${contractDate}`, PW - MR, 35, { align:"right" });
+
+  // ── Bloc titre mission (sous la bande) ──
+  let cy = 58;
+  doc.setFont("helvetica","bold"); doc.setFontSize(7);
+  doc.setTextColor(...NAVYL);
+  doc.text("OBJET DE LA MISSION", ML + 2, cy);
+  cy += 4;
+  doc.setDrawColor(...NAVYL); doc.setLineWidth(0.4);
+  doc.line(ML + 2, cy, PW - MR, cy);
+  cy += 5;
+  doc.setFont("helvetica","bold"); doc.setFontSize(14);
+  doc.setTextColor(...NAVY);
+  const missionLines = doc.splitTextToSize((pForm.missionTitle || "Mission").toUpperCase(), cw - 4);
+  missionLines.forEach(l => { doc.text(l, ML + 2, cy); cy += 9; });
+  cy += 3;
+
+  // ── Blocs Parties (fond bleu très clair) ──
+  const blockW = (cw - 6) / 2;
+
+  // Prestataire
+  doc.setFillColor(...NAVYLT); doc.rect(ML, cy, blockW, 56, "F");
+  doc.setDrawColor(...NAVYL); doc.setLineWidth(0.3); doc.rect(ML, cy, blockW, 56);
+  // En-tête bloc
+  doc.setFillColor(...NAVY); doc.rect(ML, cy, blockW, 9, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
+  doc.text("PRESTATAIRE", ML + 4, cy + 6.5);
+  // Contenu
+  doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...NAVY);
+  doc.text(contractFreelanceName(pForm), ML + 4, cy + 17);
+  doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
+  const actLines = doc.splitTextToSize(pForm.freelanceActivity, blockW - 8);
+  actLines.forEach((l,i) => doc.text(l, ML + 4, cy + 24 + i*5));
+  let offAct = cy + 24 + actLines.length * 5 + 2;
+  if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.setFontSize(7.5); doc.text(`SIRET : ${pForm.freelanceSiret}`, ML + 4, offAct); offAct += 5; }
+  doc.setFontSize(7.5); doc.setTextColor(...DARK);
+  const addrLines1 = doc.splitTextToSize(pForm.freelanceAddress, blockW - 8);
+  addrLines1.forEach((l,i) => doc.text(l, ML + 4, offAct + i*4.5));
+  if (pForm.freelanceEmail) { doc.setTextColor(...NAVYL); doc.text(pForm.freelanceEmail, ML + 4, offAct + addrLines1.length*4.5 + 2); }
+
+  // Client
+  const cx2 = ML + blockW + 6;
+  doc.setFillColor(...NAVYLT); doc.rect(cx2, cy, blockW, 56, "F");
+  doc.setDrawColor(...NAVYL); doc.setLineWidth(0.3); doc.rect(cx2, cy, blockW, 56);
+  doc.setFillColor(...NAVY); doc.rect(cx2, cy, blockW, 9, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
+  doc.text("CLIENT", cx2 + 4, cy + 6.5);
+  doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...NAVY);
+  doc.text(pForm.clientName, cx2 + 4, cy + 17);
+  doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
+  if (pForm.clientCompany) { doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.text(pForm.clientCompany, cx2 + 4, cy + 24); }
+  doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+  const addrLines2 = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", blockW - 8);
+  addrLines2.forEach((l,i) => doc.text(l, cx2 + 4, cy + (pForm.clientCompany ? 31 : 24) + i*4.5));
+  if (pForm.clientEmail) { doc.setTextColor(...NAVYL); const emailOffY = cy + (pForm.clientCompany ? 31 : 24) + addrLines2.length*4.5 + 2; doc.text(pForm.clientEmail, cx2 + 4, emailOffY); }
+
+  cy += 64;
+
+  // ── Tableau récapitulatif des conditions (style premium) ──
+  doc.setFont("helvetica","bold"); doc.setFontSize(7);
+  doc.setTextColor(...NAVYL);
+  doc.text("RÉCAPITULATIF DES CONDITIONS FINANCIÈRES ET OPÉRATIONNELLES", ML, cy);
+  cy += 3;
+
+  const acomptePctPdf = Number(pForm.acomptePourcentage) || 0;
+  // jsPDF (police standard) n'affiche pas correctement l'espace fine utilisée par défaut par toLocaleString("fr-FR") — on la remplace par un espace normal
+  const frMoney = (n) => Number(n).toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g, " ");
+  const tableRows = [
+    ["Mission",          pForm.missionTitle],
+    ["Période",          `Du ${d1} au ${d2}`],
+    [`Honoraires ${pricing.unit}`, `${fmtEuro(pricing.total)} €`],
+  ];
+  if (pricing.b2c) tableRows.push(["TVA", pricing.tvaApplicable ? `Incluse : ${fmtEuro(pricing.total - pricing.ht)} € (20 %)` : "Non applicable — art. 293 B du CGI"]);
+  else tableRows.push(["TVA", pricing.tvaApplicable ? "En sus, au taux en vigueur" : "Non applicable — art. 293 B du CGI"]);
+  // Signé hors établissement avec un particulier : rien ne se paie avant le 8e jour (art. L221-10 C. conso)
+  if (acomptePctPdf > 0) {
+    tableRows.push([`Acompte (${acomptePctPdf} %)`, payFromLabel ? `${fmtEuro(pricing.acompte)} € — payable à partir du ${payFromLabel} (délai légal de 7 jours)` : `${fmtEuro(pricing.acompte)} € — dû à la signature`]);
+    tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${fmtEuro(pricing.solde)} € — dû à la livraison`]);
+  }
+  // Avec un acompte, « Comptant » veut dire : solde payé dès réception de sa facture (jamais « à la commande »)
+  tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant"
+    ? (acomptePctPdf > 0 ? "Solde dès réception de la facture" : (payFromLabel ? `Comptant, payable à partir du ${payFromLabel} (délai légal de 7 jours)` : "Comptant à la commande"))
+    : `${pForm.paymentTerms} jours nets`]);
+  tableRows.push(["Révisions incluses", `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
+  if (pricing.b2c) tableRows.push(["Intérêts de retard", pForm.latePaymentPenalty ? "Oui — Taux d'intérêt légal, après mise en demeure" : "Non stipulés"]);
+  else tableRows.push(["Pénalités de retard", pForm.latePaymentPenalty ? "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)" : "Non stipulées"]);
+
+
+  // En-tête tableau bleu
+  doc.setFillColor(...NAVY); doc.rect(ML, cy, cw, 8, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
+  doc.text("DÉSIGNATION", ML + 4, cy + 5.5);
+  doc.text("DÉTAIL", ML + 60, cy + 5.5);
+  cy += 8;
+
+  tableRows.forEach((row, ri) => {
+    const isTotal = row[0].startsWith("Honoraires");
+    const bg = isTotal ? NAVYLT : (ri % 2 === 0 ? [252,252,252] : WHITE);
+    doc.setFillColor(...bg); doc.rect(ML, cy, cw, 8, "F");
+    doc.setDrawColor(...GREYLT); doc.setLineWidth(0.15); doc.rect(ML, cy, cw, 8);
+    // Séparateur colonne
+    doc.setDrawColor(...GREYLT); doc.line(ML + 56, cy, ML + 56, cy + 8);
+    // Label
+    const labelColor = isTotal ? NAVY : [80,80,80];
+    const labelWeight = isTotal ? "bold" : "bold";
+    doc.setFont("helvetica", labelWeight); doc.setFontSize(isTotal ? 8 : 7.5);
+    doc.setTextColor(...labelColor);
+    doc.text(row[0], ML + 4, cy + 5.5);
+    // Valeur
+    const valColor = isTotal ? NAVY : DARK;
+    doc.setFont("helvetica", isTotal ? "bold" : "normal"); doc.setFontSize(isTotal ? 8.5 : 7.5);
+    doc.setTextColor(...valColor);
+    const valLines = doc.splitTextToSize(String(row[1]), cw - 62);
+    valLines.forEach((vl, vi) => {
+      if (vi > 0) { cy += 5; doc.setFillColor(...bg); doc.rect(ML, cy, cw, 5, "F"); }
+      doc.text(vl, ML + 60, cy + 5.5);
+    });
+    cy += 8;
+  });
+
+  // Ligne TOTAL grasse
+  doc.setFillColor(...NAVY); doc.rect(ML, cy, cw, 10, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...WHITE);
+  doc.text(`TOTAL ${pricing.unit}`, ML + 4, cy + 7);
+  doc.text(`${fmtEuro(pricing.total)} €`, PW - MR - 4, cy + 7, { align:"right" });
+  cy += 14;
+
+  // Note de bas de page de garde
+  doc.setFont("helvetica","italic"); doc.setFontSize(6.8);
+  doc.setTextColor(...GREY);
+  // Ce que dit l'article 6 du métier : cession (création, digital), licence (conseil), rien (artisanat)
+  const piNote = pForm.categorieMetier === "artisanat" ? ""
+    : pForm.categorieMetier === "conseil" ? "Les livrables font l'objet d'une licence d'utilisation, accordée après le paiement intégral des honoraires."
+    : (pForm.contenuNumeriquePret && pForm.typeClient === "particulier") ? "Le contenu fourni fait l'objet d'une licence d'utilisation, accordée après le paiement intégral des honoraires."
+    : "Les droits de propriété intellectuelle sont cédés sous condition suspensive du paiement intégral des honoraires.";
+  if (piNote) { doc.text(piNote, ML, cy); cy += 5; }
+  doc.text("Contrat soumis au droit français. Généré par Freeley. À faire relire pour toute mission sensible.", ML, cy);
+
+  /* ══════════════════════════════════════════
+     PAGES DE CONTENU DU CONTRAT
+  ══════════════════════════════════════════ */
+  doc.addPage();
+  let y = BODY_TOP + 6;
+
+  const newPage = () => {
+    doc.addPage();
+    y = BODY_TOP + 6;
+  };
+
+  const checkY = (need = 8) => {
+    if (y + need > BODY_BOT) newPage();
+  };
+
+  // Détection clause pénalités (encadré ambre)
+  const isPenaltyClause = (text) =>
+    /40\s*€|pénalités?\s+de\s+retard|L441-10|L441-11|indemnité\s+forfaitaire|taux\s+directeur|banque\s+centrale/i.test(text);
+
+  const isPIClause = (text) =>
+    /cession.*subordonn|droits.*propriété.*intellectuelle.*paiement|contrefaçon|L335-2|L111-1|L122-1|L131-1/i.test(text);
+
+  const isMoyensClause = (text) =>
+    /obligation\s+de\s+moyens|responsabilité.*plafonnée|faute\s+prouvée|préjudice\s+indirect/i.test(text);
+
+  // Parse contrat
+  const paragraphs = pContract.split(/\n{2,}/);
+  paragraphs.forEach(para => {
+    if (!para.trim()) return;
+    const lines = para.split("\n");
+
+    // Détection de bloc spécial (encadré ambre)
+    const fullPara = para.trim();
+    const isLegalCallout = isPenaltyClause(fullPara) || isPIClause(fullPara) || isMoyensClause(fullPara);
+
+    // Si c'est un bloc spécial, on wrappe tout le paragraphe dans l'encadré
+    if (isLegalCallout && lines.length >= 2 && !(/^ARTICLE\s+\d+\s*[-–—]/i.test(fullPara.split("\n")[0]))) {
+      const allText = lines.map(l => l.trim()).filter(Boolean).join(" ");
+      const wrapped = doc.splitTextToSize(allText, cw - 14);
+      const blockH = wrapped.length * 5 + 10;
+      checkY(blockH + 4);
+      y += 2;
+      // Fond ambre
+      doc.setFillColor(...AMBER); doc.rect(ML, y - 3, cw, blockH, "F");
+      // Bordure gauche orange
+      doc.setFillColor(...AMBER_BORDER); doc.rect(ML, y - 3, 3.5, blockH, "F");
+      // Bordure extérieure légère
+      doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.3); doc.rect(ML, y - 3, cw, blockH);
+      // Icône ⚖ simulée (texte)
+      doc.setFont("helvetica","bold"); doc.setFontSize(7);
+      doc.setTextColor(...AMBER_BORDER);
+      doc.text("CLAUSE CLÉE", ML + 6, y + 2);
+      y += 6;
+      doc.setFont("helvetica","normal"); doc.setFontSize(8.2); doc.setTextColor(100, 55, 0);
+      wrapped.forEach(l => { doc.text(l, ML + 7, y); y += 5; });
+      y += 6;
+      return;
+    }
+
+    lines.forEach(line => {
+      const t = line.trim();
+      if (!t) { y += 2.5; return; }
+
+      const isArticleTitle = /^ARTICLE\s+\d+\s*[-–—]/i.test(t);
+      // Un vrai sous-titre est court (« 4.1. Honoraires »). Une ligne numérotée plus longue est un
+      // paragraphe : elle doit passer à la ligne (avant, sa fin sortait de la page par la droite).
+      const isNumbered = /^\d+\.\d+\.?[\s\u00A0]/.test(t);
+      // Version 220 : une phrase numérotée courte qui finit par un point ou deux-points (« 4.1. Le montant total
+      // des honoraires est fixé à 300 € TTC. ») est un paragraphe, pas un sous-titre (elle ressemblait à un lien).
+      const isSubTitle = (isNumbered && t.length <= 60 && !/[.:;]$/.test(t)) || (/^[A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ][A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ\s·]{4,}[:.]/.test(t) && t.length < 90);
+
+      if (isArticleTitle) {
+        checkY(20);
+        y += 5;
+        // Barre bleue marine full-width avec texte blanc
+        const artLines = doc.splitTextToSize(t.toUpperCase(), cw - 10);
+        const barH = Math.max(11, artLines.length * 6 + 4);
+        doc.setFillColor(...NAVY); doc.rect(ML, y - 6, cw, barH, "F");
+        // Filet doré en bas
+        doc.setDrawColor(...GOLD); doc.setLineWidth(0.5);
+        doc.line(ML, y - 6 + barH, ML + cw, y - 6 + barH);
+        doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...WHITE);
+        artLines.forEach((l, i) => doc.text(l, ML + 5, y + i * 6));
+        y += barH - 2;
+      } else if (isSubTitle) {
+        checkY(10);
+        y += 3;
+        // Sous-titre en bleu accent avec soulignement fin
+        doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
+        doc.setTextColor(...NAVYL);
+        doc.setDrawColor(...NAVYL); doc.setLineWidth(0.25);
+        doc.splitTextToSize(t, cw).forEach((l, i) => {
+          if (i > 0) { y += 5; checkY(6); }
+          doc.text(l, ML, y);
+          doc.line(ML, y + 1.2, ML + Math.min(doc.getTextWidth(l), cw), y + 1.2);
+        });
+        y += 7;
+      } else {
+        // Corps de texte
+        const isBullet = /^[-•·▸–]/.test(t);
+        const cleanT = t.replace(/^[-•·▸–]\s*/, "");
+        const indent = isBullet ? ML + 6 : ML;
+        const textWidth = isBullet ? cw - 6 : cw;
+
+        if (isBullet) {
+          checkY(6);
+          doc.setFillColor(...NAVYL);
+          doc.circle(ML + 2.5, y - 1.2, 1, "F");
+        }
+        doc.setFont("helvetica","normal"); doc.setFontSize(8.8);
+        doc.setTextColor(...DARK);
+        const wrapped = doc.splitTextToSize(cleanT, textWidth);
+        wrapped.forEach(l => {
+          checkY(5.5);
+          doc.text(l, indent, y);
+          y += 5.2;
+        });
+      }
+    });
+    y += 3;
+  });
+
+  /* ══════════════════════════════════════════
+     BLOC SIGNATURES — STYLE NOTARIAL PREMIUM
+  ══════════════════════════════════════════ */
+  checkY(80);
+  y += 8;
+
+  // Barre titre SIGNATURES
+  doc.setFillColor(...NAVY); doc.rect(ML, y - 5, cw, 11, "F");
+  doc.setDrawColor(...GOLD); doc.setLineWidth(0.6);
+  doc.line(ML, y + 6, ML + cw, y + 6);
+  doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  doc.setTextColor(...WHITE);
+  doc.text("SIGNATURES — BON POUR ACCORD", ML + 5, y + 2.5);
+  y += 16;
+
+  doc.setFont("helvetica","normal"); doc.setFontSize(8.2);
+  doc.setTextColor(...DARK);
+  doc.text("Les soussignés déclarent avoir lu et approuvé l'intégralité des clauses du présent contrat.", ML, y);
+  doc.text("Ils s'engagent à en respecter les termes et conditions.", ML, y + 5.5);
+  y += 14;
+
+  const bw = (cw - 10) / 2;
+
+  // ── Bloc Prestataire ──
+  // Fond bleu très clair + bordure bleue
+  doc.setFillColor(...NAVYLT); doc.rect(ML, y, bw, 58, "F");
+  doc.setDrawColor(...NAVYL); doc.setLineWidth(0.5); doc.rect(ML, y, bw, 58);
+  // En-tête bloc
+  doc.setFillColor(...NAVY); doc.rect(ML, y, bw, 9, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
+  doc.text("LE PRESTATAIRE", ML + 4, y + 6.5);
+  // Badge vert : uniquement quand le prestataire a réellement signé
+  if (pFreelanceSig) {
+    doc.setFillColor(...GREEN); doc.circle(ML + bw - 10, y + 4.5, 5.5, "F");
+    doc.setDrawColor(255,255,255); doc.setLineWidth(0.8); doc.circle(ML + bw - 10, y + 4.5, 5.5);
+    drawCheck(ML + bw - 10, y + 4.5, 4.2, WHITE);
+  }
+  // Infos
+  doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+  doc.text(contractFreelanceName(pForm), ML + 4, y + 17);
+  doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
+  const actLinesS = doc.splitTextToSize(pForm.freelanceActivity, bw - 8);
+  actLinesS.forEach((l,i) => doc.text(l, ML + 4, y + 23 + i*5));
+  if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.text(`SIRET : ${pForm.freelanceSiret}`, ML + 4, y + 30); }
+  // Signature réelle si disponible, sinon ligne à remplir à la main
+  if (pFreelanceSig) {
+    try { doc.addImage(pFreelanceSig, "PNG", ML + 4, y + 33, bw - 8, 16); } catch(e) {}
+    doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
+    drawCheck(ML + 5.6, y + 54.4, 2.6, GREEN);
+    doc.text(pFreelanceSignedAt ? `Signé électroniquement le ${new Date(pFreelanceSignedAt).toLocaleDateString("fr-FR")}` : "Signé électroniquement", ML + 8.5, y + 55.5);
+  } else {
+    doc.setDrawColor(...NAVY); doc.setLineWidth(0.6);
+    doc.line(ML + 4, y + 50, ML + bw - 4, y + 50);
+    doc.setFont("helvetica","normal"); doc.setFontSize(7);
+    doc.setTextColor(...NAVYL);
+    doc.text("Lu et approuvé — Signature et date :", ML + 4, y + 38);
+    doc.setTextColor(...GREY); doc.setFontSize(6.5);
+    doc.text("(Prénom, Nom, Date, Lieu)", ML + 4, y + 55.5);
+  }
+
+  // ── Bloc Client ──
+  const cx3 = ML + bw + 10;
+  doc.setFillColor(252, 252, 250); doc.rect(cx3, y, bw, 58, "F");
+  doc.setDrawColor(...GREYLT); doc.setLineWidth(0.5); doc.rect(cx3, y, bw, 58);
+  // En-tête bloc client
+  doc.setFillColor(...DARK); doc.rect(cx3, y, bw, 9, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
+  doc.text("LE CLIENT", cx3 + 4, y + 6.5);
+  if (pClientSig) {
+    doc.setFillColor(...GREEN); doc.circle(cx3 + bw - 10, y + 4.5, 5.5, "F");
+    doc.setDrawColor(255,255,255); doc.setLineWidth(0.8); doc.circle(cx3 + bw - 10, y + 4.5, 5.5);
+    drawCheck(cx3 + bw - 10, y + 4.5, 4.2, WHITE);
+  }
+  // Infos client
+  doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...DARK);
+  doc.text(pForm.clientName, cx3 + 4, y + 17);
+  if (pForm.clientCompany) {
+    doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+    doc.text(pForm.clientCompany, cx3 + 4, y + 23);
+  }
+  doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
+  const addrSig = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", bw - 8);
+  addrSig.forEach((l,i) => doc.text(l, cx3 + 4, y + (pForm.clientCompany ? 30 : 24) + i*4.5));
+  // Signature réelle si disponible, sinon ligne à remplir à la main
+  if (pClientSig) {
+    try { doc.addImage(pClientSig, "PNG", cx3 + 4, y + 33, bw - 8, 16); } catch(e) {}
+    doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
+    const signedLabel = pSignedAt ? new Date(pSignedAt).toLocaleDateString("fr-FR") : today;
+    drawCheck(cx3 + 5.6, y + 54.4, 2.6, GREEN);
+    doc.text(`Signé électroniquement le ${signedLabel}`, cx3 + 8.5, y + 55.5);
+  } else {
+    doc.setDrawColor(...DARK); doc.setLineWidth(0.6);
+    doc.line(cx3 + 4, y + 50, cx3 + bw - 4, y + 50);
+    doc.setFont("helvetica","normal"); doc.setFontSize(7);
+    doc.setTextColor(...DARK);
+    doc.text("Lu et approuvé — Bon pour accord :", cx3 + 4, y + 38);
+    doc.setTextColor(...GREY); doc.setFontSize(6.5);
+    doc.text("(Prénom, Nom, Date, Lieu, Qualité)", cx3 + 4, y + 55.5);
+  }
+
+  y += 68;
+
+  // ── Mention renonciation au délai de rétractation (clients particuliers uniquement) ──
+  if (pForm.typeClient === "particulier") {
+    if (pRetractationWaivedAt) {
+      doc.setFillColor(...GREEN); doc.circle(ML + 2.5, y - 1.3, 2, "F");
+      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREEN);
+      doc.text(pForm.contenuNumeriquePret
+        ? `Perte du droit de rétractation acceptée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`
+        : `Démarrage avant la fin du délai de rétractation demandé le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
+    } else {
+      doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
+      doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
+      doc.text(pForm.contenuNumeriquePret
+        ? "Perte du droit de rétractation non acceptée à ce jour"
+        : "Démarrage avant la fin du délai de rétractation non demandé à ce jour", ML + 7, y);
+    }
+    y += 8;
+  }
+
+  // Mention finale
+  doc.setFont("helvetica","italic"); doc.setFontSize(7);
+  doc.setTextColor(...GREY);
+  doc.text(doc.splitTextToSize(pFreelanceSig && pClientSig
+    ? `Contrat signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie. Droit français applicable. Freeley — ${today}`
+    : `Contrat en attente de signature. Droit français applicable. Freeley — ${today}`, cw), ML, y);
+
+  // ── Annexe : information officielle sur la rétractation + formulaire (clients particuliers) ──
+  if (pForm.typeClient === "particulier") {
+    const annexTitles = ["Droit de rétractation", "Effets de rétractation", "Perte du droit de rétractation", "Modèle de formulaire de rétractation"];
+    const writeAnnex = (txt) => {
+      txt.split("\n\n").forEach(par => {
+        const isTitle = annexTitles.includes(par);
+        doc.setFont("helvetica", isTitle ? "bold" : "normal"); doc.setFontSize(isTitle ? 9 : 8); doc.setTextColor(...DARK);
+        const lines = doc.splitTextToSize(par, cw);
+        checkY(lines.length * 3.6 + 3);
+        doc.text(lines, ML, y);
+        y += lines.length * 3.6 + 3;
+      });
+    };
+    newPage();
+    doc.setFont("helvetica","bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
+    doc.text("Annexe — Informations concernant l'exercice du droit de rétractation", ML, y);
+    y += 9;
+    writeAnnex(buildRetractationNotice(pForm));
+    y += 5;
+    writeAnnex(buildRetractationForm(pForm));
+  }
+
+  /* ── Header/footer toutes les pages intérieures ── */
+  const total = doc.internal.getNumberOfPages();
+  for (let i = 2; i <= total; i++) {
+    doc.setPage(i);
+    drawHeader();
+    drawFooter(i - 1, total - 1);
+  }
+
+  return { doc, fileName: `Contrat_${safe(pForm.missionTitle)}_${safe(pForm.clientName)}.pdf` };
+}
+
+// Profil vide (nouvel appareil, déconnexion, compte sans profil)
+const emptyProfile = () => ({
+  firstName: "", lastName: "", jobTitle: "", bio: "", tjm: "",
+  siret: "", linkedin: "", portfolio: "", github: "",
+  skills: [], photo: null,
+  companyName: "", legalStatus: "", tvaNumber: "", address: "",
+  iban: "", bic: "", bankName: "", logo: null,
+  mediateur: "", assurance: "",
+});
+
 function AppInner() {
   const [step, setStep]           = useState(() => {
     const urlDraft = readUrlDraft();
@@ -2208,14 +2807,7 @@ function AppInner() {
 
   // ── Profil freelance ──
   const [profile, setProfile] = useState(() => {
-    const base = {
-      firstName: "", lastName: "", jobTitle: "", bio: "", tjm: "",
-      siret: "", linkedin: "", portfolio: "", github: "",
-      skills: [], photo: null,
-      companyName: "", legalStatus: "", tvaNumber: "", address: "",
-      iban: "", bic: "", bankName: "", logo: null,
-      mediateur: "", assurance: "",
-    };
+    const base = emptyProfile();
     try {
       const saved = localStorage.getItem("freeley_profile");
       if (saved) return { ...base, ...JSON.parse(saved) };
@@ -2223,6 +2815,12 @@ function AppInner() {
     return base;
   });
   const updateProfile = (key, val) => setProfile(p => ({ ...p, [key]: val }));
+  // Compte dont le profil a été lu dans Supabase pendant cette session. Tant que ce n'est pas le compte
+  // connecté, la sauvegarde automatique n'envoie rien en ligne (version 220) : avant, au démarrage, la copie
+  // de l'appareil (vide sur un nouvel appareil ou une autre adresse) pouvait écraser le vrai profil.
+  const [profileSyncedFor, setProfileSyncedFor] = useState(null);
+  const profileLoadSeqRef = useRef(0);          // chaque connexion ou déconnexion annule les chargements en cours
+  const skipNextProfileSaveRef = useRef(false); // le profil vient d'être lu en ligne : rien de neuf à renvoyer
   // Volontairement séparé de "profile" : géré uniquement par la connexion Stripe elle-même,
   // jamais par la sauvegarde automatique du profil (pour ne jamais risquer de l'écraser par erreur).
   const [stripeConnectAccountId, setStripeConnectAccountId] = useState(null);
@@ -2260,24 +2858,48 @@ function AppInner() {
     superPdpConnected: !!(row.super_pdp_client_id && row.super_pdp_client_secret),
   });
 
-  // Récupère le profil réel depuis Supabase (appelée depuis loadUserData à la connexion)
-  const loadProfileFromSupabase = async (userId) => {
+  // Récupère le profil réel depuis Supabase (appelée depuis loadUserData à la connexion).
+  // En cas d'échec, on réessaie : tant que le profil n'est pas lu, rien n'est envoyé en ligne.
+  const loadProfileFromSupabase = async (userId, seq, attempt = 0) => {
+    let data = null;
     try {
-      const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
-      if (error) { console.error("Erreur chargement profil:", error); return; }
-      if (data) {
-        setProfile(p => ({ ...p, ...rowToProfile(data) }));
-        setStripeConnectAccountId(data.stripe_connect_account_id || null);
-        setStripeConnectReady(!!data.stripe_connect_ready);
-      }
-    } catch(e) { console.error("Erreur chargement profil:", e); }
+      const res = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+      if (res.error) throw res.error;
+      data = res.data;
+    } catch(e) {
+      console.error("Erreur chargement profil:", e);
+      if (attempt < 4) setTimeout(() => {
+        if (seq === profileLoadSeqRef.current) loadProfileFromSupabase(userId, seq, attempt + 1);
+      }, [2000, 5000, 10000, 20000][attempt]);
+      return;
+    }
+    if (seq !== profileLoadSeqRef.current) return; // déconnexion ou autre connexion entre-temps
+    if (data) {
+      skipNextProfileSaveRef.current = true;
+      setProfile(p => ({ ...p, ...rowToProfile(data) }));
+      setStripeConnectAccountId(data.stripe_connect_account_id || null);
+      setStripeConnectReady(!!data.stripe_connect_ready);
+    } else {
+      // Pas encore de profil en ligne pour ce compte : on garde celui de l'appareil (il sera envoyé),
+      // sauf s'il appartient à un autre compte qui s'est connecté ici avant.
+      let owner = null;
+      try { owner = localStorage.getItem("freeley_profile_owner"); } catch(e) {}
+      if (owner && owner !== userId) setProfile(emptyProfile());
+    }
+    setProfileSyncedFor(userId);
   };
 
   // Sauvegarde automatique du profil : instantanée en local (cache rapide, survit au rafraîchissement),
   // et vers Supabase avec un léger délai pour ne pas envoyer une requête à chaque frappe.
   useEffect(() => {
-    try { localStorage.setItem("freeley_profile", JSON.stringify(profile)); } catch(e) {}
+    const synced = !!authUser?.id && profileSyncedFor === authUser.id;
+    try {
+      localStorage.setItem("freeley_profile", JSON.stringify(profile));
+      if (synced) localStorage.setItem("freeley_profile_owner", authUser.id);
+    } catch(e) {}
     if (!authUser?.id) return; // pas connecté : uniquement local pour l'instant
+    if (!synced) return;       // profil de ce compte pas encore lu dans Supabase : on n'écrase rien
+    if (skipNextProfileSaveRef.current) { skipNextProfileSaveRef.current = false; return; }
     const timer = setTimeout(() => {
       const row = profileToRow(profile, authUser.id);
       supabase.from("profiles").upsert(row)
@@ -2290,7 +2912,7 @@ function AppInner() {
         });
     }, 1200);
     return () => clearTimeout(timer);
-  }, [profile, authUser]);
+  }, [profile, authUser, profileSyncedFor]);
 
   // Charge la liste des NDA depuis Supabase quand on arrive sur la page "Mes NDA"
   useEffect(() => {
@@ -2377,9 +2999,12 @@ function AppInner() {
     setPremium(true);
     setPlan(null);
     setContractsUsed(0);
+    // Le profil se charge en même temps que les contrats (avant, il attendait la fin des contrats)
+    const seq = ++profileLoadSeqRef.current;
+    const profileLoad = user?.id ? loadProfileFromSupabase(user.id, seq) : null;
     const hist = await getHistory();
     setHistory(hist);
-    if (user?.id) await loadProfileFromSupabase(user.id);
+    if (profileLoad) await profileLoad;
     if (user?.id) {
       const { data, error } = await supabase.from("ndas").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
       if (error) console.error("Erreur chargement NDA (alertes):", error);
@@ -2774,559 +3399,18 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   };
 
   // ── Yousign : envoyer pour signature ──
+  // Téléchargement du PDF du contrat par le freelance (le PDF est construit par buildContractPdfDoc)
   const downloadPDF = (overrideForm, overrideContract, overrideFreelanceSig, overrideClientSig, overrideSignedAt, overrideRetractationWaivedAt, overrideExtra) => {
-    const rawForm = overrideForm || form;
-    const pContract = normalizeContractText(overrideContract || contract);
-    // Si le formulaire n'a pas gardé le statut juridique, on suit le texte du contrat (« Nom EI »)
-    const pForm = resolveLegalStatus({
-      freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "", freelancePhone: "",
-      freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
-      clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
-      endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
-      acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true, clauseInterlocuteur: true, clausePreavis: true, preavisJours: "30",
-      ...rawForm,
-    }, pContract);
-    const pFreelanceSig = overrideFreelanceSig || null;
-    const pClientSig = overrideClientSig || null;
-    const pSignedAt = overrideSignedAt || null;
-    const pRetractationWaivedAt = overrideRetractationWaivedAt || null;
-    // Date de signature du freelance, et lieu de signature déclaré (signature en présence d'un particulier)
-    const pExtra = overrideExtra || {};
-    const pFreelanceSignedAt = pExtra.signedByFreelanceAt || null;
-    const pPayFrom = pForm.typeClient === "particulier" && pExtra.signatureLocation === "hors_etablissement" && pSignedAt
-      ? paymentAllowedFrom(pSignedAt) : null;
     if (!jsPDFReady || !window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!overrideForm) setPdfLoad(true);
     try {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: "mm", format: "a4" });
-      doc.setProperties({ title: `Contrat — ${pForm.missionTitle || "Mission"}`, creator: `Freeley ${APP_VERSION}` });
-      const PW = 210, PH = 297;
-      const ML = 22, MR = 22, cw = PW - ML - MR;
-      const HEADER_H = 16, FOOTER_H = 14, BODY_TOP = HEADER_H + 8, BODY_BOT = PH - FOOTER_H - 6;
-
-      // ── Palette document premium ──
-      const NAVY   = [26, 54, 93];    // #1a365d
-      const NAVYL  = [43, 108, 176];  // #2b6cb0
-      const NAVYLT = [235, 241, 250]; // fond bleu très clair
-      const DARK   = [44, 62, 80];    // #2c3e50
-      const GOLD   = [180, 140, 70];
-      const AMBER  = [255, 248, 230]; // fond encadré clause
-      const AMBER_BORDER = [214, 132, 49]; // bordure orange
-      const WHITE  = [255, 255, 255];
-      const GREY   = [140, 140, 140];
-      const GREYLT = [220, 220, 220];
-      const GREEN  = [39, 119, 63];   // badge scellé
-
-      const safe = s => (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9]+/g,"_").substring(0,25).replace(/^_+|_+$/g,"");
-      // Les polices standard de jsPDF n'ont pas le caractère ✓ (il s'affichait comme un point) :
-      // la coche est dessinée avec deux traits.
-      const drawCheck = (x, y, size, color) => {
-        doc.setDrawColor(...color); doc.setLineWidth(Math.max(0.35, size * 0.16));
-        doc.line(x - size * 0.42, y, x - size * 0.1, y + size * 0.32);
-        doc.line(x - size * 0.1, y + size * 0.32, x + size * 0.45, y - size * 0.38);
-      };
-      const pricing = contractPricing(pForm, profile);
-      const contractNumber = (String(pContract || "").match(/CP-\d{4}-\d{4}/) || [])[0] || "";
-      const d1 = pForm.startDate ? new Date(pForm.startDate).toLocaleDateString("fr-FR") : "Non défini";
-      const d2 = pForm.endDate   ? new Date(pForm.endDate).toLocaleDateString("fr-FR")   : "Non défini";
-      const today = new Date().toLocaleDateString("fr-FR");
-      // Date du contrat : celle écrite en tête du contrat, pas le jour où l'on télécharge le PDF
-      const contractDate = (String(pContract || "").slice(0, 900).match(/\d{1,2}(?:er)? (?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre) \d{4}/i) || [])[0] || today;
-      const payFromLabel = pPayFrom ? new Date(pPayFrom).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) : null;
-
-      /* ── HEADER (pages intérieures) ── */
-      const drawHeader = () => {
-        // Bande bleue marine fine en haut
-        doc.setFillColor(...NAVY);
-        doc.rect(0, 0, PW, HEADER_H, "F");
-        // Filet doré sous la bande
-        doc.setDrawColor(...GOLD); doc.setLineWidth(0.5);
-        doc.line(0, HEADER_H, PW, HEADER_H);
-        // Titre gauche
-        doc.setFont("helvetica","bold"); doc.setFontSize(7.5);
-        doc.setTextColor(...WHITE);
-        doc.text("CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", ML, 10.5);
-        // Marque droite
-        doc.setFont("helvetica","normal"); doc.setFontSize(7);
-        doc.setTextColor(180, 200, 230);
-        doc.text("Freeley", PW - MR, 10.5, { align:"right" });
-      };
-
-      /* ── FOOTER ── */
-      const drawFooter = (pageNum, total) => {
-        doc.setDrawColor(...GREYLT); doc.setLineWidth(0.3);
-        doc.line(ML, PH - FOOTER_H + 1, PW - MR, PH - FOOTER_H + 1);
-        doc.setFont("helvetica","italic"); doc.setFontSize(6.5);
-        doc.setTextColor(...GREY);
-        // Pas de « document indicatif » sur un contrat signé : le client pourrait croire qu'il ne l'engage pas
-        doc.text(`${contractNumber ? `Contrat ${contractNumber} — ` : ""}Document généré via Freeley le ${today}`, ML, PH - FOOTER_H + 6);
-        doc.setFont("helvetica","bold"); doc.setFontSize(7);
-        doc.setTextColor(...NAVYL);
-        doc.text(`Page ${pageNum} / ${total}`, PW - MR, PH - FOOTER_H + 6, { align:"right" });
-      };
-
-      /* ══════════════════════════════════════════
-         PAGE DE GARDE — STYLE PREMIUM
-      ══════════════════════════════════════════ */
-
-      // Fond blanc pur
-      doc.setFillColor(...WHITE); doc.rect(0, 0, PW, PH, "F");
-
-      // Bande bleue marine haute (40 mm)
-      doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 46, "F");
-
-      // Filet doré sous la bande
-      doc.setDrawColor(...GOLD); doc.setLineWidth(1.2);
-      doc.line(0, 46, PW, 46);
-
-      // Liseré latéral gauche bleu accent (toute la page)
-      doc.setFillColor(...NAVYL);
-      doc.rect(0, 0, 5, PH, "F");
-
-      // Marque Freeley (dans la bande)
-      doc.setFont("helvetica","bold"); doc.setFontSize(8);
-      doc.setTextColor(160, 190, 230);
-      doc.text("FREELEY", ML + 2, 14, { charSpace: 2 });
-      // Séparateur doré fin
-      doc.setDrawColor(...GOLD); doc.setLineWidth(0.3);
-      doc.line(ML + 2, 16.5, ML + 42, 16.5);
-
-      // Titre principal (dans la bande)
-      doc.setFont("helvetica","bold"); doc.setFontSize(22);
-      doc.setTextColor(...WHITE);
-      doc.text("CONTRAT DE PRESTATION", ML + 2, 29);
-      doc.setFontSize(16);
-      doc.setTextColor(180, 210, 240);
-      doc.text("DE SERVICES INDÉPENDANT", ML + 2, 38.5);
-
-      // Numéro de contrat (coin droit de la bande)
-      doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
-      doc.setTextColor(160, 190, 230);
-      if (contractNumber) {
-        doc.text("Réf. document", PW - MR, 20, { align:"right" });
-        doc.setFont("helvetica","bold"); doc.setFontSize(9);
-        doc.setTextColor(...WHITE);
-        doc.text(contractNumber, PW - MR, 28, { align:"right" });
-      }
-      doc.setFont("helvetica","normal"); doc.setFontSize(7);
-      doc.setTextColor(180, 210, 240);
-      doc.text(`Fait le ${contractDate}`, PW - MR, 35, { align:"right" });
-
-      // ── Bloc titre mission (sous la bande) ──
-      let cy = 58;
-      doc.setFont("helvetica","bold"); doc.setFontSize(7);
-      doc.setTextColor(...NAVYL);
-      doc.text("OBJET DE LA MISSION", ML + 2, cy);
-      cy += 4;
-      doc.setDrawColor(...NAVYL); doc.setLineWidth(0.4);
-      doc.line(ML + 2, cy, PW - MR, cy);
-      cy += 5;
-      doc.setFont("helvetica","bold"); doc.setFontSize(14);
-      doc.setTextColor(...NAVY);
-      const missionLines = doc.splitTextToSize((pForm.missionTitle || "Mission").toUpperCase(), cw - 4);
-      missionLines.forEach(l => { doc.text(l, ML + 2, cy); cy += 9; });
-      cy += 3;
-
-      // ── Blocs Parties (fond bleu très clair) ──
-      const blockW = (cw - 6) / 2;
-
-      // Prestataire
-      doc.setFillColor(...NAVYLT); doc.rect(ML, cy, blockW, 56, "F");
-      doc.setDrawColor(...NAVYL); doc.setLineWidth(0.3); doc.rect(ML, cy, blockW, 56);
-      // En-tête bloc
-      doc.setFillColor(...NAVY); doc.rect(ML, cy, blockW, 9, "F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
-      doc.text("PRESTATAIRE", ML + 4, cy + 6.5);
-      // Contenu
-      doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...NAVY);
-      doc.text(contractFreelanceName(pForm), ML + 4, cy + 17);
-      doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
-      const actLines = doc.splitTextToSize(pForm.freelanceActivity, blockW - 8);
-      actLines.forEach((l,i) => doc.text(l, ML + 4, cy + 24 + i*5));
-      let offAct = cy + 24 + actLines.length * 5 + 2;
-      if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.setFontSize(7.5); doc.text(`SIRET : ${pForm.freelanceSiret}`, ML + 4, offAct); offAct += 5; }
-      doc.setFontSize(7.5); doc.setTextColor(...DARK);
-      const addrLines1 = doc.splitTextToSize(pForm.freelanceAddress, blockW - 8);
-      addrLines1.forEach((l,i) => doc.text(l, ML + 4, offAct + i*4.5));
-      if (pForm.freelanceEmail) { doc.setTextColor(...NAVYL); doc.text(pForm.freelanceEmail, ML + 4, offAct + addrLines1.length*4.5 + 2); }
-
-      // Client
-      const cx2 = ML + blockW + 6;
-      doc.setFillColor(...NAVYLT); doc.rect(cx2, cy, blockW, 56, "F");
-      doc.setDrawColor(...NAVYL); doc.setLineWidth(0.3); doc.rect(cx2, cy, blockW, 56);
-      doc.setFillColor(...NAVY); doc.rect(cx2, cy, blockW, 9, "F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
-      doc.text("CLIENT", cx2 + 4, cy + 6.5);
-      doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...NAVY);
-      doc.text(pForm.clientName, cx2 + 4, cy + 17);
-      doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
-      if (pForm.clientCompany) { doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.text(pForm.clientCompany, cx2 + 4, cy + 24); }
-      doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
-      const addrLines2 = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", blockW - 8);
-      addrLines2.forEach((l,i) => doc.text(l, cx2 + 4, cy + (pForm.clientCompany ? 31 : 24) + i*4.5));
-      if (pForm.clientEmail) { doc.setTextColor(...NAVYL); const emailOffY = cy + (pForm.clientCompany ? 31 : 24) + addrLines2.length*4.5 + 2; doc.text(pForm.clientEmail, cx2 + 4, emailOffY); }
-
-      cy += 64;
-
-      // ── Tableau récapitulatif des conditions (style premium) ──
-      doc.setFont("helvetica","bold"); doc.setFontSize(7);
-      doc.setTextColor(...NAVYL);
-      doc.text("RÉCAPITULATIF DES CONDITIONS FINANCIÈRES ET OPÉRATIONNELLES", ML, cy);
-      cy += 3;
-
-      const acomptePctPdf = Number(pForm.acomptePourcentage) || 0;
-      // jsPDF (police standard) n'affiche pas correctement l'espace fine utilisée par défaut par toLocaleString("fr-FR") — on la remplace par un espace normal
-      const frMoney = (n) => Number(n).toLocaleString("fr-FR").replace(/[\u202F\u00A0]/g, " ");
-      const tableRows = [
-        ["Mission",          pForm.missionTitle],
-        ["Période",          `Du ${d1} au ${d2}`],
-        [`Honoraires ${pricing.unit}`, `${fmtEuro(pricing.total)} €`],
-      ];
-      if (pricing.b2c) tableRows.push(["TVA", pricing.tvaApplicable ? `Incluse : ${fmtEuro(pricing.total - pricing.ht)} € (20 %)` : "Non applicable — art. 293 B du CGI"]);
-      else tableRows.push(["TVA", pricing.tvaApplicable ? "En sus, au taux en vigueur" : "Non applicable — art. 293 B du CGI"]);
-      // Signé hors établissement avec un particulier : rien ne se paie avant le 8e jour (art. L221-10 C. conso)
-      if (acomptePctPdf > 0) {
-        tableRows.push([`Acompte (${acomptePctPdf} %)`, payFromLabel ? `${fmtEuro(pricing.acompte)} € — payable à partir du ${payFromLabel} (délai légal de 7 jours)` : `${fmtEuro(pricing.acompte)} € — dû à la signature`]);
-        tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${fmtEuro(pricing.solde)} € — dû à la livraison`]);
-      }
-      // Avec un acompte, « Comptant » veut dire : solde payé dès réception de sa facture (jamais « à la commande »)
-      tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant"
-        ? (acomptePctPdf > 0 ? "Solde dès réception de la facture" : (payFromLabel ? `Comptant, payable à partir du ${payFromLabel} (délai légal de 7 jours)` : "Comptant à la commande"))
-        : `${pForm.paymentTerms} jours nets`]);
-      tableRows.push(["Révisions incluses", `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
-      if (pricing.b2c) tableRows.push(["Intérêts de retard", pForm.latePaymentPenalty ? "Oui — Taux d'intérêt légal, après mise en demeure" : "Non stipulés"]);
-      else tableRows.push(["Pénalités de retard", pForm.latePaymentPenalty ? "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)" : "Non stipulées"]);
-
-
-      // En-tête tableau bleu
-      doc.setFillColor(...NAVY); doc.rect(ML, cy, cw, 8, "F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
-      doc.text("DÉSIGNATION", ML + 4, cy + 5.5);
-      doc.text("DÉTAIL", ML + 60, cy + 5.5);
-      cy += 8;
-
-      tableRows.forEach((row, ri) => {
-        const isTotal = row[0].startsWith("Honoraires");
-        const bg = isTotal ? NAVYLT : (ri % 2 === 0 ? [252,252,252] : WHITE);
-        doc.setFillColor(...bg); doc.rect(ML, cy, cw, 8, "F");
-        doc.setDrawColor(...GREYLT); doc.setLineWidth(0.15); doc.rect(ML, cy, cw, 8);
-        // Séparateur colonne
-        doc.setDrawColor(...GREYLT); doc.line(ML + 56, cy, ML + 56, cy + 8);
-        // Label
-        const labelColor = isTotal ? NAVY : [80,80,80];
-        const labelWeight = isTotal ? "bold" : "bold";
-        doc.setFont("helvetica", labelWeight); doc.setFontSize(isTotal ? 8 : 7.5);
-        doc.setTextColor(...labelColor);
-        doc.text(row[0], ML + 4, cy + 5.5);
-        // Valeur
-        const valColor = isTotal ? NAVY : DARK;
-        doc.setFont("helvetica", isTotal ? "bold" : "normal"); doc.setFontSize(isTotal ? 8.5 : 7.5);
-        doc.setTextColor(...valColor);
-        const valLines = doc.splitTextToSize(String(row[1]), cw - 62);
-        valLines.forEach((vl, vi) => {
-          if (vi > 0) { cy += 5; doc.setFillColor(...bg); doc.rect(ML, cy, cw, 5, "F"); }
-          doc.text(vl, ML + 60, cy + 5.5);
-        });
-        cy += 8;
+      const { doc, fileName } = buildContractPdfDoc({
+        form: overrideForm || form, contract: overrideContract || contract,
+        freelanceSignature: overrideFreelanceSig, clientSignature: overrideClientSig,
+        signedAt: overrideSignedAt, retractationWaivedAt: overrideRetractationWaivedAt,
+        extra: overrideExtra, profile,
       });
-
-      // Ligne TOTAL grasse
-      doc.setFillColor(...NAVY); doc.rect(ML, cy, cw, 10, "F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...WHITE);
-      doc.text(`TOTAL ${pricing.unit}`, ML + 4, cy + 7);
-      doc.text(`${fmtEuro(pricing.total)} €`, PW - MR - 4, cy + 7, { align:"right" });
-      cy += 14;
-
-      // Note de bas de page de garde
-      doc.setFont("helvetica","italic"); doc.setFontSize(6.8);
-      doc.setTextColor(...GREY);
-      // Ce que dit l'article 6 du métier : cession (création, digital), licence (conseil), rien (artisanat)
-      const piNote = pForm.categorieMetier === "artisanat" ? ""
-        : pForm.categorieMetier === "conseil" ? "Les livrables font l'objet d'une licence d'utilisation, accordée après le paiement intégral des honoraires."
-        : (pForm.contenuNumeriquePret && pForm.typeClient === "particulier") ? "Le contenu fourni fait l'objet d'une licence d'utilisation, accordée après le paiement intégral des honoraires."
-        : "Les droits de propriété intellectuelle sont cédés sous condition suspensive du paiement intégral des honoraires.";
-      if (piNote) { doc.text(piNote, ML, cy); cy += 5; }
-      doc.text("Contrat soumis au droit français. Généré par Freeley. À faire relire pour toute mission sensible.", ML, cy);
-
-      /* ══════════════════════════════════════════
-         PAGES DE CONTENU DU CONTRAT
-      ══════════════════════════════════════════ */
-      doc.addPage();
-      let y = BODY_TOP + 6;
-
-      const newPage = () => {
-        doc.addPage();
-        y = BODY_TOP + 6;
-      };
-
-      const checkY = (need = 8) => {
-        if (y + need > BODY_BOT) newPage();
-      };
-
-      // Détection clause pénalités (encadré ambre)
-      const isPenaltyClause = (text) =>
-        /40\s*€|pénalités?\s+de\s+retard|L441-10|L441-11|indemnité\s+forfaitaire|taux\s+directeur|banque\s+centrale/i.test(text);
-
-      const isPIClause = (text) =>
-        /cession.*subordonn|droits.*propriété.*intellectuelle.*paiement|contrefaçon|L335-2|L111-1|L122-1|L131-1/i.test(text);
-
-      const isMoyensClause = (text) =>
-        /obligation\s+de\s+moyens|responsabilité.*plafonnée|faute\s+prouvée|préjudice\s+indirect/i.test(text);
-
-      // Parse contrat
-      const paragraphs = pContract.split(/\n{2,}/);
-      paragraphs.forEach(para => {
-        if (!para.trim()) return;
-        const lines = para.split("\n");
-
-        // Détection de bloc spécial (encadré ambre)
-        const fullPara = para.trim();
-        const isLegalCallout = isPenaltyClause(fullPara) || isPIClause(fullPara) || isMoyensClause(fullPara);
-
-        // Si c'est un bloc spécial, on wrappe tout le paragraphe dans l'encadré
-        if (isLegalCallout && lines.length >= 2 && !(/^ARTICLE\s+\d+\s*[-–—]/i.test(fullPara.split("\n")[0]))) {
-          const allText = lines.map(l => l.trim()).filter(Boolean).join(" ");
-          const wrapped = doc.splitTextToSize(allText, cw - 14);
-          const blockH = wrapped.length * 5 + 10;
-          checkY(blockH + 4);
-          y += 2;
-          // Fond ambre
-          doc.setFillColor(...AMBER); doc.rect(ML, y - 3, cw, blockH, "F");
-          // Bordure gauche orange
-          doc.setFillColor(...AMBER_BORDER); doc.rect(ML, y - 3, 3.5, blockH, "F");
-          // Bordure extérieure légère
-          doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.3); doc.rect(ML, y - 3, cw, blockH);
-          // Icône ⚖ simulée (texte)
-          doc.setFont("helvetica","bold"); doc.setFontSize(7);
-          doc.setTextColor(...AMBER_BORDER);
-          doc.text("CLAUSE CLÉE", ML + 6, y + 2);
-          y += 6;
-          doc.setFont("helvetica","normal"); doc.setFontSize(8.2); doc.setTextColor(100, 55, 0);
-          wrapped.forEach(l => { doc.text(l, ML + 7, y); y += 5; });
-          y += 6;
-          return;
-        }
-
-        lines.forEach(line => {
-          const t = line.trim();
-          if (!t) { y += 2.5; return; }
-
-          const isArticleTitle = /^ARTICLE\s+\d+\s*[-–—]/i.test(t);
-          // Un vrai sous-titre est court (« 4.1. Honoraires »). Une ligne numérotée plus longue est un
-          // paragraphe : elle doit passer à la ligne (avant, sa fin sortait de la page par la droite).
-          const isNumbered = /^\d+\.\d+\.?[\s\u00A0]/.test(t);
-          const isSubTitle = (isNumbered && t.length <= 60) || (/^[A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ][A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ\s·]{4,}[:.]/.test(t) && t.length < 90);
-
-          if (isArticleTitle) {
-            checkY(20);
-            y += 5;
-            // Barre bleue marine full-width avec texte blanc
-            const artLines = doc.splitTextToSize(t.toUpperCase(), cw - 10);
-            const barH = Math.max(11, artLines.length * 6 + 4);
-            doc.setFillColor(...NAVY); doc.rect(ML, y - 6, cw, barH, "F");
-            // Filet doré en bas
-            doc.setDrawColor(...GOLD); doc.setLineWidth(0.5);
-            doc.line(ML, y - 6 + barH, ML + cw, y - 6 + barH);
-            doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...WHITE);
-            artLines.forEach((l, i) => doc.text(l, ML + 5, y + i * 6));
-            y += barH - 2;
-          } else if (isSubTitle) {
-            checkY(10);
-            y += 3;
-            // Sous-titre en bleu accent avec soulignement fin
-            doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
-            doc.setTextColor(...NAVYL);
-            doc.setDrawColor(...NAVYL); doc.setLineWidth(0.25);
-            doc.splitTextToSize(t, cw).forEach((l, i) => {
-              if (i > 0) { y += 5; checkY(6); }
-              doc.text(l, ML, y);
-              doc.line(ML, y + 1.2, ML + Math.min(doc.getTextWidth(l), cw), y + 1.2);
-            });
-            y += 7;
-          } else {
-            // Corps de texte
-            const isBullet = /^[-•·▸–]/.test(t);
-            const cleanT = t.replace(/^[-•·▸–]\s*/, "");
-            const indent = isBullet ? ML + 6 : ML;
-            const textWidth = isBullet ? cw - 6 : cw;
-
-            if (isBullet) {
-              checkY(6);
-              doc.setFillColor(...NAVYL);
-              doc.circle(ML + 2.5, y - 1.2, 1, "F");
-            }
-            doc.setFont("helvetica","normal"); doc.setFontSize(8.8);
-            doc.setTextColor(...DARK);
-            const wrapped = doc.splitTextToSize(cleanT, textWidth);
-            wrapped.forEach(l => {
-              checkY(5.5);
-              doc.text(l, indent, y);
-              y += 5.2;
-            });
-          }
-        });
-        y += 3;
-      });
-
-      /* ══════════════════════════════════════════
-         BLOC SIGNATURES — STYLE NOTARIAL PREMIUM
-      ══════════════════════════════════════════ */
-      checkY(80);
-      y += 8;
-
-      // Barre titre SIGNATURES
-      doc.setFillColor(...NAVY); doc.rect(ML, y - 5, cw, 11, "F");
-      doc.setDrawColor(...GOLD); doc.setLineWidth(0.6);
-      doc.line(ML, y + 6, ML + cw, y + 6);
-      doc.setFont("helvetica","bold"); doc.setFontSize(9);
-      doc.setTextColor(...WHITE);
-      doc.text("SIGNATURES — BON POUR ACCORD", ML + 5, y + 2.5);
-      y += 16;
-
-      doc.setFont("helvetica","normal"); doc.setFontSize(8.2);
-      doc.setTextColor(...DARK);
-      doc.text("Les soussignés déclarent avoir lu et approuvé l'intégralité des clauses du présent contrat.", ML, y);
-      doc.text("Ils s'engagent à en respecter les termes et conditions.", ML, y + 5.5);
-      y += 14;
-
-      const bw = (cw - 10) / 2;
-
-      // ── Bloc Prestataire ──
-      // Fond bleu très clair + bordure bleue
-      doc.setFillColor(...NAVYLT); doc.rect(ML, y, bw, 58, "F");
-      doc.setDrawColor(...NAVYL); doc.setLineWidth(0.5); doc.rect(ML, y, bw, 58);
-      // En-tête bloc
-      doc.setFillColor(...NAVY); doc.rect(ML, y, bw, 9, "F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
-      doc.text("LE PRESTATAIRE", ML + 4, y + 6.5);
-      // Badge vert : uniquement quand le prestataire a réellement signé
-      if (pFreelanceSig) {
-        doc.setFillColor(...GREEN); doc.circle(ML + bw - 10, y + 4.5, 5.5, "F");
-        doc.setDrawColor(255,255,255); doc.setLineWidth(0.8); doc.circle(ML + bw - 10, y + 4.5, 5.5);
-        drawCheck(ML + bw - 10, y + 4.5, 4.2, WHITE);
-      }
-      // Infos
-      doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-      doc.text(contractFreelanceName(pForm), ML + 4, y + 17);
-      doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
-      const actLinesS = doc.splitTextToSize(pForm.freelanceActivity, bw - 8);
-      actLinesS.forEach((l,i) => doc.text(l, ML + 4, y + 23 + i*5));
-      if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.text(`SIRET : ${pForm.freelanceSiret}`, ML + 4, y + 30); }
-      // Signature réelle si disponible, sinon ligne à remplir à la main
-      if (pFreelanceSig) {
-        try { doc.addImage(pFreelanceSig, "PNG", ML + 4, y + 33, bw - 8, 16); } catch(e) {}
-        doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
-        drawCheck(ML + 5.6, y + 54.4, 2.6, GREEN);
-        doc.text(pFreelanceSignedAt ? `Signé électroniquement le ${new Date(pFreelanceSignedAt).toLocaleDateString("fr-FR")}` : "Signé électroniquement", ML + 8.5, y + 55.5);
-      } else {
-        doc.setDrawColor(...NAVY); doc.setLineWidth(0.6);
-        doc.line(ML + 4, y + 50, ML + bw - 4, y + 50);
-        doc.setFont("helvetica","normal"); doc.setFontSize(7);
-        doc.setTextColor(...NAVYL);
-        doc.text("Lu et approuvé — Signature et date :", ML + 4, y + 38);
-        doc.setTextColor(...GREY); doc.setFontSize(6.5);
-        doc.text("(Prénom, Nom, Date, Lieu)", ML + 4, y + 55.5);
-      }
-
-      // ── Bloc Client ──
-      const cx3 = ML + bw + 10;
-      doc.setFillColor(252, 252, 250); doc.rect(cx3, y, bw, 58, "F");
-      doc.setDrawColor(...GREYLT); doc.setLineWidth(0.5); doc.rect(cx3, y, bw, 58);
-      // En-tête bloc client
-      doc.setFillColor(...DARK); doc.rect(cx3, y, bw, 9, "F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...WHITE);
-      doc.text("LE CLIENT", cx3 + 4, y + 6.5);
-      if (pClientSig) {
-        doc.setFillColor(...GREEN); doc.circle(cx3 + bw - 10, y + 4.5, 5.5, "F");
-        doc.setDrawColor(255,255,255); doc.setLineWidth(0.8); doc.circle(cx3 + bw - 10, y + 4.5, 5.5);
-        drawCheck(cx3 + bw - 10, y + 4.5, 4.2, WHITE);
-      }
-      // Infos client
-      doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...DARK);
-      doc.text(pForm.clientName, cx3 + 4, y + 17);
-      if (pForm.clientCompany) {
-        doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
-        doc.text(pForm.clientCompany, cx3 + 4, y + 23);
-      }
-      doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
-      const addrSig = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", bw - 8);
-      addrSig.forEach((l,i) => doc.text(l, cx3 + 4, y + (pForm.clientCompany ? 30 : 24) + i*4.5));
-      // Signature réelle si disponible, sinon ligne à remplir à la main
-      if (pClientSig) {
-        try { doc.addImage(pClientSig, "PNG", cx3 + 4, y + 33, bw - 8, 16); } catch(e) {}
-        doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
-        const signedLabel = pSignedAt ? new Date(pSignedAt).toLocaleDateString("fr-FR") : today;
-        drawCheck(cx3 + 5.6, y + 54.4, 2.6, GREEN);
-        doc.text(`Signé électroniquement le ${signedLabel}`, cx3 + 8.5, y + 55.5);
-      } else {
-        doc.setDrawColor(...DARK); doc.setLineWidth(0.6);
-        doc.line(cx3 + 4, y + 50, cx3 + bw - 4, y + 50);
-        doc.setFont("helvetica","normal"); doc.setFontSize(7);
-        doc.setTextColor(...DARK);
-        doc.text("Lu et approuvé — Bon pour accord :", cx3 + 4, y + 38);
-        doc.setTextColor(...GREY); doc.setFontSize(6.5);
-        doc.text("(Prénom, Nom, Date, Lieu, Qualité)", cx3 + 4, y + 55.5);
-      }
-
-      y += 68;
-
-      // ── Mention renonciation au délai de rétractation (clients particuliers uniquement) ──
-      if (pForm.typeClient === "particulier") {
-        if (pRetractationWaivedAt) {
-          doc.setFillColor(...GREEN); doc.circle(ML + 2.5, y - 1.3, 2, "F");
-          doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREEN);
-          doc.text(pForm.contenuNumeriquePret
-            ? `Perte du droit de rétractation acceptée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`
-            : `Démarrage avant la fin du délai de rétractation demandé le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
-        } else {
-          doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
-          doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
-          doc.text(pForm.contenuNumeriquePret
-            ? "Perte du droit de rétractation non acceptée à ce jour"
-            : "Démarrage avant la fin du délai de rétractation non demandé à ce jour", ML + 7, y);
-        }
-        y += 8;
-      }
-
-      // Mention finale
-      doc.setFont("helvetica","italic"); doc.setFontSize(7);
-      doc.setTextColor(...GREY);
-      doc.text(doc.splitTextToSize(pFreelanceSig && pClientSig
-        ? `Contrat signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie. Droit français applicable. Freeley — ${today}`
-        : `Contrat en attente de signature. Droit français applicable. Freeley — ${today}`, cw), ML, y);
-
-      // ── Annexe : information officielle sur la rétractation + formulaire (clients particuliers) ──
-      if (pForm.typeClient === "particulier") {
-        const annexTitles = ["Droit de rétractation", "Effets de rétractation", "Perte du droit de rétractation", "Modèle de formulaire de rétractation"];
-        const writeAnnex = (txt) => {
-          txt.split("\n\n").forEach(par => {
-            const isTitle = annexTitles.includes(par);
-            doc.setFont("helvetica", isTitle ? "bold" : "normal"); doc.setFontSize(isTitle ? 9 : 8); doc.setTextColor(...DARK);
-            const lines = doc.splitTextToSize(par, cw);
-            checkY(lines.length * 3.6 + 3);
-            doc.text(lines, ML, y);
-            y += lines.length * 3.6 + 3;
-          });
-        };
-        newPage();
-        doc.setFont("helvetica","bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
-        doc.text("Annexe — Informations concernant l'exercice du droit de rétractation", ML, y);
-        y += 9;
-        writeAnnex(buildRetractationNotice(pForm));
-        y += 5;
-        writeAnnex(buildRetractationForm(pForm));
-      }
-
-      /* ── Header/footer toutes les pages intérieures ── */
-      const total = doc.internal.getNumberOfPages();
-      for (let i = 2; i <= total; i++) {
-        doc.setPage(i);
-        drawHeader();
-        drawFooter(i - 1, total - 1);
-      }
-
-      doc.save(`Contrat_${safe(pForm.missionTitle)}_${safe(pForm.clientName)}.pdf`);
+      doc.save(fileName);
     } catch(err) { console.error(err); alert("Erreur PDF : " + (err.message || "inconnue") + " — Utilise le bouton Copier en attendant."); }
     if (!overrideForm) setPdfLoad(false);
   };
@@ -3476,15 +3560,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     // Efface le profil et son cache local — sinon le profil de cette session reste affiché
     // (et pourrait même être ré-enregistré par erreur) sur le compte de la prochaine personne
     // qui se connecte sur ce même appareil.
-    setProfile({
-      firstName: "", lastName: "", jobTitle: "", bio: "", tjm: "",
-      siret: "", linkedin: "", portfolio: "", github: "",
-      skills: [], photo: null,
-      companyName: "", legalStatus: "", tvaNumber: "", address: "",
-      iban: "", bic: "", bankName: "", logo: null,
-      mediateur: "", assurance: "",
-    });
-    try { localStorage.removeItem("freeley_profile"); } catch(e) {}
+    profileLoadSeqRef.current++;
+    setProfileSyncedFor(null);
+    setProfile(emptyProfile());
+    try { localStorage.removeItem("freeley_profile"); localStorage.removeItem("freeley_profile_owner"); } catch(e) {}
   };
 
   /* ── Attente session ── */
@@ -11103,9 +11182,10 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 )}
               </div>
             )}
-            {/* Copier lien paiement */}
+            {/* Copier lien paiement — sans Stripe, on le dit tout de suite, avant la fenêtre des 7 jours
+                (version 220 : sinon la réponse « sous ta responsabilité » était enregistrée pour rien) */}
             <button
-              onClick={early.guard("lien-carte", handleCopyLink)}
+              onClick={stripeConnectReady ? early.guard("lien-carte", handleCopyLink) : handleCopyLink}
               disabled={linkGenerating}
               style={{
                 flex: 1, minWidth: 200,
@@ -11132,9 +11212,9 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               )}
             </button>
 
-            {/* Relancer le client */}
+            {/* Relancer le client (la relance demande aussi Stripe : même ordre de vérification) */}
             <button
-              onClick={early.guard("relance", handleRelance)}
+              onClick={stripeConnectReady ? early.guard("relance", handleRelance) : handleRelance}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -14767,6 +14847,12 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const paymentNotBefore = isParticulier && signLocation === "hors_etablissement" ? paymentAllowedFrom(new Date().toISOString()) : null;
   const paymentEarly = !!paymentNotBefore;
   const early = useEarlyPaymentGuard({ contractId, payNotBefore: paymentNotBefore, active: paymentEarly, savedAck: null });
+  // Démarrage prévu au contrat avant le premier jour possible : rappelé au choix du lieu ET sur l'écran final
+  const startPlanned = form.startDate ? new Date(form.startDate).getTime() : null;
+  const startsBeforePayment = !!(startPlanned && paymentNotBefore && !payAfterDelivery && startPlanned < new Date(paymentNotBefore).getTime());
+  const contractPostponesStart = /le démarrage est reporté au jour du versement/.test(contractText || "");
+  const retractLastDay = isParticulier ? retractationLastDay(new Date().toISOString()) : null;
+  const startsBeforeRetractationEnd = !!(startPlanned && retractLastDay && startPlanned <= retractLastDay.getTime());
   const canValidateFreelance = freelanceHasStrokes && (!isParticulier || !!signLocation);
   // Moyens de paiement réellement disponibles : on ne parle pas d'IBAN s'il manque, ni de carte sans Stripe
   const hasIban = !!String(profile?.iban || "").trim();
@@ -15008,7 +15094,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 </span>
               </div>
               <div style={{ fontFamily:T.body, fontSize:12, color:C.white, fontWeight:600 }}>Prestataire (toi)</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#6A8AB0", marginTop:2 }}>{form.freelanceName || "Toi"}</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#6A8AB0", marginTop:2 }}>{contractFreelanceName(resolveLegalStatus(form, contractText)) || "Toi"}</div>
             </div>
 
             {/* Arrow */}
@@ -15066,10 +15152,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     </label>
                   ))}
                   {/* Dates de la mission incompatibles avec les 7 jours sans paiement */}
-                  {signLocation === "hors_etablissement" && !payAfterDelivery && form.startDate && paymentNotBefore && new Date(form.startDate).getTime() < new Date(paymentNotBefore).getTime() && (
+                  {startsBeforePayment && (
                     <div style={{ marginTop:4, padding:"10px 12px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:10, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
                       📅 <strong>Attention aux dates.</strong> La mission doit démarrer le {frDate(form.startDate)}. Avec une signature chez le client, {isComptant ? "le paiement" : "l'acompte"} ne pourra être demandé qu'à partir du {frDate(paymentNotBefore)}. Comme ce paiement conditionne le démarrage, la mission ne pourra pas commencer avant.{" "}
-                      {/le démarrage est reporté au jour du versement/.test(contractText || "")
+                      {contractPostponesStart
                         ? "Le contrat le prévoit : le démarrage est reporté au jour du paiement, et la date de fin est décalée d'autant. Préviens ton client."
                         : "Préviens ton client, et adapte les dates si besoin."}
                     </div>
@@ -15463,11 +15549,12 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 </div>
               )}
 
-              {/* Lien de paiement réel */}
+              {/* Lien de paiement réel — seulement avec Stripe connecté (sinon le cadre au-dessus propose de le connecter).
+                  Stripe est vérifié AVANT la fenêtre des 7 jours : on n'enregistre pas une réponse pour rien. */}
               <div style={{ marginBottom:20 }}>
-                {!tactilePaymentLink ? (
+                {!stripeConnectReady && !tactilePaymentLink ? null : !tactilePaymentLink ? (
                   <button
-                    onClick={early.guard("lien-carte", handleGetTactilePaymentLink)}
+                    onClick={stripeConnectReady ? early.guard("lien-carte", handleGetTactilePaymentLink) : handleGetTactilePaymentLink}
                     disabled={tactilePaymentLoading}
                     style={{
                       width:"100%", padding:"12px", borderRadius:10, border:"none",
@@ -15483,23 +15570,34 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     <button onClick={() => { navigator.clipboard.writeText(tactilePaymentLink); setTactilePaymentCopied(true); setTimeout(()=>setTactilePaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{tactilePaymentCopied ? "Copié !" : "Copier"}</button>
                   </div>
                 )}
-                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:6, textAlign:"center" }}>{hasIban ? "Carte bancaire (Stripe) — ou par virement avec l'IBAN sur la facture" : "Carte bancaire (Stripe) — ou par virement"}</div>
+                <div style={{ fontFamily:T.body, fontSize: stripeConnectReady ? 10 : 11.5, color:C.textL, marginTop: stripeConnectReady ? 6 : 0, textAlign:"center", lineHeight:1.5 }}>
+                  {stripeConnectReady
+                    ? (hasIban ? "Carte bancaire (Stripe) — ou par virement avec l'IBAN sur la facture" : "Carte bancaire (Stripe) — ou par virement")
+                    : (hasIban ? "Sans Stripe, ton client paie par virement, avec l'IBAN indiqué sur la facture." : "Sans Stripe, ton client paie par virement. Ajoute ton IBAN dans ton profil pour qu'il figure sur la facture.")}
+                </div>
               </div>
 
-              {/* Quand la mission peut commencer : d'après le contrat, la case cochée et la règle des 7 jours */}
-              <div style={{
-                background: (isParticulier && !tactileRetractationChecked) ? "#FFFBEB" : "#F0FDF4",
-                border: `1px solid ${(isParticulier && !tactileRetractationChecked) ? "#FCD34D" : "#86EFAC"}`,
-                borderRadius:10, padding:"12px 16px", marginBottom:20,
-                fontFamily:T.body, fontSize:12, color: (isParticulier && !tactileRetractationChecked) ? "#92400E" : "#166534", lineHeight:1.6,
-                textAlign:"left",
-              }}>
-                {(isParticulier && !tactileRetractationChecked)
-                  ? <>⏳ <strong>Le client n'a pas coché la case de démarrage anticipé.</strong> Pour être sûr d'être payé de ton travail, attends la fin du délai de rétractation (après le {frDate(retractationLastDay(new Date().toISOString()))}){payAfterDelivery ? null : <> et la réception {isComptant ? "du paiement" : "de l'acompte"}</>} avant de commencer.</>
-                  : payAfterDelivery
-                    ? <>🗓️ <strong>La mission peut commencer.</strong> Le paiement de la totalité est dû {form.paymentTerms} jours après réception de ta facture de fin de mission.</>
-                    : <>🗓️ <strong>La mission pourra commencer dès réception {isComptant ? "du paiement" : "de l'acompte"}</strong>{paymentEarly ? <>, que la loi permet de demander à partir du {frDate(paymentNotBefore)}</> : null}.</>}
-              </div>
+              {/* Quand la mission peut commencer : d'après le contrat, la case cochée et la règle des 7 jours.
+                  Version 220 : si la date de démarrage prévue au contrat tombe trop tôt, on le rappelle ici aussi. */}
+              {(() => {
+                const notWaived = isParticulier && !tactileRetractationChecked;
+                const amber = notWaived || startsBeforePayment;
+                return (
+                  <div style={{
+                    background: amber ? "#FFFBEB" : "#F0FDF4",
+                    border: `1px solid ${amber ? "#FCD34D" : "#86EFAC"}`,
+                    borderRadius:10, padding:"12px 16px", marginBottom:20,
+                    fontFamily:T.body, fontSize:12, color: amber ? "#92400E" : "#166534", lineHeight:1.6,
+                    textAlign:"left",
+                  }}>
+                    {notWaived
+                      ? <>⏳ <strong>Le client n'a pas coché la case de démarrage anticipé.</strong> Pour être sûr d'être payé de ton travail, attends la fin du délai de rétractation (après le {frDate(retractLastDay)}){payAfterDelivery ? null : <> et la réception {isComptant ? "du paiement" : "de l'acompte"}</>} avant de commencer.{startsBeforeRetractationEnd ? <> <strong>La mission était prévue à partir du {frDate(form.startDate)}</strong> : préviens ton client de ce nouveau calendrier.</> : null}</>
+                      : payAfterDelivery
+                        ? <>🗓️ <strong>La mission peut commencer.</strong> Le paiement de la totalité est dû {form.paymentTerms} jours après réception de ta facture de fin de mission.</>
+                        : <>🗓️ <strong>La mission pourra commencer dès réception {isComptant ? "du paiement" : "de l'acompte"}</strong>{paymentEarly ? <>, que la loi permet de demander à partir du {frDate(paymentNotBefore)}</> : null}.{startsBeforePayment ? <> <strong>Elle était prévue le {frDate(form.startDate)}</strong> : {contractPostponesStart ? "comme le contrat le prévoit, le démarrage est reporté au jour du paiement, et la date de fin est décalée d'autant. Préviens ton client." : "préviens ton client, et adapte les dates si besoin."}</> : null}</>}
+                  </div>
+                );
+              })()}
 
               {/* ── Conseil Pro Freeley (seulement si le profil n'est pas encore complet) ── */}
               {profileIncomplete && (
@@ -15825,7 +15923,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
 
       // Nettoie toutes les données locales de l'app sur cet appareil — seulement une fois la
       // suppression confirmée réussie côté serveur.
-      ["freeley_profile","freeley_current_draft","freeley_drafts_list","freeley_invoice_counters",
+      ["freeley_profile","freeley_profile_owner","freeley_current_draft","freeley_drafts_list","freeley_invoice_counters",
        "freeley_nda_list","freeley_payment_status","freeley_read_alerts","freeley_scan_list",
        "freeley_scan_results","freeley_screen"].forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
 
@@ -16453,6 +16551,25 @@ function ClientSignaturePage({ contractId }) {
   const [contractReadForGate, setContractReadForGate] = useState(false); // le client a lu le contrat avant l'écran de rétractation
   const [retractConfirming, setRetractConfirming] = useState(false);
   const [retractSubmitting, setRetractSubmitting] = useState(false);
+  // Exemplaire signé en PDF, le même que celui du prestataire (version 220)
+  const [pdfDownloading, setPdfDownloading] = useState(false);
+  const handleDownloadSignedPdf = async () => {
+    if (pdfDownloading) return;
+    setPdfDownloading(true);
+    try { await downloadSignedContractForClient(contractId); }
+    catch (e) {
+      console.error("PDF du contrat signé :", e);
+      alert("Le PDF n'a pas pu être créé. Réessayez dans quelques instants.");
+    }
+    setPdfDownloading(false);
+  };
+  const signedPdfButton = (
+    <button
+      onClick={handleDownloadSignedPdf}
+      disabled={pdfDownloading}
+      style={{ width:"100%", padding:"13px 18px", background: pdfDownloading ? "#D1D5DB" : "#1B2E4B", border:"none", borderRadius:10, cursor: pdfDownloading ? "wait" : "pointer", fontSize:13, fontWeight:700, color:"#fff", marginBottom:12 }}
+    >{pdfDownloading ? "Création du PDF…" : "📄 Télécharger mon contrat signé (PDF)"}</button>
+  );
 
   const handleContinueFromRetractationScreen = async () => {
     if (!retractationChecked) { setRetractationDoneLocally(true); return; }
@@ -16542,8 +16659,9 @@ function ClientSignaturePage({ contractId }) {
             📧 Un email de confirmation avec votre contrat vient de vous être envoyé. Si vous ne le voyez pas d'ici quelques minutes, regardez dans vos spams.
           </div>
         )}
-        <div style={{ fontSize:11.5, color:"#9CA3AF", marginTop:16, lineHeight:1.5, borderTop:"1px solid #F0EEE6", paddingTop:14 }}>
-          Gardez ce lien précieusement : il vous permet de revoir votre contrat à tout moment. En cas de perte, vous pouvez le retrouver via freeley.fr/?trouver-contrat=1.
+        <div style={{ marginTop:16 }}>{signedPdfButton}</div>
+        <div style={{ fontSize:11.5, color:"#9CA3AF", marginTop:4, lineHeight:1.5, borderTop:"1px solid #F0EEE6", paddingTop:14 }}>
+          Gardez ce lien précieusement : il vous permet de revoir votre contrat et de télécharger votre exemplaire signé à tout moment. En cas de perte, vous pouvez le retrouver via freeley.fr/?trouver-contrat=1.
         </div>
       </div>
     </div>
@@ -16607,6 +16725,8 @@ function ClientSignaturePage({ contractId }) {
               {contractText || "Contenu du contrat indisponible."}
             </div>
           </div>
+
+          {signedPdfButton}
 
           {canRetract && !retractConfirming && (
             <button
