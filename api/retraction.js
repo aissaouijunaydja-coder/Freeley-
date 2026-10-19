@@ -14,6 +14,8 @@
 //                           avec le texte du contrat, et pour un client particulier l'information officielle
 //                           sur la rétractation + le formulaire officiel. La date d'envoi est enregistrée
 //                           par le serveur (horloge serveur), une seule fois par contrat.
+//   - action: "content-delivered" → (freelance connecté, propriétaire du contrat) contenu numérique fourni
+//                           au client : date et heure du serveur, une seule fois (version 208).
 //
 // Variables d'environnement : VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY.
 // Version 202 : lecture du contrat sans la colonne contract_text (qui n'existe pas), et un email
@@ -31,6 +33,12 @@
 // Version 207 : « Retrouver mon contrat » envoie UN seul email, vouvoyé, avec tous les contrats signés de
 // l'adresse (nom du prestataire et date de signature). L'email de confirmation signale que le client peut
 // télécharger son exemplaire signé (PDF) sur sa page.
+// Version 208 : contenu numérique déjà existant. Le freelance indique dans Mes contrats le moment où il fournit
+// le contenu (action « content-delivered »). Si le client l'avait accepté avant et que la confirmation lui a
+// été envoyée, son droit de rétractation prend fin à ce moment (art. L221-28, 13° C. conso) : la rétractation
+// en ligne est alors refusée (« right_lost »). Avant ce moment, elle reste possible. L'email envoyé au
+// freelance après une rétractation est adapté au contenu numérique, et l'email de confirmation parle de
+// « votre accord » (et non plus de « votre demande ») pour un contenu numérique.
 //
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
@@ -203,6 +211,31 @@ function retractationDeadline(signedIso) {
 const WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la fourniture du contenu numérique commence avant l'expiration du délai de rétractation de quatorze (14) jours et je reconnais qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution.";
 const WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
 
+// Contenu numérique (version 208) : le droit de rétractation a pris fin quand le contenu a été fourni APRÈS
+// l'accord exprès du client (case cochée, avec reconnaissance de la perte du droit) et que la confirmation de
+// cet accord lui a été envoyée (art. L221-28, 13° et L221-13 C. conso). Même règle que dans contrat-freelance.jsx.
+function digitalRightEnded(content = {}, form = {}) {
+  const waivedAt = content.retractationWaivedAtServer || content.retractationWaivedAt;
+  const deliveredAt = content.contentDeliveredAtServer || content.contentDeliveredAt;
+  if (form.typeClient !== "particulier" || !form.contenuNumeriquePret) return null;
+  if (!waivedAt || !content.retractationConfirmationSentAt || !deliveredAt) return null;
+  if (!(new Date(waivedAt) <= new Date(deliveredAt))) return null;
+  return { deliveredAt, waivedAt, confirmationSentAt: content.retractationConfirmationSentAt };
+}
+
+// Utilisateur connecté (freelance) à partir du jeton envoyé par l'appli (en-tête Authorization: Bearer …)
+async function userIdFromToken(token) {
+  if (!token) return null;
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error) return null;
+    return data?.user?.id || null;
+  } catch (e) {
+    console.error("retraction: jeton de connexion illisible", e);
+    return null;
+  }
+}
+
 async function getFreelanceAuthEmail(userId) {
   if (!userId) return null;
   try {
@@ -231,6 +264,9 @@ async function handleConfirm(contractId) {
   if (form.typeClient !== "particulier") return { status: 400, body: { error: "not_particulier" } };
   const deadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt);
   if (deadline && Date.now() > deadline.getTime()) return { status: 400, body: { error: "deadline_passed" } };
+  // Contenu numérique fourni après l'accord du client et la confirmation : le droit a pris fin (version 208)
+  const ended = digitalRightEnded(content, form);
+  if (ended) return { status: 400, body: { error: "right_lost", ...ended } };
   const clientEmail = form.clientEmail || content.clientEmail || "";
   const clientName = form.clientName || content.clientName || "";
   const freelanceName = legalFreelanceName(form) || "votre prestataire";
@@ -256,11 +292,20 @@ async function handleConfirm(contractId) {
   }
 
   if (freelanceEmail) {
+    // Conseils adaptés : prestation de services, ou contenu numérique (version 208)
+    const waived = !!(content.retractationWaivedAtServer || content.retractationWaivedAt);
+    const advice = !form.contenuNumeriquePret
+      ? "Si une partie de la prestation a déjà été réalisée à sa demande expresse, pense à établir la facturation proportionnelle correspondante. Tu dois rembourser les sommes reçues dans les 14 jours."
+      : !waived
+        ? "Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours. Il n'avait pas accepté de recevoir le contenu avant la fin du délai de rétractation : sa rétractation est valable, même si tu lui avais déjà fourni le contenu."
+        : !content.retractationConfirmationSentAt
+          ? "Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours. La confirmation de son accord ne lui avait pas été envoyée : sa rétractation est valable, même si tu lui avais déjà fourni le contenu."
+          : "Il avait accepté de recevoir le contenu avant la fin du délai de rétractation, mais tu n'avais pas indiqué dans Freeley le lui avoir fourni. Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours.\n\nSi tu le lui avais déjà fourni avant sa rétractation, son droit de rétractation avait pris fin à ce moment-là : réponds-lui en joignant la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement). La prochaine fois, touche « J'ai fourni le contenu au client » dans Mes contrats au moment où tu le fournis.";
     try {
       await sendMail({
         from: FROM, to: freelanceEmail,
         subject: `Un client s'est rétracté — ${missionTitle}`,
-        text: `Bonjour,\n\n${clientName || "Votre client"} a exercé son droit de rétractation le ${dateStr} pour la mission « ${missionTitle} ».\n\n${results.clientEmailSent ? "Un accusé de réception lui a été envoyé automatiquement." : "Attention : l'accusé de réception automatique n'a pas pu lui être envoyé. Envoie-lui toi-même, dès maintenant, un email confirmant que tu as bien reçu sa rétractation, avec la date et l'heure ci-dessus."}\n\nSi une partie de la prestation a déjà été réalisée à sa demande expresse, pense à établir la facturation proportionnelle correspondante. Tu dois rembourser les sommes reçues dans les 14 jours.\n\nCordialement,\nFreeley`,
+        text: `Bonjour,\n\n${clientName || "Votre client"} a exercé son droit de rétractation le ${dateStr} pour la mission « ${missionTitle} ».\n\n${results.clientEmailSent ? "Un accusé de réception lui a été envoyé automatiquement." : "Attention : l'accusé de réception automatique n'a pas pu lui être envoyé. Envoie-lui toi-même, dès maintenant, un email confirmant que tu as bien reçu sa rétractation, avec la date et l'heure ci-dessus."}\n\n${advice}\n\nCordialement,\nFreeley`,
       });
       results.freelanceEmailSent = true;
     } catch (e) { console.error("retraction/confirm: échec email freelance", e); }
@@ -291,6 +336,31 @@ async function handleStampEarlyPayment(contractId) {
   const saved = await saveContent(contractId, { ...content, earlyPaymentAckAtServer: nowIso }, row.status, "earlyPaymentAckAtServer");
   if (!saved) return { status: 500, body: { error: "save_failed" } };
   return { status: 200, body: { ok: true, stamped: true, stampedAt: nowIso } };
+}
+
+// ── action: "content-delivered" — le freelance indique qu'il vient de fournir le contenu numérique (version 208) ──
+// Réservé au freelance propriétaire du contrat (jeton de connexion vérifié). Heure du serveur, une seule fois.
+// Seulement quand le client a accepté la fourniture avant la fin du délai et que la confirmation lui a été
+// envoyée : c'est ce moment qui met fin à son droit de rétractation.
+async function handleContentDelivered(contractId, token) {
+  const userId = await userIdFromToken(token);
+  if (!userId) return { status: 401, body: { error: "unauthorized" } };
+  const { data: row, error } = await supabase.from("contracts").select("content, user_id, status").eq("id", contractId).single();
+  if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
+  if (row.user_id !== userId) return { status: 403, body: { error: "forbidden" } };
+  const content = parseContent(row.content);
+  const form = content.form || {};
+  if (row.status !== "signed") return { status: 400, body: { error: "not_signed" } };
+  if (form.typeClient !== "particulier" || !form.contenuNumeriquePret) return { status: 400, body: { error: "not_digital" } };
+  if (content.retractationExercisedAtServer || content.retractationExercisedAt) return { status: 409, body: { error: "retracted" } };
+  const already = content.contentDeliveredAtServer || content.contentDeliveredAt;
+  if (already) return { status: 200, body: { ok: true, alreadyDelivered: true, deliveredAt: already } };
+  if (!(content.retractationWaivedAtServer || content.retractationWaivedAt)) return { status: 400, body: { error: "not_waived" } };
+  if (!content.retractationConfirmationSentAt) return { status: 400, body: { error: "not_confirmed" } };
+  const nowIso = new Date().toISOString();
+  const saved = await saveContent(contractId, { ...content, contentDeliveredAt: nowIso, contentDeliveredAtServer: nowIso }, row.status, "contentDeliveredAtServer");
+  if (!saved) return { status: 500, body: { error: "save_failed" } };
+  return { status: 200, body: { ok: true, saved: true, deliveredAt: nowIso } };
 }
 
 // ── action: "client-waive" — le client coche la case de démarrage avant la fin du délai ──
@@ -415,7 +485,8 @@ async function handleSendLink(contractId) {
   ];
 
   if (isParticulier && waivedAt && content.retractationWaiverText) {
-    blocks.push(`Votre demande du ${fmt(waivedAt)} (texte que vous avez coché) :\n« ${content.retractationWaiverText} »`);
+    // Contenu numérique : le client a donné son accord (version 208) ; prestation : il l'a demandé
+    blocks.push(`${isDigital ? "Votre accord" : "Votre demande"} du ${fmt(waivedAt)} (texte que vous avez coché) :\n« ${content.retractationWaiverText} »`);
     if (isDigital) {
       // Confirmation exigée pour un contenu numérique (texte relu par une juriste)
       const waivedDate = new Date(waivedAt).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" });
@@ -464,6 +535,8 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const { action, contractId, email, waiverText, signature } = req.body || {};
+  // Jeton de connexion du freelance, seulement pour ses propres actions (version 208)
+  const token = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "").trim();
   let result;
 
   if (action === "confirm") {
@@ -486,6 +559,9 @@ export default async function handler(req, res) {
   } else if (action === "client-sign") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
     result = await handleClientSign(contractId, signature);
+  } else if (action === "content-delivered") {
+    if (!contractId) return res.status(400).json({ error: "contractId manquant" });
+    result = await handleContentDelivered(contractId, token);
   } else {
     return res.status(400).json({ error: "action inconnue" });
   }

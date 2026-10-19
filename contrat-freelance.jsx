@@ -241,6 +241,7 @@ const getHistory = async () => {
       retractationWaiverText: content.retractationWaiverText || contenu.retractationWaiverText || null,
       retractationConfirmationSentAt: content.retractationConfirmationSentAt || contenu.retractationConfirmationSentAt || null,
       retractationExercisedAt: content.retractationExercisedAtServer || content.retractationExercisedAt || null,
+      contentDeliveredAt: content.contentDeliveredAtServer || content.contentDeliveredAt || null,
       signatureLocation: content.signatureLocation || null,
       earlyPaymentAck: content.earlyPaymentAck ? { ...content.earlyPaymentAck, atServer: content.earlyPaymentAckAtServer || null } : null,
       avenants: content.avenants || contenu.avenants || [],
@@ -496,11 +497,12 @@ const STRIPE_RETURN_URLS = { successUrl: `${SITE_URL}/?paiement=succes`, cancelU
 
 // Appel au serveur de Freeley (api/retraction.js). Le client n'a pas de compte : c'est le serveur qui
 // enregistre ses actions avec tous les droits, puis relit la base pour vérifier.
-const callRetractionApi = async (payload) => {
+const callRetractionApi = async (payload, token) => {
   try {
     const res = await fetch("/api/retraction", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // Jeton de connexion seulement pour les actions du freelance (le serveur vérifie qu'il est le propriétaire)
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
@@ -580,6 +582,32 @@ function EarlyPaymentConfirmModal({ payNotBefore, saving, error, onCancel, onCon
   );
 }
 
+// Contenu numérique (version 221) : le freelance confirme qu'il vient de fournir le contenu à son client
+function ContentDeliveredModal({ saving, error, onCancel, onConfirm }) {
+  return createPortal(
+    <div
+      onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget && !saving) onCancel(); }}
+      style={{ position:"fixed", inset:0, zIndex:10050, background:"rgba(10,20,40,0.6)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+    >
+      <div role="dialog" aria-modal="true" style={{ background:C.white, borderRadius:16, width:"100%", maxWidth:440, maxHeight:"90vh", overflowY:"auto", padding:"20px 20px 18px", boxShadow:"0 24px 60px rgba(0,0,0,0.3)", fontFamily:T.body }}>
+        <div style={{ fontSize:16, fontWeight:800, color:C.navy, marginBottom:10, lineHeight:1.4 }}>📦 Tu viens de fournir le contenu ?</div>
+        <p style={{ fontSize:13, color:C.text, lineHeight:1.6, margin:"0 0 10px" }}>
+          Touche « Oui » seulement au moment où tu envoies vraiment le contenu à ton client : les fichiers, un lien de téléchargement ou un accès.
+        </p>
+        <p style={{ fontSize:12.5, color:C.textM, lineHeight:1.6, margin:"0 0 14px" }}>
+          La date et l'heure seront enregistrées et affichées sur la page de ton client. À partir de ce moment, il ne pourra plus se rétracter, comme il l'a accepté. Tu ne pourras pas annuler cette indication.
+        </p>
+        {error && <div style={{ fontSize:12, color:"#B91C1C", marginBottom:10, lineHeight:1.5 }}>{error}</div>}
+        <div style={{ display:"flex", gap:10 }}>
+          <button onClick={onCancel} disabled={saving} style={{ flex:1, padding:"11px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.textM }}>Annuler</button>
+          <button onClick={onConfirm} disabled={saving} style={{ flex:1, padding:"11px 12px", background: saving ? "#E5E7EB" : "#1D4ED8", border:"none", borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color: saving ? C.textL : "#fff" }}>{saving ? "Enregistrement…" : "Oui, je viens de le fournir"}</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // Logique commune : pendant les 7 jours, le premier clic sur un bouton de paiement ouvre la fenêtre ;
 // une fois la réponse enregistrée, l'action demandée continue, et on ne redemande plus pour ce contrat.
 function useEarlyPaymentGuard({ contractId, payNotBefore, active, savedAck }) {
@@ -610,6 +638,18 @@ function useEarlyPaymentGuard({ contractId, payNotBefore, active, savedAck }) {
   ) : null;
   return { guard, ack, modal };
 }
+
+// Contenu numérique déjà existant (version 221) : le freelance indique qu'il vient de fournir le contenu.
+// Si le client l'a accepté avant et que la confirmation lui a été envoyée, c'est ce moment qui met fin à son
+// droit de rétractation (art. L221-28, 13° C. conso). Enregistré par le serveur, à son heure, après avoir
+// vérifié que c'est bien le freelance propriétaire du contrat (et que le client ne s'est pas déjà rétracté).
+const submitContentDelivered = async (contractId) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const r = await callRetractionApi({ action: "content-delivered", contractId }, session?.access_token);
+  if (r.ok) return { ok: true, deliveredAt: r.data.deliveredAt };
+  console.error("[Freeley] Contenu fourni refusé par le serveur :", r.status, r.data);
+  return { ok: false, reason: r.data.error || "" };
+};
 
 // Le client (particulier) demande expressément le démarrage avant la fin du délai de rétractation de 14 jours
 const submitRetractationWaiver = async (contractId, waiverText) => {
@@ -658,7 +698,8 @@ const submitRetractationExercise = async (contractId) => {
   const r = await callRetractionApi({ action: "confirm", contractId });
   if (r.ok) return { ok: true, exercisedAt: r.data.exercisedAt || new Date().toISOString() };
   console.error("Rétractation refusée par le serveur:", r.status, r.data);
-  return { ok: false, reason: r.data.error || "" };
+  // right_lost (version 221) : le serveur renvoie les dates qui ont mis fin au droit, pour mettre la page à jour
+  return { ok: false, reason: r.data.error || "", deliveredAt: r.data.deliveredAt || null, waivedAt: r.data.waivedAt || null, confirmationSentAt: r.data.confirmationSentAt || null };
 };
 
 // Le client signe à distance : le serveur enregistre la signature, passe le contrat en « signé », puis
@@ -806,7 +847,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "220";
+const APP_VERSION = "221";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -4715,7 +4756,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
                     <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>LIVRABLE : CONTENU NUMÉRIQUE DÉJÀ EXISTANT</label>
-                    <LegalTooltip text="À cocher si tu vends quelque chose déjà tout prêt à l'avance, comme un template ou un fichier que tu proposes tel quel à plusieurs clients. Ne coche pas si tu réalises un travail fait spécialement pour ce client. Si c'est coché : dès que le client accepte de perdre son droit de rétractation, envoie-lui l'email de confirmation qui apparaîtra sur la page du contrat, et fais-le avant de lui livrer le contenu." />
+                    <LegalTooltip text="À cocher si tu vends quelque chose déjà tout prêt à l'avance, comme un template ou un fichier que tu proposes tel quel à plusieurs clients. Ne coche pas si tu réalises un travail fait spécialement pour ce client. Si c'est coché et que le client accepte de perdre son droit de rétractation, Freeley lui envoie la confirmation écrite par email juste après sa signature (sinon, un bouton apparaît sur la page du contrat pour la lui envoyer). Ensuite, au moment où tu lui fournis le contenu, touche « J'ai fourni le contenu au client » sur la page du contrat, dans Mes contrats." />
                   </div>
                   <div
                     onClick={() => update("contenuNumeriquePret", !form.contenuNumeriquePret)}
@@ -4745,7 +4786,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                         {form.contenuNumeriquePret ? "✓ Oui, contenu déjà existant" : "Non, travail réalisé sur mesure"}
                       </div>
                       <div style={{ fontFamily:T.body, fontSize:12, color: form.contenuNumeriquePret ? "#2563EB" : C.textL, lineHeight:1.5 }}>
-                        Un template, un fichier standard ou une ressource déjà créée, plutôt qu'un travail fait spécifiquement pour ce client. Si oui, une confirmation écrite supplémentaire devra être envoyée au client avant de lui livrer le contenu.
+                        Un template, un fichier standard ou une ressource déjà créée, plutôt qu'un travail fait spécifiquement pour ce client. Si oui, une confirmation écrite supplémentaire est envoyée au client avant que tu lui livres le contenu, et tu indiques dans Mes contrats le moment où tu le lui livres.
                       </div>
                     </div>
                   </div>
@@ -11862,6 +11903,32 @@ function DraftsPage({ onBack, onResume, onNewContract }) {
 function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe, setForm, signingContractId, setSigningContractId, setShowTactileSign, remoteSignLink, setRemoteSignLink, showRemoteSignPad, setShowRemoteSignPad, remoteSigHasStrokes, setRemoteSigHasStrokes, remoteSignLoading, remoteSignCopied, setRemoteSignCopied, remoteSigCanvasRef, startRemoteSigDraw, drawRemoteSig, endRemoteSigDraw, clearRemoteSig, handleRemoteSign }) {
   const [copied, setCopied] = useState(false);
   const [retractMailOpenedFor, setRetractMailOpenedFor] = useState(null);
+  // Contenu numérique (version 221) : « J'ai fourni le contenu », avec fenêtre de confirmation
+  const [deliveryAskFor, setDeliveryAskFor] = useState(null);
+  const [deliverySaving, setDeliverySaving] = useState(false);
+  const [deliveryError, setDeliveryError] = useState("");
+  const confirmContentDelivered = async () => {
+    if (!historyView || deliverySaving) return;
+    setDeliverySaving(true); setDeliveryError("");
+    const r = await submitContentDelivered(historyView.id);
+    setDeliverySaving(false);
+    if (r.ok) {
+      setDeliveryAskFor(null);
+      if (onRefreshHistory) await onRefreshHistory();
+    } else if (r.reason === "retracted") {
+      setDeliveryAskFor(null);
+      alert("Ton client s'est rétracté entre-temps : ne lui fournis pas le contenu.");
+      if (onRefreshHistory) await onRefreshHistory();
+    } else if (r.reason === "not_confirmed" || r.reason === "not_waived") {
+      setDeliveryAskFor(null);
+      alert(r.reason === "not_confirmed"
+        ? "La confirmation de l'accord de ton client n'est pas enregistrée. Envoie-lui d'abord l'email de confirmation, puis réessaie."
+        : "Ton client n'a pas accepté de recevoir le contenu avant la fin du délai de rétractation : il garde son droit de rétractation.");
+      if (onRefreshHistory) await onRefreshHistory();
+    } else {
+      setDeliveryError("La date n'a pas pu être enregistrée. Vérifie ta connexion, puis réessaie.");
+    }
+  };
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showAvenantModal, setShowAvenantModal] = useState(false);
   const [showAssistantModal, setShowAssistantModal] = useState(false);
@@ -12120,6 +12187,45 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
           }}>🗑</button>
         </div>
       </div>
+
+      {/* Contenu numérique déjà existant : fourniture du contenu et fin du droit de rétractation (version 221) */}
+      {historyView.form?.typeClient === "particulier" && historyView.form?.contenuNumeriquePret && historyView.signatureStatus === "signed" && !historyView.retractationExercisedAt && (() => {
+        const waivedAt = historyView.retractationWaivedAt;
+        const confirmed = !!historyView.retractationConfirmationSentAt;
+        const deliveredAt = historyView.contentDeliveredAt;
+        const fmtAt = (iso) => new Date(iso).toLocaleString("fr-FR", { day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit", timeZone:"Europe/Paris" });
+        const lastDay = historyView.signedByClientAt ? retractationLastDay(historyView.signedByClientAt) : null;
+        const box = (bg, border, color, children) => (
+          <div className="fade-up" style={{ background:bg, border:`1.5px solid ${border}`, borderRadius:12, padding:"16px 18px", marginBottom:24, fontFamily:T.body, fontSize:12.5, color, lineHeight:1.6 }}>
+            <div style={{ fontSize:10, letterSpacing:"0.15em", fontWeight:700, marginBottom:8 }}>CONTENU NUMÉRIQUE ET RÉTRACTATION</div>
+            {children}
+          </div>
+        );
+        if (deliveredAt) {
+          const ended = !!waivedAt && confirmed && new Date(waivedAt) <= new Date(deliveredAt);
+          return box("#F0FDF4", "#86EFAC", "#166534", <>
+            ✓ <strong>Contenu fourni le {fmtAt(deliveredAt)}.</strong>{" "}
+            {ended
+              ? <>Comme ton client l'avait accepté le {new Date(waivedAt).toLocaleDateString("fr-FR")}, son droit de rétractation a pris fin à ce moment-là.</>
+              : <>Ton client n'avait pas donné son accord avant : il garde son droit de rétractation{lastDay ? <> jusqu'au {frDate(lastDay)}</> : null}.</>}
+          </>);
+        }
+        if (!waivedAt) return box("#FFFBEB", "#FCD34D", "#92400E", <>
+          Ton client n'a pas accepté de recevoir le contenu avant la fin du délai de rétractation{lastDay ? <>, qui court jusqu'au {frDate(lastDay)}</> : null}. Si tu le lui fournis avant, il garde son droit de rétractation.
+        </>);
+        if (!confirmed) return box("#FFF7ED", "#FDBA74", "#9A3412", <>
+          Ton client a accepté de recevoir le contenu avant la fin du délai de rétractation. <strong>Avant de le lui fournir, envoie-lui l'email de confirmation</strong>, avec le bouton en haut de cette fiche. Ensuite, tu pourras indiquer ici le moment où tu lui fournis le contenu.
+        </>);
+        return box("#EFF6FF", "#93C5FD", "#1E3A8A", <>
+          Ton client a accepté de perdre son droit de rétractation dès que tu lui fournis le contenu, et la confirmation lui a été envoyée. Au moment où tu lui envoies les fichiers ou le lien de téléchargement, touche ce bouton : la date et l'heure seront enregistrées, et sa page lui indiquera que son droit a pris fin. Avant ce moment, il peut encore se rétracter.
+          <div style={{ marginTop:12 }}>
+            <button onClick={() => { setDeliveryError(""); setDeliveryAskFor(historyView.id); }} style={{ padding:"10px 16px", background:"#1D4ED8", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}>📦 J'ai fourni le contenu au client</button>
+          </div>
+        </>);
+      })()}
+      {deliveryAskFor === historyView.id && (
+        <ContentDeliveredModal saving={deliverySaving} error={deliveryError} onCancel={() => setDeliveryAskFor(null)} onConfirm={confirmContentDelivered} />
+      )}
 
       {/* Suivi du paiement — remplacé par une simple note si le client s'est rétracté (contrat annulé) */}
       {historyView.retractationExercisedAt ? (
@@ -15301,7 +15407,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 {isParticulier && !tactileRetractationDone ? (
                   <div>
                     <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
-                      En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si {form.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
+                      {/* Version 221 : pour un contenu numérique, la conséquence de la case est dite dès cette phrase */}
+                      {form.contenuNumeriquePret
+                        ? "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Signer le contrat ne vous fait pas perdre ce droit. En cochant la case ci-dessous, vous acceptez que le contenu numérique vous soit fourni avant la fin de ce délai : vous perdrez alors votre droit de rétractation dès le début de cette fourniture."
+                        : "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si la prestation peut commencer avant la fin de ce délai."}
                     </div>
                     <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(form, contractText))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(form, contractText))}</div>
                     <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
@@ -15314,7 +15423,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       style={{ width:"100%", marginTop:12, padding:"11px 16px", background: !tactileRetractationWaiving ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:8, cursor: !tactileRetractationWaiving ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
                     >{tactileRetractationWaiving ? "Enregistrement…" : (tactileRetractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
                     <div style={{ fontSize:10, color:"#6B7280", marginTop:10, lineHeight:1.5, textAlign:"center" }}>
-                      Que vous cochiez ou non, vous accédez ensuite à la signature. Si vous cochez, votre demande est datée et conservée.
+                      Que vous cochiez ou non, vous accédez ensuite à la signature. Si vous cochez, {form.contenuNumeriquePret ? "votre accord est daté et conservé" : "votre demande est datée et conservée"}.
                     </div>
                   </div>
                 ) : (
@@ -15598,6 +15707,13 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   </div>
                 );
               })()}
+
+              {/* Contenu numérique accepté par le client : indiquer dans Mes contrats le moment de la fourniture (version 221) */}
+              {isParticulier && form.contenuNumeriquePret && tactileRetractationChecked && (
+                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px", marginBottom:20, fontFamily:T.body, fontSize:12, color:"#1E3A8A", lineHeight:1.6, textAlign:"left" }}>
+                  📦 <strong>Au moment où tu fournis le contenu à ton client</strong>, touche « J'ai fourni le contenu au client » sur la fiche de ce contrat, dans Mes contrats. Son droit de rétractation prend fin à ce moment-là, comme il l'a accepté. Avant, il peut encore se rétracter.
+                </div>
+              )}
 
               {/* ── Conseil Pro Freeley (seulement si le profil n'est pas encore complet) ── */}
               {profileIncomplete && (
@@ -16589,6 +16705,18 @@ function ClientSignaturePage({ contractId }) {
       setRetractConfirming(false);
     } else if (r.reason === "deadline_passed") {
       setError("Le délai de rétractation de 14 jours est dépassé : la rétractation en ligne n'est plus possible.");
+    } else if (r.reason === "right_lost") {
+      // Le contenu numérique a été fourni entre-temps, avec l'accord du client : la page l'explique (version 221)
+      setContractData(prev => {
+        const c = prev.content || {};
+        return { ...prev, content: {
+          ...c,
+          contentDeliveredAtServer: r.deliveredAt || c.contentDeliveredAtServer || c.contentDeliveredAt || new Date().toISOString(),
+          retractationWaivedAtServer: r.waivedAt || c.retractationWaivedAtServer || c.retractationWaivedAt,
+          retractationConfirmationSentAt: r.confirmationSentAt || c.retractationConfirmationSentAt || r.deliveredAt,
+        } };
+      });
+      setRetractConfirming(false);
     } else {
       setError("Votre rétractation n'a pas pu être enregistrée. Réessayez dans quelques instants. Si le problème continue, envoyez votre décision au prestataire par email, avec le formulaire de rétractation reçu par email.");
     }
@@ -16682,7 +16810,14 @@ function ClientSignaturePage({ contractId }) {
     const retractDeadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt);
     const withinRetractDeadline = retractDeadline ? (new Date() < retractDeadline) : false;
     const retractationExercised = !!content.retractationExercisedAt;
-    const canRetract = isParticulier && withinRetractDeadline && !retractationExercised;
+    // Contenu numérique (version 221) : fourni après l'accord du client et la confirmation envoyée, le droit de
+    // rétractation a pris fin à ce moment-là (art. L221-28, 13° C. conso). Même règle que le serveur.
+    const isDigital = !!content.form?.contenuNumeriquePret;
+    const waivedAtC = content.retractationWaivedAtServer || content.retractationWaivedAt;
+    const deliveredAtC = content.contentDeliveredAtServer || content.contentDeliveredAt;
+    const rightEndedByDelivery = isParticulier && isDigital && !!waivedAtC && !!content.retractationConfirmationSentAt && !!deliveredAtC && new Date(waivedAtC) <= new Date(deliveredAtC);
+    const canRetract = isParticulier && withinRetractDeadline && !retractationExercised && !rightEndedByDelivery;
+    const fmtLong = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
 
     return (
       <div style={wrap}>
@@ -16698,6 +16833,19 @@ function ClientSignaturePage({ contractId }) {
               <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Rétractation enregistrée</div>
               <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
                 Votre demande a été reçue le {new Date(content.retractationExercisedAtServer || content.retractationExercisedAt).toLocaleDateString("fr-FR")}.{" "}{content.form?.clientEmail ? "Un email de confirmation vous a été envoyé." : "Gardez une capture de cet écran comme preuve de votre demande."}
+              </div>
+            </div>
+          )}
+
+          {/* Contenu numérique fourni, avec l'accord du client : le droit de rétractation a pris fin (version 221) */}
+          {rightEndedByDelivery && !retractationExercised && (
+            <div style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", border:"1px solid #BFDBFE" }}>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:8 }}>📦 Contenu numérique fourni</div>
+              <div style={{ fontSize:12.5, color:"#2C3E50", lineHeight:1.6 }}>
+                Le prestataire a indiqué vous avoir fourni le contenu numérique le {fmtLong(deliveredAtC)}. Comme vous l'aviez accepté le {fmtLong(waivedAtC)}, votre droit de rétractation a pris fin au début de cette fourniture (article L221-28, 13°, du Code de la consommation).
+              </div>
+              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginTop:8 }}>
+                Si vous n'avez rien reçu, contactez le prestataire{content.form?.freelanceEmail ? ` : ${content.form.freelanceEmail}` : ""}.
               </div>
             </div>
           )}
@@ -16728,6 +16876,13 @@ function ClientSignaturePage({ contractId }) {
 
           {signedPdfButton}
 
+          {/* Contenu numérique accepté mais pas encore fourni : le client peut encore se rétracter (version 221) */}
+          {canRetract && !retractConfirming && isDigital && !!waivedAtC && !!content.retractationConfirmationSentAt && (
+            <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, background:"#fff", border:"1px solid #E8E0D0", borderRadius:10, padding:"12px 14px", marginBottom:10 }}>
+              Vous avez accepté, le {fmtLong(waivedAtC)}, que le contenu numérique vous soit fourni avant la fin du délai de rétractation. Votre droit de rétractation prendra fin dès le début de cette fourniture. Tant que le contenu ne vous a pas été fourni, vous pouvez encore vous rétracter.
+            </div>
+          )}
+
           {canRetract && !retractConfirming && (
             <button
               onClick={() => setRetractConfirming(true)}
@@ -16749,7 +16904,10 @@ function ClientSignaturePage({ contractId }) {
         </div>
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           <div style={{ fontSize:12.5, color:"#5A6B80", lineHeight:1.6, marginBottom:16 }}>
-            En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si {content.form?.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
+            {/* Version 221 : pour un contenu numérique, la conséquence de la case est dite dès cette phrase */}
+            {content.form?.contenuNumeriquePret
+              ? "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Signer le contrat ne vous fait pas perdre ce droit. En cochant la case ci-dessous, vous acceptez que le contenu numérique vous soit fourni avant la fin de ce délai : vous perdrez alors votre droit de rétractation dès le début de cette fourniture."
+              : "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si la prestation peut commencer avant la fin de ce délai."}
           </div>
           <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(content.form || {}, content.contract))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(content.form || {}, content.contract))}</div>
           <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
@@ -16762,7 +16920,7 @@ function ClientSignaturePage({ contractId }) {
             style={{ width:"100%", marginTop:16, padding:"12px 18px", background: !retractationWaiving ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: !retractationWaiving ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
           >{retractationWaiving ? "Enregistrement…" : (retractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:12, lineHeight:1.5, textAlign:"center" }}>
-            Que vous cochiez ou non, vous pouvez ensuite signer le contrat. Si vous cochez, votre demande est datée et conservée.
+            Que vous cochiez ou non, vous pouvez ensuite signer le contrat. Si vous cochez, {content.form?.contenuNumeriquePret ? "votre accord est daté et conservé" : "votre demande est datée et conservée"}.
           </div>
           <button onClick={() => { setContractReadForGate(false); window.scrollTo(0, 0); }} style={{ display:"block", margin:"10px auto 0", background:"none", border:"none", color:"#1B2E4B", fontSize:12, textDecoration:"underline", cursor:"pointer" }}>← Relire le contrat</button>
         </div>
