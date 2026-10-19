@@ -26,6 +26,8 @@
 // hors établissement, moins de 7 jours) : Freeley ne bloque pas le paiement, il garde la preuve qu'il a prévenu.
 // Version 205 : mention « EI » à côté du nom du freelance entrepreneur individuel dans les emails envoyés
 // au client (confirmation du contrat, information et formulaire de rétractation, accusé de réception).
+// Version 206 : information sur la perte du droit de rétractation (démarrage anticipé, contenu numérique),
+// et « EI » repris du texte du contrat quand le formulaire enregistré n'a pas le statut juridique.
 //
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
@@ -66,13 +68,26 @@ function fmtPhone(v) {
 // Mention « EI » obligatoire à côté du nom d'un entrepreneur individuel (décret du 28 avril 2022).
 // Même règle que contractFreelanceName() dans contrat-freelance.jsx : seulement pour les contrats créés à
 // partir de la version 218 de l'appli, qui enregistrent le statut juridique du freelance (même vide).
+// Version 206 : un formulaire sans statut juridique suit le texte du contrat (« Nom EI ») ; une société
+// apparaît sous sa dénomination quand elle est connue.
 const COMPANY_STATUSES = ["EURL", "SASU", "SARL", "SAS"];
-function legalFreelanceName(f = {}) {
+function legalFreelanceName(f = {}, contractText = "") {
   const n = String(f.freelanceName || "").trim();
-  if (!n || f.freelanceLegalStatus === undefined) return n;
-  if (COMPANY_STATUSES.includes(String(f.freelanceLegalStatus || "").trim())) return n;
+  if (!n) return n;
+  const t = String(contractText || "");
+  if (f.freelanceLegalStatus === undefined) return (t.includes(`${n} EI`) || t.includes(`${n} (EI)`)) ? `${n} EI` : n;
+  if (COMPANY_STATUSES.includes(String(f.freelanceLegalStatus || "").trim())) return String(f.freelanceCompanyName || "").trim() || n;
   if (/\bEI\b/.test(n) || /entrepreneur individuel/i.test(n)) return n;
   return `${n} EI`;
+}
+
+// Formulaire sans statut juridique alors que le texte du contrat écrit « Nom EI » : on suit le texte
+function resolveStatus(f = {}, contractText = "") {
+  const n = String(f.freelanceName || "").trim();
+  const t = String(contractText || "");
+  return f.freelanceLegalStatus === undefined && n && (t.includes(`${n} EI`) || t.includes(`${n} (EI)`))
+    ? { ...f, freelanceLegalStatus: "" }
+    : f;
 }
 
 function coords(f = {}) {
@@ -94,6 +109,11 @@ function buildNotice(f = {}, where) {
   if (!f.contenuNumeriquePret) {
     parts.push("Si vous avez demandé de commencer la prestation de services pendant le délai de rétractation, vous devrez nous payer un montant proportionnel à ce qui vous a été fourni jusqu'au moment où vous nous avez informé de votre rétractation du présent contrat, par rapport à l'ensemble des prestations prévues par le contrat.");
   }
+  // Cas où le droit de rétractation se perd (art. L221-5 et L221-28 C. conso). Même texte que dans l'appli.
+  parts.push("Perte du droit de rétractation");
+  parts.push(f.contenuNumeriquePret
+    ? "Si vous avez expressément consenti à ce que la fourniture du contenu numérique commence avant la fin du délai de rétractation, en renonçant à votre droit de rétractation, vous perdez ce droit dès le début de cette fourniture."
+    : "Si vous avez expressément demandé que la prestation commence avant la fin du délai de rétractation, en reconnaissant que vous perdrez ce droit une fois la prestation entièrement exécutée, vous perdez votre droit de rétractation dès que la prestation est entièrement exécutée, si cela intervient avant la fin du délai.");
   return parts.join("\n\n");
 }
 
@@ -203,7 +223,7 @@ async function handleConfirm(contractId) {
   const content = parseContent(row.content);
   const already = content.retractationExercisedAtServer || content.retractationExercisedAt;
   if (already) return { status: 200, body: { ok: true, alreadyConfirmed: true, exercisedAt: already } };
-  const form = content.form || {};
+  const form = resolveStatus(content.form || {}, content.contract);
   if (row.status !== "signed") return { status: 400, body: { error: "not_signed" } };
   if (form.typeClient !== "particulier") return { status: 400, body: { error: "not_particulier" } };
   const deadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt);
@@ -347,7 +367,7 @@ async function handleSendLink(contractId) {
   const content = parseContent(row.content);
   if (content.contractConfirmationSentAt) return { status: 200, body: { ok: true, sent: false, reason: "already_sent" } };
 
-  const form = { ...(content.form || {}) };
+  const form = { ...resolveStatus(content.form || {}, content.contract) };
   if (!form.freelanceEmail) form.freelanceEmail = (await getFreelanceAuthEmail(row.user_id)) || "";
   const clientEmail = form.clientEmail || content.clientEmail || "";
   if (!clientEmail) return { status: 200, body: { ok: true, sent: false, reason: "no_client_email" } };

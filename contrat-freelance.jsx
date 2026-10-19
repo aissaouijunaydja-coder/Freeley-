@@ -467,6 +467,12 @@ const buildRetractationNotice = (f = {}, where = RETRACTATION_ONLINE_REF) => {
     "En cas de rétractation de votre part du présent contrat, nous vous rembourserons tous les paiements reçus de vous, y compris les frais de livraison (à l'exception des frais supplémentaires découlant du fait que vous avez choisi, le cas échéant, un mode de livraison autre que le mode moins coûteux de livraison standard proposé par nous) sans retard excessif et, en tout état de cause, au plus tard quatorze jours à compter du jour où nous sommes informés de votre décision de rétractation du présent contrat. Nous procéderons au remboursement en utilisant le même moyen de paiement que celui que vous aurez utilisé pour la transaction initiale, sauf si vous convenez expressément d'un moyen différent ; en tout état de cause, ce remboursement n'occasionnera pas de frais pour vous.",
   ];
   if (!f.contenuNumeriquePret) parts.push("Si vous avez demandé de commencer la prestation de services pendant le délai de rétractation, vous devrez nous payer un montant proportionnel à ce qui vous a été fourni jusqu'au moment où vous nous avez informé de votre rétractation du présent contrat, par rapport à l'ensemble des prestations prévues par le contrat.");
+  // Cas où le droit de rétractation se perd (art. L221-5 et L221-28 C. conso) : information à donner
+  // avant la signature. Même texte dans api/retraction.js.
+  parts.push("Perte du droit de rétractation");
+  parts.push(f.contenuNumeriquePret
+    ? "Si vous avez expressément consenti à ce que la fourniture du contenu numérique commence avant la fin du délai de rétractation, en renonçant à votre droit de rétractation, vous perdez ce droit dès le début de cette fourniture."
+    : "Si vous avez expressément demandé que la prestation commence avant la fin du délai de rétractation, en reconnaissant que vous perdrez ce droit une fois la prestation entièrement exécutée, vous perdez votre droit de rétractation dès que la prestation est entièrement exécutée, si cela intervient avant la fin du délai.");
   return parts.join("\n\n");
 };
 const buildRetractationForm = (f = {}) => [
@@ -714,7 +720,8 @@ const initialForm = {
   clauseSuspension: true,
   clauseSecurite: true,
   clauseInterlocuteur: true,
-  clausePreavis: true,
+  // Préavis : seulement pour une mission récurrente (forfait mensuel, abonnement). Plus coché d'office.
+  clausePreavis: false,
   preavisJours: "30",
   contenuNumeriquePret: false,
 };
@@ -797,12 +804,368 @@ const withEI = (name, legalStatus) => {
   if (/\bEI\b/.test(n) || /entrepreneur individuel/i.test(n)) return n;
   return `${n} EI`;
 };
+// Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
+// a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
+const APP_VERSION = "219";
+
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
-// enregistrent le statut juridique (même vide) : on y ajoute « EI ». Les plus anciens restent tels
-// qu'ils ont été signés.
+// enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
+// apparaît sous sa dénomination quand elle est connue. Les contrats plus anciens restent tels qu'ils ont
+// été signés.
 const contractFreelanceName = (form) => {
   const name = String(form?.freelanceName || "").trim();
-  return form && form.freelanceLegalStatus !== undefined ? withEI(name, form.freelanceLegalStatus) : name;
+  if (!form) return name;
+  const company = String(form.freelanceCompanyName || "").trim();
+  if (company && form.freelanceLegalStatus !== undefined && !isEntrepreneurIndividuel(form.freelanceLegalStatus)) return company;
+  return form.freelanceLegalStatus !== undefined ? withEI(name, form.freelanceLegalStatus) : name;
+};
+// Formulaire qui a perdu le statut juridique alors que le texte du contrat écrit « Nom EI » : on suit le
+// texte du contrat, pour que la page de garde, les signatures et l'annexe disent la même chose que lui.
+const textShowsEI = (name, text) => {
+  const n = String(name || "").trim();
+  const t = String(text || "");
+  return !!n && (t.includes(`${n} EI`) || t.includes(`${n} (EI)`));
+};
+const resolveLegalStatus = (form, text) =>
+  form && form.freelanceLegalStatus === undefined && textShowsEI(form.freelanceName, text)
+    ? { ...form, freelanceLegalStatus: "" }
+    : form;
+
+// ── Contrôle automatique du contrat rédigé ──
+// Le texte du contrat est rédigé en partie par l'IA : il peut varier d'une fois sur l'autre. Après chaque
+// rédaction, Freeley relit le texte et liste ce qui ne va pas. Il prévient le freelance, il ne bloque rien.
+// Chaque règle correspond à un défaut déjà rencontré, ou à une clause que la loi interdit.
+const checkContractText = (text, form = {}, profile = {}) => {
+  const t = String(text || "");
+  if (!t.trim()) return [];
+  const out = [];
+  const add = (m) => { if (!out.includes(m)) out.push(m); };
+  const has = (re) => re.test(t);
+  const b2c = form.typeClient === "particulier";
+
+  // Structure : les 13 articles
+  const missing = [];
+  for (let i = 1; i <= 13; i++) if (!new RegExp(`ARTICLE ${i} [—–-]`).test(t)) missing.push(i);
+  if (missing.length === 1) add(`L'article ${missing[0]} manque. Le contrat est peut-être incomplet.`);
+  else if (missing.length > 1) add(`Les articles ${missing.join(", ")} manquent. Le contrat est peut-être incomplet.`);
+
+  // Consigne de rédaction recopiée dans le contrat, ou passage laissé à compléter
+  if (has(/Seul l'acompte est dû à la signature|le solde n'est jamais payable|Inclus OBLIGATOIREMENT|mot pour mot|STRUCTURE OBLIGATOIRE|DONNÉES DE LA MISSION|CONSIGNES DE RÉDACTION|RÈGLES ABSOLUES|═/)) add("Une consigne de rédaction a été recopiée dans le contrat.");
+  if (has(/\[[^\]\n]{0,60}\]|\bXXX\b|_{4,}|Non défini/)) add("Un passage du contrat est resté à compléter.");
+
+  // Mention « EI » juste après le nom d'un entrepreneur individuel
+  const name = String(form.freelanceName || "").trim();
+  if (name && form.freelanceLegalStatus !== undefined && isEntrepreneurIndividuel(form.freelanceLegalStatus)
+      && !t.includes(`${name} EI`) && !t.includes(`${name} (EI)`) && !t.includes(`${name}, entrepreneur individuel`))
+    add("La mention « EI » n'apparaît pas juste après ton nom. Elle est obligatoire pour un entrepreneur individuel.");
+
+  // Civilité ajoutée : elle n'est jamais demandée au freelance, elle peut être fausse
+  if (has(/\b(Monsieur|Madame|Mademoiselle)\s+[A-ZÀ-Ý]/)) add("Le contrat ajoute « Monsieur » ou « Madame » devant un nom. Vérifie que c'est juste, ou refais le contrat.");
+
+  // Montants : le total et l'acompte doivent apparaître tels quels
+  const pr = contractPricing(form, profile);
+  const flat = t.replace(/(\d)[\s.](?=\d{3}(?!\d))/g, "$1").replace(/\s+(€|euros)/g, " $1");
+  const shows = (n) => { const s = fmtEuro(n).replace(/\s/g, ""); return flat.includes(`${s} €`) || flat.includes(`${s},00 €`) || flat.includes(`${s} euros`); };
+  if (pr.total > 0 && !shows(pr.total)) add(`Le montant total (${fmtEuro(pr.total)} € ${pr.unit}) n'apparaît pas dans le contrat.`);
+  if (pr.total > 0 && pr.pct > 0 && pr.acompte > 0 && !shows(pr.acompte)) add(`Le montant de l'acompte (${fmtEuro(pr.acompte)} € ${pr.unit}) n'apparaît pas dans le contrat.`);
+
+  // Dates de la mission, telles que saisies
+  const dateShown = (iso) => {
+    if (!iso) return true;
+    const d = new Date(iso);
+    if (isNaN(d)) return true;
+    const month = d.toLocaleDateString("fr-FR", { month: "long" });
+    return t.includes(d.toLocaleDateString("fr-FR")) || new RegExp(`\\b${d.getDate()}(er)?\\b[^.\\n]{0,25}${month} ${d.getFullYear()}`).test(t);
+  };
+  if (!dateShown(form.startDate) || !dateShown(form.endDate)) add("Les dates de la mission n'apparaissent pas telles que tu les as saisies.");
+
+  if (b2c) {
+    if (has(/plafonn|responsabilité totale et cumulée|à l'exclusion de tout préjudice/i)) add("Client particulier : le contrat limite ta responsabilité. C'est interdit avec un particulier : la clause serait sans effet, et tu risquerais une amende.");
+    if (has(/sollicitation|solicitation|débauch/i)) add("Client particulier : le contrat contient une clause de non-sollicitation. Elle est réservée aux contrats entre professionnels.");
+    if (has(/pénalités? de retard|L441-10|D441-5|indemnité forfaitaire (pour|de) frais de recouvrement/i)) add("Client particulier : le contrat parle de pénalités de retard ou de l'indemnité de 40 €. Elles sont réservées aux professionnels.");
+    if (has(/€\s*HT\b(?!\s+et\b)|hors taxes(?! et)/)) add("Client particulier : un prix est écrit hors taxes. Avec un particulier, les prix sont toujours TTC.");
+    if (has(/reste(nt)? acquis au Prestataire/)) add("Client particulier : le contrat dit que l'acompte reste acquis au prestataire. Avec un particulier, cette clause est abusive.");
+    if (has(/réputée définitivement acceptée|retours oraux/)) add("Client particulier : la validation des livrables est trop stricte pour un particulier.");
+    if (has(/compétence exclusive|attribution de (compétence|juridiction)|tribunal de commerce/i)) add("Client particulier : le contrat impose un tribunal. C'est interdit avec un particulier.");
+    if (!has(/L221-10/)) add("Client particulier : la règle des 7 jours sans paiement après une signature hors établissement n'apparaît pas.");
+    if (!String(form.freelanceMediateur || "").trim()) add("Client particulier : ton médiateur de la consommation n'est pas indiqué, alors que la loi l'impose. Ajoute-le dans ton profil, puis refais le contrat.");
+  } else if (!has(/L441-10/)) {
+    add("Client professionnel : les pénalités de retard, obligatoires entre professionnels (article L441-10 du Code de commerce), n'apparaissent pas.");
+  }
+
+  // Assurance annoncée par la clause, mais pas renseignée
+  if (form.clauseSecurite && !String(form.freelanceAssurance || "").trim()) add("La clause d'assurance dit que tes assurances sont indiquées dans le contrat, mais ton assurance n'est pas renseignée. Ajoute-la dans ton profil puis refais le contrat, ou décoche la clause.");
+
+  // Mot anglais oublié
+  if (has(/\b(duly|scope creep|deliverables?|best effort)\b/i)) add("Le contrat contient un mot anglais.");
+  return out;
+};
+
+// ── Consignes de rédaction du contrat (texte envoyé à l'IA) ──
+// Fonction à part, sans écran : les tests vérifient les consignes de chaque cas (particulier ou
+// professionnel, TVA ou franchise, métier, options) sans passer par le formulaire. « now » sert aux tests.
+const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
+      const d1 = form.startDate ? new Date(form.startDate).toLocaleDateString("fr-FR") : "Non défini";
+      const d2 = form.endDate   ? new Date(form.endDate).toLocaleDateString("fr-FR")   : "Non défini";
+      const acomptePct = Number(form.acomptePourcentage) || 0;
+      // Délai de paiement. « Comptant » sans acompte : tout est payé à la signature. Avec un acompte,
+      // l'acompte est payé à la signature et le solde dès réception de sa facture : on ne donne JAMAIS
+      // à l'IA la phrase « 100 % à la signature » dans ce cas, sinon le contrat se contredit.
+      const paymentTermsLabel = form.paymentTerms === "Comptant"
+        ? "comptant à la commande (100 % à la signature)"
+        : `${form.paymentTerms} jours nets à compter de la date de facturation`;
+      const soldeTermsLabel = form.paymentTerms === "Comptant"
+        ? "dès réception de la facture de solde, sans délai"
+        : `à ${form.paymentTerms} jours nets à compter de la date de la facture de solde`;
+      // Fin de la clause de recette (article 3) : on ne parle de « solde » que s'il y en a un
+      const recetteEnd = acomptePct > 0
+        ? "valant recette tacite et ouvrant droit à la facturation du solde correspondant"
+        : form.paymentTerms === "Comptant"
+          ? "valant recette tacite"
+          : "valant recette tacite et ouvrant droit à la facturation des honoraires";
+      const paymentConditionsData = acomptePct > 0
+        ? `acompte de ${acomptePct} % à la signature ; solde à la livraison, payable ${soldeTermsLabel}`
+        : paymentTermsLabel;
+      // Montants du contrat : TTC pour un particulier (obligatoire), HT pour un professionnel
+      const pricing = contractPricing(form, profile);
+      const U = pricing.unit;
+      const isB2C = form.typeClient === "particulier";
+      const isCompany = !isEntrepreneurIndividuel(form.freelanceLegalStatus);
+
+      // Article 3 — particulier : pas de preuve limitée ni de validation qui priverait le client de ses garanties
+      const recetteEndB2C = acomptePct > 0
+        ? ", ce qui permet la facturation du solde correspondant"
+        : form.paymentTerms === "Comptant" ? "" : ", ce qui permet la facturation des honoraires";
+      const recetteClause = isB2C
+        ? `"À compter de la livraison de chaque livrable, le Client dispose d'un délai de sept (7) jours ouvrés pour faire part au Prestataire, par écrit (par exemple par courriel), de ses observations ou réserves. À défaut, le livrable est considéré comme validé${recetteEndB2C}. Cette validation ne prive pas le Client des garanties légales dont il bénéficie, notamment pour les défauts qui n'apparaissent qu'après la livraison."`
+        : `"À compter de la livraison de chaque livrable, le Client dispose d'un délai de SEPT (7) JOURS OUVRÉS pour formuler par écrit (email avec accusé de réception) ses observations ou réserves motivées et circonstanciées. À l'expiration de ce délai sans retour écrit du Client, la prestation est réputée définitivement acceptée sans réserve, ${recetteEnd}. Les retours oraux ou non circonstanciés ne seront pas pris en compte."`;
+
+      // Article 4 — phrases écrites ici, mot pour mot : l'IA ne reformule plus les échéances de paiement
+      // (elle avait recopié une consigne dans le contrat : « Seul l'acompte est dû à la signature… »).
+      const dueAtSigning = acomptePct > 0 || form.paymentTerms === "Comptant";
+      const horsEtabRef = isB2C ? ", sous réserve du délai de sept jours applicable aux contrats conclus hors établissement rappelé ci-après" : "";
+      const paymentSentences = `- "Le montant total des honoraires est fixé à ${fmtEuro(pricing.total)} € ${U}."
+` + (acomptePct > 0
+        ? `- "Un acompte de ${acomptePct} %, soit ${fmtEuro(pricing.acompte)} € ${U}, est dû à la signature du présent contrat${horsEtabRef}. Le versement de cet acompte conditionne le démarrage de la mission."
+- "Le solde de ${100 - acomptePct} %, soit ${fmtEuro(pricing.solde)} € ${U}, est exigible à la livraison et à la recette finale de la mission, payable ${soldeTermsLabel}."`
+        : form.paymentTerms === "Comptant"
+          ? `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${fmtEuro(pricing.total)} € ${U}, est payable à la signature du présent contrat${horsEtabRef}. Le versement de cette somme conditionne le démarrage de la mission."`
+          : `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${fmtEuro(pricing.total)} € ${U}, est facturée à la fin de la mission et payable à ${form.paymentTerms} jours nets à compter de la date de cette facture."`);
+      // Contrat hors établissement (art. L221-10 C. conso) : rien ne se paie pendant 7 jours. Si un paiement
+      // conditionne le démarrage, le contrat dit ce que deviennent les dates de la mission.
+      const horsEtabSentence = `"Lorsque le présent contrat est conclu hors établissement, aucun paiement ne peut être exigé ni reçu du Client avant l'expiration d'un délai de sept jours à compter de sa conclusion, sauf pour des travaux d'entretien ou de réparation à réaliser en urgence au domicile du Client et expressément sollicités par lui, dans la limite des pièces de rechange et travaux strictement nécessaires pour répondre à l'urgence (article L221-10 du Code de la consommation).${dueAtSigning ? " En dehors de ce cas d'urgence, la somme prévue à la signature n'est alors exigible qu'à l'expiration de ce délai. Si la date de démarrage prévue à l'article 3 tombe avant son versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée." : ""}"`;
+      // Article 6 (création, digital, autre) : la clause dit que le contrat indique si le prix rémunère aussi la
+      // cession des droits. On l'écrit vraiment, à l'article 4.
+      const cessionInPrice = form.categorieMetier !== "artisanat" && form.categorieMetier !== "conseil";
+      // Contenu numérique déjà existant (vendu tel quel, à plusieurs clients) : rien n'est créé pour ce client,
+      // donc pas de cession exclusive, mais une licence d'utilisation non exclusive.
+      const existingContent = isB2C && !!form.contenuNumeriquePret && cessionInPrice;
+      const existingContentLicence = existingContent
+        ? `\nLe livrable est un contenu numérique déjà existant, fourni tel quel. Inclus aussi, mot pour mot : "Le contenu numérique fourni au titre du présent contrat existait avant la mission. Sous réserve du paiement intégral et effectif des honoraires, le Prestataire concède au Client, pour ses besoins propres, une licence non exclusive d'utilisation de ce contenu, pour le monde entier et pendant toute la durée légale de protection applicable. Cette licence n'autorise pas la revente du contenu en tant que produit autonome, sa commercialisation séparée ni sa concession à des tiers. La cession prévue au présent article ne porte que sur les éventuelles créations réalisées spécifiquement pour le Client."`
+        : "";
+
+      // Article 8 — particulier : aucune limite de responsabilité (clause noire, art. R212-1 6° C. conso)
+      const responsabiliteB2C = `"Le Prestataire s'engage à exécuter la mission avec le soin et la compétence attendus d'un professionnel de son activité. Lorsque le résultat attendu ne dépend pas uniquement de son intervention, il est tenu d'une obligation de moyens. Il est responsable envers le Client des dommages causés par un manquement à ses obligations, dans les conditions prévues par la loi. Aucune stipulation du présent contrat ne limite ni n'exclut cette responsabilité, ni les garanties légales dont bénéficie le Client, notamment la garantie légale de conformité lorsqu'elle s'applique."`;
+      const assuranceAfterClause = form.freelanceAssurance
+        ? `\nJuste après cette clause, inclus mot pour mot : "Assurance déclarée par le Prestataire : ${form.freelanceAssurance}."`
+        : "";
+
+      // Article 9 — résiliation : phrases fixes, et rien qui retienne l'acompte d'un particulier
+      const resiliationClient = form.clauseDedit
+        ? `Ne mentionne PAS que l'acompte est automatiquement et intégralement conservé comme indemnité forfaitaire fixe en cas de résiliation par le Client : ce sujet est entièrement régi par la clause de dédommagement ci-dessous, qui prévoit une indemnité déterminée selon l'avancement réel de la mission, et ne doit pas être contredite ou dupliquée ici.`
+        : (isB2C || acomptePct === 0)
+          ? `Inclus aussi, mot pour mot : "En cas de résiliation par le Client${isB2C ? " en dehors de l'exercice de son droit de rétractation" : ""}, les prestations effectivement réalisées jusqu'à la date de résiliation restent dues. Toute somme déjà versée s'impute sur ces montants, et le surplus éventuel est restitué au Client."`
+          : `Inclus aussi, mot pour mot : "En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire."`;
+
+      // Article 11 — particulier : le médiateur du freelance, s'il est indiqué dans son profil
+      const mediateurB2C = form.freelanceMediateur
+        ? `au médiateur de la consommation dont relève le Prestataire, ${form.freelanceMediateur},`
+        : `à un médiateur de la consommation`;
+
+      // Article 12 — dispositions générales : texte fixe
+      const dispositionsGenerales = isB2C
+        ? `"Le présent contrat, ses annexes et ses éventuels avenants signés expriment l'accord des Parties sur son objet. Toute modification du contrat fait l'objet d'un avenant écrit, accepté par les deux Parties. Si l'une des stipulations du présent contrat est déclarée nulle ou inapplicable, les autres stipulations demeurent en vigueur. Le fait pour l'une des Parties de ne pas se prévaloir d'un manquement de l'autre Partie ne vaut pas renonciation à s'en prévaloir ultérieurement. En cas de contradiction entre un avenant et le présent contrat, l'avenant prévaut pour son objet. Les notifications prévues au présent contrat sont adressées aux adresses postales ou électroniques indiquées en tête du contrat."`
+        : `"Le présent contrat, ses annexes et ses éventuels avenants signés expriment l'intégralité de l'accord des Parties sur son objet et remplacent tout accord antérieur portant sur le même objet. Toute modification du contrat fait l'objet d'un avenant écrit, accepté par les deux Parties. Si l'une des stipulations du présent contrat est déclarée nulle ou inapplicable, les autres stipulations demeurent en vigueur. Le fait pour l'une des Parties de ne pas se prévaloir d'un manquement de l'autre Partie ne vaut pas renonciation à s'en prévaloir ultérieurement. En cas de contradiction entre un avenant et le présent contrat, l'avenant prévaut pour son objet. Les notifications prévues au présent contrat sont adressées aux adresses postales ou électroniques indiquées en tête du contrat."`;
+      // Date et numéro générés par l'app (pas par l'IA) : garantit une info réelle, jamais hallucinée
+      const todayFull = now.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+      const contractRef = `CP-${now.getFullYear()}-${String(now.getTime()).slice(-4)}`;
+
+      const prompt = `Tu es un avocat d'affaires français spécialisé en droit des contrats de prestation intellectuelle et en propriété intellectuelle. Rédige un CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT complet, à la fois rigoureux sur le plan juridique et protecteur pour le Prestataire, en français, en utilisant EXACTEMENT les informations fournies ci-dessous.
+
+══════════════════════════════════════════════
+DONNÉES DE LA MISSION
+══════════════════════════════════════════════
+Prestataire        : ${contractFreelanceName(form)}${isCompany && form.freelanceLegalStatus ? "\nForme juridique    : " + form.freelanceLegalStatus + "\nReprésentant légal : " + form.freelanceName : ""}
+Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + form.freelanceSiret : ""}${form.freelanceTvaNumber ? "\nN° TVA Prestataire : " + form.freelanceTvaNumber : ""}
+Adresse Prestataire: ${form.freelanceAddress}
+Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + fmtPhone(form.freelancePhone) : ""}${form.freelanceAssurance ? "\nAssurance professionnelle du Prestataire : " + form.freelanceAssurance : ""}${isB2C && form.freelanceMediateur ? "\nMédiateur de la consommation du Prestataire : " + form.freelanceMediateur : ""}
+
+Client             : ${form.clientName}${form.clientCompany ? " — " + form.clientCompany : ""}
+Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}${!isB2C && form.clientSiret ? "\nSIRET Client       : " + form.clientSiret : ""}
+Adresse Client     : ${form.clientAddress || "Non communiquée"}
+Email Client       : ${form.clientEmail || "—"}
+
+Titre de la mission: ${form.missionTitle}
+Domaine d'activité : ${form.categorieMetier === "artisanat" ? "Métier manuel / artisanat" : form.categorieMetier === "digital" ? "Digital / Tech / Création" : form.categorieMetier === "conseil" ? "Conseil / Formation / Services" : "Autre / prestation générale"}
+Description        : ${form.missionDescription}${isB2C && form.contenuNumeriquePret ? "\nNature du livrable : contenu numérique déjà existant, fourni tel quel (pas un travail réalisé sur mesure pour ce client)" : ""}
+Période            : du ${d1} au ${d2}
+${pricing.b2c ? `Prix TTC           : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Honoraires HT      : ${form.price} €`}
+Conditions paiement: ${paymentConditionsData}
+Révisions incluses : ${form.revisions} aller(s)-retour(s)
+${form.typeClient === "particulier"
+  ? `Intérêts de retard : ${form.latePaymentPenalty ? "OUI (taux d'intérêt légal, après mise en demeure — art. 1231-6 C. civ.)" : "NON"}`
+  : `Pénalités de retard: ${form.latePaymentPenalty ? "OUI (clause légale obligatoire Art. L441-10 C.com.)" : "NON"}`}
+Clause de dédommagement annulation: ${form.clauseDedit ? "OUI" : "NON"}
+Clause de bonne conduite / respect mutuel: ${form.clauseRespect ? "OUI" : "NON"}
+Clause de suspension en cas de retard de paiement: ${form.clauseSuspension ? "OUI" : "NON"}
+Clause de sécurité et assurance professionnelle: ${form.clauseSecurite ? "OUI" : "NON"}
+Clause d'interlocuteur unique côté client: ${form.clauseInterlocuteur ? "OUI" : "NON"}
+Clause de préavis pour mission récurrente: ${form.clausePreavis ? `OUI (${form.preavisJours} jours)` : "NON"}
+
+══════════════════════════════════════════════
+STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
+══════════════════════════════════════════════
+
+EN-TÊTE : Titre "CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", puis la date suivante en toutes lettres, à utiliser EXACTEMENT telle quelle sans la modifier ni la recalculer : "${todayFull}". Numéro de contrat à utiliser EXACTEMENT tel quel, ne jamais en inventer un autre : ${contractRef}. Mention "ENTRE LES SOUSSIGNÉS".${!isCompany ? ` Le Prestataire est un entrepreneur individuel : écris son nom EXACTEMENT comme dans « Prestataire » ci-dessus, avec la mention « EI » juste après son nom (obligatoire sur ses contrats), dans la présentation des parties comme dans les signatures.` : form.freelanceCompanyName ? ` Le Prestataire est une société (${form.freelanceLegalStatus}) : présente-la sous sa dénomination « ${form.freelanceCompanyName} », avec sa forme juridique, représentée par ${form.freelanceName}, dans la présentation des parties comme dans les signatures.` : ` Le Prestataire exerce sous la forme d'une société (${form.freelanceLegalStatus}) : indique cette forme juridique dans la présentation des parties.`} Si un numéro SIRET ou un numéro de TVA est fourni ci-dessus, indique-le dans la présentation des parties. N'ajoute aucune civilité (Monsieur, Madame) devant le nom des parties.
+
+ARTICLE 1 — INDÉPENDANCE DU PRESTATAIRE ET ABSENCE DE LIEN DE SUBORDINATION
+Rédige une clause affirmant EXPLICITEMENT que :
+- Le Prestataire exerce son activité en toute indépendance et autonomie ;
+- Il conserve l'entière liberté de choix de ses horaires de travail, de son matériel, de ses méthodes et de son organisation ;
+- Le présent contrat ne crée en aucun cas un lien de subordination au sens du droit du travail (art. L1221-1 C.trav.) ;
+- Le Prestataire peut exercer d'autres missions simultanément pour d'autres clients ;
+- Le Client s'interdit expressément toute directive, instruction ou contrôle portant sur les moyens d'exécution.
+Cite l'article L1221-1 du Code du travail et la jurisprudence Soc. 13 nov. 1996 sur le faisceau d'indices.
+
+ARTICLE 2 — OBJET DU CONTRAT ET DESCRIPTION DE LA MISSION
+Objet général, puis la description de la mission et des livrables, reprise FIDÈLEMENT depuis la description fournie par le Prestataire. Tu peux la reformuler dans un style juridique et la présenter en énumération, mais n'ajoute AUCUN livrable, AUCUNE prestation, AUCUNE exclusion, AUCUNE quantité, AUCUNE fréquence et AUCUN délai qui n'y figure pas.
+
+ARTICLE 3 — DÉLAIS, PLANNING ET PROCÉDURE DE VALIDATION (RECETTE)
+Rédige les dates de début/fin. Puis inclus OBLIGATOIREMENT, mot pour mot, cette clause de recette :
+${recetteClause}${form.categorieMetier === "artisanat" ? `\nInclus aussi, mot pour mot : "Pour les travaux qui relèvent de l'article 1792-6 du Code civil, la réception est prononcée dans les conditions prévues à l'article 6."` : ""}
+${form.clauseInterlocuteur ? (form.typeClient === "particulier"
+  ? `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Le Client est l'interlocuteur de référence du Prestataire pour la validation des livrables et la transmission des instructions. S'il souhaite qu'un tiers intervienne pour son compte, il en informe préalablement le Prestataire par écrit en précisant l'identité et le rôle de cette personne. Les instructions d'un tiers non désigné ne sont opposables au Prestataire qu'après confirmation écrite du Client."`
+  : `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Lorsque plusieurs personnes sont susceptibles d'intervenir pour le compte du Client dans le suivi de la mission, le Client désigne un interlocuteur unique, dûment habilité, chargé de la validation des livrables et de la transmission des instructions au Prestataire. Le Prestataire n'est tenu de prendre en compte que les observations, validations ou demandes de modification émanant de cet interlocuteur ou expressément confirmées par écrit par celui-ci. Toute instruction contradictoire émanant d'une autre personne intervenant pour le compte du Client ne peut engager le Prestataire ni justifier un dépassement du périmètre ou des délais convenus. L'identité et les coordonnées de l'interlocuteur sont précisées au contrat ou communiquées par écrit avant le commencement de la mission. Tout changement est notifié par écrit dans les meilleurs délais."`)
+  : ""}
+
+ARTICLE 4 — HONORAIRES, MODALITÉS DE PAIEMENT ET ACOMPTE
+${pricing.b2c ? `Montant total TTC : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Montant total HT : ${form.price} €`}
+Inclus OBLIGATOIREMENT, mot pour mot, les phrases suivantes, chacune dans son propre sous-paragraphe :
+${paymentSentences}
+${pricing.b2c
+  ? `- "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent aux montants que le Client aura effectivement à payer (${pricing.taxNote})."
+- ${horsEtabSentence}`
+  : pricing.tvaApplicable
+    ? `- "Toutes les sommes sont exprimées hors taxes ; la TVA s'y ajoute au taux en vigueur."`
+    : `- "TVA non applicable, article 293 B du Code général des impôts : les montants indiqués au présent contrat sont les montants effectivement dus par le Client."`}${cessionInPrice ? `
+- "Le prix global du présent contrat rémunère à la fois ${existingContent ? "la fourniture du contenu numérique et les droits d'utilisation prévus à l'article 6" : "la réalisation de la prestation et la cession des droits prévue à l'article 6"}."` : ""}
+${(form.latePaymentPenalty || !isB2C)
+  ? (form.typeClient === "particulier"
+    ? `- Le client étant un PARTICULIER (B2C), la clause doit IMPÉRATIVEMENT s'intituler "intérêts de retard" (jamais "pénalités de retard", terme réservé au Code de commerce entre professionnels et inapplicable à un consommateur), utiliser le taux d'intérêt légal en vigueur en France applicable aux consommateurs, ET exiger une mise en demeure préalable conformément à l'article 1231-6 du Code civil — ces intérêts ne courent qu'à compter de cette mise en demeure, jamais automatiquement dès la date d'échéance (et non le Code de commerce ni l'indemnité forfaitaire de 40 €, strictement réservés aux professionnels) : "En cas de retard de paiement, une mise en demeure sera préalablement adressée au Client par lettre recommandée ou courrier électronique avec accusé de réception. À défaut de règlement, des intérêts de retard calculés au taux d'intérêt légal en vigueur seront appliqués sur les sommes dues à compter de la date de cette mise en demeure et jusqu'au complet paiement, conformément à l'article 1231-6 du Code civil et au droit de la consommation."`
+    : `- La clause légale de pénalités de retard réservée aux professionnels : "Conformément à l'article L441-10 du Code de commerce, toute somme non réglée à l'échéance porte, de plein droit et sans qu'un rappel soit nécessaire, des pénalités de retard au taux d'intérêt appliqué par la Banque centrale européenne à son opération de refinancement la plus récente, majoré de dix (10) points de pourcentage, sauf stipulation d'un autre taux conforme aux limites légales. Les pénalités sont exigibles à compter du jour suivant la date de règlement figurant sur la facture. En sus, tout professionnel en situation de retard de paiement est de plein droit débiteur de l'indemnité forfaitaire pour frais de recouvrement fixée à quarante euros (40 €) par l'article D441-5 du Code de commerce. Lorsque les frais de recouvrement exposés sont supérieurs à ce montant, le Prestataire peut demander une indemnisation complémentaire sur justification."`)
+  : ""}
+${pricing.b2c
+  ? `- Le Client étant un consommateur, le prix est toujours exprimé toutes taxes comprises : n'écris jamais un montant « HT » ou « hors taxes » sans son montant TTC, et n'écris jamais qu'une taxe s'ajoutera au prix.`
+  : pricing.tvaApplicable
+    ? ""
+    : `- Le Prestataire bénéficie de la franchise en base de TVA : n'écris jamais qu'une TVA pourrait s'ajouter au prix.`}
+${form.clauseSuspension ? `- Inclus OBLIGATOIREMENT la clause de suspension suivante : "En cas de retard de paiement de toute somme exigible au titre du présent contrat persistant plus de huit (8) jours après une mise en demeure adressée par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception, restée sans effet, le Prestataire peut suspendre l'exécution de la mission jusqu'au complet règlement des sommes dues. Cette suspension ne constitue pas une faute du Prestataire et n'ouvre pas droit à indemnité au profit du Client. Les délais d'exécution affectés par la suspension sont eux-mêmes suspendus et prorogés d'une durée correspondant à la période de suspension, sans que le retard qui en résulte puisse être imputé au Prestataire."` : ""}
+
+ARTICLE 5 — RÉVISIONS ET MODIFICATIONS DU PÉRIMÈTRE
+Nombre de révisions incluses : ${form.revisions}. Clause sur les demandes hors périmètre : toute demande hors périmètre fait l'objet d'un avenant écrit et facturé au tarif horaire du Prestataire${isB2C ? ", communiqué au Client avant l'établissement de l'avenant" : ""}.
+
+ARTICLE 6 — ${form.categorieMetier === "artisanat" ? "GARANTIE DE BONNE EXÉCUTION ET CONFORMITÉ AUX NORMES MÉTIER" : form.categorieMetier === "conseil" ? "PROPRIÉTÉ INTELLECTUELLE ET CONFIDENTIALITÉ" : "PROPRIÉTÉ INTELLECTUELLE ET CESSION DES DROITS SUSPENDUE AU PAIEMENT"}
+Inclus OBLIGATOIREMENT, mot pour mot et SANS reformuler ni raccourcir, la clause suivante :
+${form.categorieMetier === "artisanat"
+  ? `"Le Prestataire garantit la conformité de son intervention aux normes techniques et réglementaires en vigueur applicables à son secteur d'activité, à la nature des travaux effectivement réalisés ainsi qu'aux spécifications convenues au contrat et, le cas échéant, au devis accepté. Il s'engage à respecter les règles de l'art et les obligations de sécurité propres à sa profession. Dans le cadre de la mission qui lui est confiée et de sa compétence professionnelle, le Prestataire informe et conseille le Client sur les difficultés, incompatibilités, anomalies apparentes ou risques qu'il peut raisonnablement identifier et qui sont susceptibles d'affecter la bonne exécution, la conformité, la sécurité ou la pérennité des travaux. La portée de ce devoir s'apprécie au regard de la mission effectivement confiée au Prestataire. Lorsque leurs conditions légales d'application sont réunies, le Prestataire est tenu notamment de la garantie de parfait achèvement prévue à l'article 1792-6 du Code civil, pendant un an à compter de la réception ; de la garantie de bon fonctionnement prévue à l'article 1792-3 du Code civil, d'une durée minimale de deux ans à compter de la réception, pour les éléments d'équipement entrant dans son champ d'application ; et de la responsabilité prévue aux articles 1792 et 1792-2 du Code civil pour les dommages entrant dans leur champ d'application. Conformément à l'article 1792-4-1, les responsabilités et garanties relevant des articles 1792 à 1792-2 prennent fin dix ans après la réception des travaux. Lorsque les travaux relèvent de ce régime, la réception est prononcée contradictoirement conformément à l'article 1792-6 du Code civil ; la date de réception constitue le point de départ des garanties précitées. Conformément à l'article 1792-5 du Code civil, aucune stipulation du présent contrat ne peut exclure ou limiter les responsabilités et garanties impératives visées par ce texte."`
+  : form.categorieMetier === "conseil"
+  ? `"Pour les livrables susceptibles d'être protégés par un droit de propriété intellectuelle, le Prestataire demeure titulaire des droits qui y sont attachés jusqu'au paiement intégral et effectif des honoraires dus. Sous réserve de ce paiement, le Prestataire concède au Client, pour ses besoins propres et aux fins pour lesquelles les livrables ont été réalisés, une licence non exclusive lui permettant d'utiliser, de reproduire, de représenter et, lorsque cela est nécessaire à l'usage convenu, d'adapter les livrables. Cette licence est consentie pour le monde entier et pendant toute la durée légale de protection applicable. Sauf stipulation contraire, cette licence n'autorise pas la revente des livrables en tant que produit autonome, leur commercialisation séparée ni leur concession sous licence à des tiers. Chaque Partie demeure titulaire des éléments, contenus, documents, méthodes et outils qu'elle détenait antérieurement à la mission ou qu'elle développe indépendamment de celle-ci et garantit disposer des droits nécessaires sur les éléments qu'elle remet à l'autre Partie pour l'exécution du contrat. Le Prestataire conserve notamment la propriété de ses méthodologies, outils, modèles, trames, processus et savoir-faire. Les obligations contractuelles de confidentialité des Parties sont régies par l'article 7 du présent contrat. Toute utilisation du nom, de la marque ou du logo du Client, ainsi que toute reproduction d'extraits des livrables à titre de référence commerciale ou de portfolio, est soumise à l'accord écrit préalable du Client."`
+  : `"(a) Éléments préexistants et droits pendant la mission : le Prestataire demeure titulaire des droits portant sur ses méthodologies, outils, modèles, bibliothèques, composants, codes génériques, savoir-faire et, plus généralement, sur tous les éléments préexistants à la mission ou développés indépendamment de celle-ci. Jusqu'au paiement intégral et effectif des honoraires dus, le Prestataire demeure titulaire des droits patrimoniaux portant sur les créations originales spécifiquement réalisées dans le cadre de la mission. Le Client bénéficie toutefois, avant paiement complet, d'une autorisation provisoire, non exclusive et strictement limitée aux opérations de test, de recette et de validation prévues au contrat.
+(b) Cession des créations spécifiques après paiement : sous réserve du paiement intégral et effectif des honoraires, le Prestataire cède au Client les droits patrimoniaux portant sur les créations originales spécifiquement réalisées pour lui dans le cadre de la mission et expressément identifiées parmi les livrables. La cession ne porte pas sur des œuvres futures indéterminées. Pour chaque catégorie de création concernée, les droits cédés sont spécifiés distinctement et le domaine d'exploitation est délimité quant à son étendue, sa destination, son lieu et sa durée, conformément à l'article L131-3 du Code de la propriété intellectuelle. Sauf précision différente au contrat, la cession comprend, dans la mesure nécessaire aux finalités du projet : le droit de reproduction ; le droit de représentation ; le droit d'adaptation, de transformation et d'arrangement ; ainsi que le droit de traduction lorsque la nature du livrable le justifie. Elle est consentie pour le monde entier et pendant la durée légale de protection applicable, pour les exploitations correspondant au projet et aux finalités décrits au contrat. La cession est consentie à titre exclusif.
+(c) Éléments tiers : les composants, logiciels, bibliothèques, contenus, polices, images et autres éléments appartenant à des tiers demeurent soumis à leurs licences propres.
+(d) Fichiers sources et documentation : lorsque la nature de la mission le justifie et que ces éléments sont compris dans le périmètre contractuel, le Prestataire remet au Client les fichiers sources, codes sources, fichiers natifs et documentations nécessaires à l'exercice effectif des droits cédés.
+(e) Garanties : le Prestataire déclare disposer des droits nécessaires pour consentir la cession et garantit la jouissance paisible des droits cédés, sous réserve des éléments fournis ou imposés par le Client et des éléments appartenant à des tiers expressément identifiés. Réciproquement, le Client garantit disposer des droits nécessaires sur les contenus, textes, images, signes, données et autres éléments qu'il fournit au Prestataire.
+(f) Références commerciales : toute utilisation du nom, de la marque ou du logo du Client, ainsi que toute reproduction d'extraits des livrables dans un portfolio ou une communication commerciale du Prestataire, est soumise à l'accord écrit préalable du Client.
+Lorsque le livrable comprend un logiciel ou des éléments logiciels protégés, la cession couvre, dans le périmètre défini ci-dessus et sous réserve des dispositions impératives, les droits d'exploitation visés à l'article L122-6 du Code de la propriété intellectuelle, notamment la reproduction permanente ou provisoire, la traduction, l'adaptation, l'arrangement ou toute autre modification, ainsi que la mise sur le marché des exemplaires dans les conditions convenues. Lorsque le Prestataire est l'auteur personne physique du logiciel, la rémunération correspondant à la cession des droits peut être évaluée forfaitairement, conformément au 5° de l'article L131-4 du Code de la propriété intellectuelle. Lorsque le prix global du contrat rémunère à la fois la prestation et cette cession, le contrat l'indique expressément. Les droits moraux de l'auteur du logiciel s'exercent dans les conditions particulières prévues à l'article L121-7 du Code de la propriété intellectuelle.
+Lorsque le Prestataire est l'auteur personne physique de créations protégées autres qu'un logiciel et qu'une cession de droits d'auteur est consentie, la rémunération attachée à cette cession respecte l'article L131-4 du Code de la propriété intellectuelle : elle est appropriée et proportionnelle aux recettes provenant de la vente ou de l'exploitation, sauf lorsqu'une rémunération forfaitaire est légalement admise. Lorsque l'article L131-5-1 est applicable, le cessionnaire respecte l'obligation de transparence et de reddition d'informations qu'il prévoit. En cas de cession exclusive, le droit de résiliation pour absence d'exploitation prévu à l'article L131-5-2 est applicable lorsque ses conditions sont réunies. La cession porte uniquement sur les droits patrimoniaux cessibles ; le droit moral de l'auteur demeure régi par l'article L121-1 du Code de la propriété intellectuelle."`}${existingContentLicence}
+
+${isB2C
+  ? `ARTICLE 7 — CONFIDENTIALITÉ
+Clause de confidentialité réciproque pendant la mission et 3 ans après. Le Client étant un particulier, n'écris AUCUNE clause de non-sollicitation, de non-débauchage ni de non-concurrence.`
+  : `ARTICLE 7 — CONFIDENTIALITÉ ET NON-SOLLICITATION
+Clause de confidentialité réciproque pendant la mission et 3 ans après. Clause de non-sollicitation du personnel du Prestataire pendant 24 mois.`}
+
+${isB2C
+  ? `ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE
+Le Client étant un consommateur, rédige OBLIGATOIREMENT, mot pour mot :
+${responsabiliteB2C}
+N'ajoute AUCUN plafond de responsabilité, AUCUNE exclusion de préjudice et AUCUNE limitation de garantie : avec un consommateur, ces clauses sont interdites (article R212-1 du Code de la consommation).${form.freelanceAssurance && !form.clauseSecurite ? `
+Inclus aussi, mot pour mot : "Le Prestataire est couvert par l'assurance professionnelle suivante : ${form.freelanceAssurance}."` : ""}`
+  : `ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE — OBLIGATION DE MOYENS ET PLAFONNEMENT
+Rédige OBLIGATOIREMENT :
+"Le Prestataire est soumis à une OBLIGATION DE MOYENS au sens du droit civil français : il s'engage à mettre en œuvre tous les moyens raisonnables et les compétences professionnelles requises pour atteindre les objectifs de la mission, sans garantir un résultat déterminé. La responsabilité du Prestataire ne pourra être engagée qu'en cas de faute prouvée par le Client. En tout état de cause, la responsabilité totale et cumulée du Prestataire au titre du présent contrat est PLAFONNÉE au montant total des honoraires effectivement perçus par le Prestataire pour la mission considérée, à l'exclusion de tout préjudice indirect, perte de chiffre d'affaires, perte de données ou préjudice commercial."${form.categorieMetier === "artisanat" ? `
+Inclus aussi, mot pour mot : "Le plafonnement prévu ci-dessus ne s'applique pas aux responsabilités et garanties légales impératives rappelées à l'article 6."` : ""}`}
+${form.clauseSecurite ? (form.categorieMetier === "artisanat"
+  ? `Inclus OBLIGATOIREMENT, en complément, la clause de sécurité et assurance suivante, et n'aborde ce sujet nulle part ailleurs dans le contrat (ne crée pas d'article séparé sur l'assurance) : "Le Prestataire déclare avoir souscrit et s'engage à maintenir pendant la durée de la mission les assurances rendues obligatoires par la réglementation applicable à son activité et à la nature des travaux réalisés. Lorsque sa responsabilité décennale est susceptible d'être engagée sur le fondement des articles 1792 et suivants du Code civil, le Prestataire est couvert par l'assurance obligatoire prévue à l'article L241-1 du Code des assurances. À l'ouverture du chantier, il justifie de cette assurance dans les conditions légales applicables. L'attestation d'assurance correspondante est notamment jointe aux devis et factures lorsque l'article L243-2 du Code des assurances l'exige. Le Client s'engage à signaler par écrit au Prestataire, avant le début de la mission, tout risque, danger ou anomalie connu du lieu d'intervention. Le Client demeure responsable des dommages directement imputables à un manquement prouvé à cette obligation d'information. Les montants garantis par les polices d'assurance ne constituent pas, par eux-mêmes, une limitation contractuelle de responsabilité."`
+  : form.categorieMetier === "digital"
+  ? `Inclus OBLIGATOIREMENT, en complément, la clause de sécurité et assurance suivante, et n'aborde ce sujet nulle part ailleurs dans le contrat (ne crée pas d'article séparé sur l'assurance) : "Le Prestataire indique dans le contrat les assurances professionnelles qu'il a effectivement souscrites pour son activité et s'engage à maintenir pendant la durée de la mission les garanties ainsi déclarées. Lorsqu'il a déclaré disposer d'une assurance couvrant certains risques cyber liés à son activité, cette garantie est également maintenue pendant la durée de la mission. Les attestations correspondantes sont transmises au Client sur demande. Le Client informe le Prestataire des contraintes techniques, règles de sécurité, restrictions d'accès et particularités de son environnement informatique nécessaires à la bonne exécution de la mission. Les montants garantis par les polices d'assurance ne constituent pas, par eux-mêmes, une limitation contractuelle de responsabilité."`
+  : `Inclus OBLIGATOIREMENT, en complément, la clause de sécurité et assurance suivante, et n'aborde ce sujet nulle part ailleurs dans le contrat (ne crée pas d'article séparé sur l'assurance) : "Le Prestataire indique dans le contrat les assurances professionnelles qu'il a effectivement souscrites pour son activité. Il s'engage à maintenir pendant la durée de la mission les garanties ainsi déclarées et transmet au Client, sur demande, une attestation en cours de validité. Le Client informe le Prestataire de toute contrainte particulière connue susceptible d'affecter l'exécution de la mission. Les montants garantis par les polices d'assurance ne constituent pas, par eux-mêmes, une limitation contractuelle de responsabilité."`) + assuranceAfterClause
+  : ""}
+
+ARTICLE 9 — RÉSILIATION
+Inclus OBLIGATOIREMENT, mot pour mot : "Chacune des Parties peut résilier le présent contrat en cas de manquement grave de l'autre Partie à l'une de ses obligations essentielles, après une mise en demeure écrite restée sans effet pendant un délai de huit (8) jours à compter de sa réception. La résiliation est notifiée par écrit et prend effet à la date de sa réception."
+Inclus aussi, mot pour mot : "Le Client peut également mettre fin au contrat à tout moment, par notification écrite adressée au Prestataire, dans les conditions prévues au présent article."
+${resiliationClient}
+Inclus aussi, mot pour mot : "En cas de résiliation par le Prestataire pour faute du Client, les sommes dues pour les prestations réalisées sont immédiatement exigibles."
+${form.clauseDedit ? (form.typeClient === "particulier"
+  ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "Hors exercice, le cas échéant, d'un droit légal de rétractation, en cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Lorsque la résiliation n'est pas motivée par un manquement du Prestataire, une indemnité complémentaire peut être due au titre des frais effectivement engagés et du préjudice direct, proportionné et dûment justifié résultant de la résiliation. Son montant tient compte notamment de l'état d'avancement de la mission. Toute somme déjà versée s'impute sur les montants effectivement dus. Le surplus éventuel est restitué au Client. Lorsqu'un droit légal de rétractation est applicable, notamment pour certains contrats conclus à distance ou hors établissement, les conséquences financières de son exercice sont déterminées par les dispositions impératives applicables."`
+  : acomptePct > 0
+  ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Une indemnité complémentaire peut être due au Prestataire au titre des frais non récupérables effectivement engagés pour la mission et du temps spécifiquement réservé qui n'a raisonnablement pas pu être réaffecté. Le montant de cette indemnité complémentaire est déterminé d'un commun accord entre les Parties au regard du préjudice direct effectivement subi. À défaut d'accord amiable, le Prestataire peut réclamer la réparation du préjudice direct, certain et dûment justifié. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due, sous réserve des stipulations du contrat relatives à l'acompte. Les sommes déjà versées s'imputent sur les sommes effectivement dues au titre de la résiliation et ne peuvent conduire à indemniser deux fois un même préjudice."`
+  : `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Une indemnité complémentaire peut être due au Prestataire au titre des frais non récupérables effectivement engagés pour la mission et du temps spécifiquement réservé qui n'a raisonnablement pas pu être réaffecté. Le montant de cette indemnité complémentaire est déterminé d'un commun accord entre les Parties au regard du préjudice direct effectivement subi. À défaut d'accord amiable, le Prestataire peut réclamer la réparation du préjudice direct, certain et dûment justifié. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due."`)
+  : ""}
+${form.clauseRespect ? `Inclus OBLIGATOIREMENT, en complément, la clause de bonne conduite suivante : "Le Client s'engage à faire preuve de respect et de courtoisie dans l'ensemble de ses échanges avec le Prestataire, quel qu'en soit le support (écrit, oral, téléphonique ou en personne). Tout comportement abusif, insultant, dégradant, menaçant ou constitutif de harcèlement à l'égard du Prestataire constitue un manquement grave aux obligations essentielles du présent contrat. Sauf urgence rendant manifestement impossible la poursuite de la relation contractuelle, le Prestataire met préalablement le Client en demeure, par écrit, de cesser le comportement reproché dans un délai raisonnable. Cette mise en demeure indique qu'à défaut de cessation du manquement, le Prestataire pourra mettre fin au contrat. Si le manquement persiste, le Prestataire notifie au Client la résolution du contrat et les raisons qui la motivent. Les sommes dues au titre des prestations déjà réalisées demeurent exigibles. En cas d'urgence, notamment en présence de menace grave, de violence ou de harcèlement caractérisé rendant impossible la poursuite de la relation, le Prestataire peut notifier immédiatement la résolution du contrat, par écrit et de manière motivée."` : ""}
+${form.clausePreavis ? (form.typeClient === "particulier"
+  ? `Inclus OBLIGATOIREMENT, en complément, la clause de préavis suivante : "Lorsque la mission conclue avec un Client consommateur est à durée indéterminée et présente un caractère récurrent, chacune des Parties peut y mettre fin sous réserve d'un préavis de trente (30) jours calendaires notifié par écrit, sans préjudice de toute disposition impérative plus favorable au Client. Lorsque les conditions de l'article L215-1-1 du Code de la consommation sont réunies, le Client peut notifier la résiliation au moyen de la fonctionnalité électronique prévue par ce texte. Lorsque le contrat est conclu pour une durée déterminée avec une clause de reconduction tacite, les obligations d'information et de non-reconduction prévues par l'article L215-1 du Code de la consommation sont applicables. Lorsque l'article L215-4 est applicable, le contrat reproduit les dispositions exigées par ce texte."`
+  : `Inclus OBLIGATOIREMENT, en complément, la clause de préavis suivante : "Lorsque la mission présente un caractère récurrent ou continu, chacune des Parties peut mettre fin à la collaboration sous réserve de respecter un préavis de ${({"15":"quinze (15)","30":"trente (30)","45":"quarante-cinq (45)","60":"soixante (60)"})[form.preavisJours] || form.preavisJours} jours calendaires, notifié par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception. Pendant le préavis, les prestations convenues se poursuivent et restent dues dans les conditions contractuelles habituelles. Le préavis ne s'applique pas en cas de résolution pour manquement grave lorsque les conditions permettant une cessation sans préavis sont réunies. Pour les missions auxquelles elle s'applique, la présente clause se substitue à tout autre délai général de résiliation sans faute incompatible avec le préavis choisi."`)
+  : ""}
+
+ARTICLE 10 — FORCE MAJEURE
+Clause standard de force majeure conforme à l'art. 1218 du Code civil.
+
+ARTICLE 11 — ${form.typeClient === "particulier" ? "DROIT APPLICABLE ET RÈGLEMENT DES LITIGES" : "DROIT APPLICABLE, MÉDIATION ET ATTRIBUTION DE JURIDICTION"}
+${form.typeClient === "particulier"
+  ? `Le Client étant un consommateur, rédige cet article EXACTEMENT ainsi, mot pour mot, sans ajouter aucune obligation de médiation préalable ni aucune clause attribuant compétence à un tribunal : "Le présent contrat est soumis au droit français. En cas de litige, le Client peut recourir gratuitement ${mediateurB2C} en vue de la résolution amiable du litige, dans les conditions prévues aux articles L611-1 et suivants du Code de la consommation. Ce recours est facultatif et ne constitue pas un préalable obligatoire à la saisine du juge. Le Client peut saisir, à son choix, l'une des juridictions territorialement compétentes en vertu du Code de procédure civile ou la juridiction du lieu où il demeurait au moment de la conclusion du contrat ou de la survenance du fait dommageable, conformément à l'article R631-3 du Code de la consommation."`
+  : `Rédige cet article EXACTEMENT ainsi, mot pour mot : "Le présent contrat est soumis au droit français. En cas de litige, les Parties s'efforcent de trouver une solution amiable, notamment par la médiation, avant toute action judiciaire. Lorsque les deux Parties ont la qualité de commerçant, tout litige relatif au présent contrat relève de la compétence exclusive du tribunal dans le ressort duquel se trouve le domicile ou le siège du Prestataire, conformément à l'article 48 du Code de procédure civile. Dans les autres cas, le tribunal compétent est déterminé selon les règles légales."`}
+
+ARTICLE 12 — DISPOSITIONS GÉNÉRALES
+Rédige cet article EXACTEMENT ainsi, mot pour mot :
+${dispositionsGenerales}
+
+ARTICLE 13 — SIGNATURES
+Bloc de signature avec : "Lu et approuvé — Bon pour accord", Nom, Qualité — pour chacune des deux parties. NE PAS inclure de lignes "Date :" ni "Lieu :" ni de ligne de signature à remplir à la main (la signature électronique réelle, datée, s'affiche séparément juste après cet article — ne pas la dupliquer ici). Termine impérativement par la mention : "Contrat établi et signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie."
+
+══════════════════════════════════════════════
+CONSIGNES DE RÉDACTION
+══════════════════════════════════════════════
+- Commence DIRECTEMENT par l'en-tête du contrat, sans introduction ni commentaire.
+- Rédige chaque article avec des sous-paragraphes numérotés. Chaque sous-paragraphe est sur sa propre ligne et commence par son numéro suivi d'un point et d'une espace : « 4.1. », « 4.2. ». Chaque titre d'article est seul sur sa ligne, sous la forme « ARTICLE 4 — TITRE ». Pour une énumération, une ligne par élément, commençant par « a) », « b) », « c) ».
+- Utilise un registre juridique français précis, sans jargon inutile mais avec la rigueur d'un acte d'avocat.
+- Cite les fondements légaux (articles de loi) entre parenthèses, uniquement quand ils sont certains.
+- Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
+- Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.
+- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € ${U}"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
+- Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").
+- Ne cite un article de loi que si tu es certain de son numéro exact. N'écris JAMAIS de numéro d'article incomplet ou approximatif (par exemple « L221-... ») : dans le doute, ne cite pas d'article.
+- N'ajoute aucune clause qui contredit ou affaiblit les clauses imposées ci-dessus, et ne remplace jamais une clause imposée par ta propre formulation.
+
+══════════════════════════════════════════════
+RÈGLES ABSOLUES — À RESPECTER À LA LETTRE
+══════════════════════════════════════════════
+1. Suis la structure ci-dessus exactement : 13 articles, dans cet ordre, avec ces titres. N'ajoute aucun article. Dans chaque article, n'écris que ce que sa consigne demande.
+2. N'invente AUCUNE information absente des données de la mission : pas de moyen de paiement, de lieu, de délai, de montant, de fréquence, de garantie, de pénalité ni d'obligation supplémentaire. Si une information n'est pas fournie, ne l'évoque pas.
+3. Les clauses imposées « mot pour mot » sont recopiées exactement, SANS guillemets autour, sans reformulation et sans phrase ajoutée au milieu.
+4. Ne commente pas ta réponse et n'ajoute aucune note, aucun conseil ni aucun avertissement en dehors du contrat.`;
+      return prompt;
 };
 
 // Ce qu'écrit une facture liée à un contrat : le même texte partout (fenêtre de facture, Mes contrats,
@@ -1851,6 +2214,7 @@ function AppInner() {
       skills: [], photo: null,
       companyName: "", legalStatus: "", tvaNumber: "", address: "",
       iban: "", bic: "", bankName: "", logo: null,
+      mediateur: "", assurance: "",
     };
     try {
       const saved = localStorage.getItem("freeley_profile");
@@ -1872,8 +2236,13 @@ function AppInner() {
     skills: p.skills, photo: p.photo,
     company_name: p.companyName, legal_status: p.legalStatus, tva_number: p.tvaNumber, address: p.address,
     iban: p.iban, bic: p.bic, bank_name: p.bankName, logo: p.logo,
+    mediateur: p.mediateur || "", assurance: p.assurance || "",
     updated_at: new Date().toISOString(),
   });
+  // Colonnes ajoutées en version 219 (script SQL v219). Tant que le script n'a pas été lancé, Supabase refuse
+  // toute la sauvegarde à cause d'elles : on réessaie alors sans elles, et elles restent gardées sur l'appareil.
+  const PROFILE_V219_COLUMNS = ["mediateur", "assurance"];
+  const isMissingColumnError = (error) => !!error && (error.code === "PGRST204" || error.code === "42703" || PROFILE_V219_COLUMNS.some(c => String(error.message || "").includes(c)));
 
   // Convertit une ligne Supabase (snake_case) vers le format du profil (camelCase)
   const rowToProfile = (row) => ({
@@ -1884,6 +2253,9 @@ function AppInner() {
     companyName: row.company_name || "", legalStatus: row.legal_status || "", tvaNumber: row.tva_number || "",
     address: row.address || "", iban: row.iban || "", bic: row.bic || "", bankName: row.bank_name || "",
     logo: row.logo || null,
+    // Seulement si la colonne existe déjà : sinon on garderait un champ vide à la place de ce qui est sur l'appareil
+    ...(row.mediateur !== undefined ? { mediateur: row.mediateur || "" } : {}),
+    ...(row.assurance !== undefined ? { assurance: row.assurance || "" } : {}),
     // Le client_secret n'est jamais renvoyé au navigateur après sauvegarde, seulement un indicateur
     superPdpConnected: !!(row.super_pdp_client_id && row.super_pdp_client_secret),
   });
@@ -1907,8 +2279,15 @@ function AppInner() {
     try { localStorage.setItem("freeley_profile", JSON.stringify(profile)); } catch(e) {}
     if (!authUser?.id) return; // pas connecté : uniquement local pour l'instant
     const timer = setTimeout(() => {
-      supabase.from("profiles").upsert(profileToRow(profile, authUser.id))
-        .then(({ error }) => { if (error) console.error("Erreur sauvegarde profil Supabase:", error); });
+      const row = profileToRow(profile, authUser.id);
+      supabase.from("profiles").upsert(row)
+        .then(({ error }) => {
+          if (!isMissingColumnError(error)) { if (error) console.error("Erreur sauvegarde profil Supabase:", error); return; }
+          const rest = { ...row };
+          PROFILE_V219_COLUMNS.forEach(c => { delete rest[c]; });
+          return supabase.from("profiles").upsert(rest)
+            .then(({ error: e2 }) => { if (e2) console.error("Erreur sauvegarde profil Supabase:", e2); });
+        });
     }, 1200);
     return () => clearTimeout(timer);
   }, [profile, authUser]);
@@ -2206,7 +2585,25 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     } catch(e) {}
   };
 
+  // Rédaction : on complète d'abord le formulaire avec ce que le contrat doit contenir (statut juridique,
+  // médiateur, assurance, n° de TVA). Il est enregistré tel quel avec le contrat : le PDF, les factures et
+  // les emails retrouvent toujours les mêmes informations que le texte du contrat.
   const generateContract = async () => {
+    const legalStatus = form.freelanceLegalStatus !== undefined ? form.freelanceLegalStatus : (profile?.legalStatus || "");
+    const genForm = {
+      ...form,
+      freelanceLegalStatus: legalStatus,
+      freelanceCompanyName: !isEntrepreneurIndividuel(legalStatus) ? String(profile?.companyName || "").trim() : "",
+      freelanceTvaNumber: String(profile?.tvaNumber || "").trim(),
+      freelanceMediateur: String(profile?.mediateur || "").trim(),
+      freelanceAssurance: String(profile?.assurance || "").trim(),
+      // Entre professionnels, les pénalités de retard sont obligatoires (art. L441-10 C. com.)
+      latePaymentPenalty: form.typeClient === "particulier" ? !!form.latePaymentPenalty : true,
+    };
+    setForm(genForm);
+    return generateContractWith(genForm);
+  };
+  const generateContractWith = async (form) => {
     setLoading(true);
     setApiError("");
     setLoadingPhase(1);
@@ -2218,192 +2615,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     const t2 = setTimeout(() => setLoadingPhase(3), 1300);
 
     try {
-      const d1 = form.startDate ? new Date(form.startDate).toLocaleDateString("fr-FR") : "Non défini";
-      const d2 = form.endDate   ? new Date(form.endDate).toLocaleDateString("fr-FR")   : "Non défini";
-      const acomptePct = Number(form.acomptePourcentage) || 0;
-      // Délai de paiement. « Comptant » sans acompte : tout est payé à la signature. Avec un acompte,
-      // l'acompte est payé à la signature et le solde dès réception de sa facture : on ne donne JAMAIS
-      // à l'IA la phrase « 100 % à la signature » dans ce cas, sinon le contrat se contredit.
-      const paymentTermsLabel = form.paymentTerms === "Comptant"
-        ? "comptant à la commande (100 % à la signature)"
-        : `${form.paymentTerms} jours nets à compter de la date de facturation`;
-      const soldeTermsLabel = form.paymentTerms === "Comptant"
-        ? "dès réception de la facture de solde, sans délai"
-        : `à ${form.paymentTerms} jours nets à compter de la date de la facture de solde`;
-      // Fin de la clause de recette (article 3) : on ne parle de « solde » que s'il y en a un
-      const recetteEnd = acomptePct > 0
-        ? "valant recette tacite et ouvrant droit à la facturation du solde correspondant"
-        : form.paymentTerms === "Comptant"
-          ? "valant recette tacite"
-          : "valant recette tacite et ouvrant droit à la facturation des honoraires";
-      const paymentConditionsData = acomptePct > 0
-        ? `acompte de ${acomptePct} % à la signature ; solde à la livraison, payable ${soldeTermsLabel}`
-        : paymentTermsLabel;
-      // Montants du contrat : TTC pour un particulier (obligatoire), HT pour un professionnel
-      const pricing = contractPricing(form, profile);
-      const U = pricing.unit;
-      // Date et numéro générés par l'app (pas par l'IA) : garantit une info réelle, jamais hallucinée
-      const todayFull = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-      const contractRef = `CP-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
-
-      const prompt = `Tu es un avocat d'affaires français spécialisé en droit des contrats de prestation intellectuelle et en propriété intellectuelle. Rédige un CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT complet, à la fois rigoureux sur le plan juridique et protecteur pour le Prestataire, en français, en utilisant EXACTEMENT les informations fournies ci-dessous.
-
-══════════════════════════════════════════════
-DONNÉES DE LA MISSION
-══════════════════════════════════════════════
-Prestataire        : ${contractFreelanceName(form)}
-Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + form.freelanceSiret : ""}
-Adresse Prestataire: ${form.freelanceAddress}
-Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + fmtPhone(form.freelancePhone) : ""}
-
-Client             : ${form.clientName}${form.clientCompany ? " — " + form.clientCompany : ""}
-Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}
-Adresse Client     : ${form.clientAddress || "Non communiquée"}
-Email Client       : ${form.clientEmail || "—"}
-
-Titre de la mission: ${form.missionTitle}
-Domaine d'activité : ${form.categorieMetier === "artisanat" ? "Métier manuel / artisanat" : form.categorieMetier === "digital" ? "Digital / Tech / Création" : form.categorieMetier === "conseil" ? "Conseil / Formation / Services" : "Autre / prestation générale"}
-Description        : ${form.missionDescription}
-Période            : du ${d1} au ${d2}
-${pricing.b2c ? `Prix TTC           : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Honoraires HT      : ${form.price} €`}
-Conditions paiement: ${paymentConditionsData}
-Révisions incluses : ${form.revisions} aller(s)-retour(s)
-${form.typeClient === "particulier"
-  ? `Intérêts de retard : ${form.latePaymentPenalty ? "OUI (taux d'intérêt légal, après mise en demeure — art. 1231-6 C. civ.)" : "NON"}`
-  : `Pénalités de retard: ${form.latePaymentPenalty ? "OUI (clause légale obligatoire Art. L441-10 C.com.)" : "NON"}`}
-Clause de dédommagement annulation: ${form.clauseDedit ? "OUI" : "NON"}
-Clause de bonne conduite / respect mutuel: ${form.clauseRespect ? "OUI" : "NON"}
-Clause de suspension en cas de retard de paiement: ${form.clauseSuspension ? "OUI" : "NON"}
-Clause de sécurité et assurance professionnelle: ${form.clauseSecurite ? "OUI" : "NON"}
-Clause d'interlocuteur unique côté client: ${form.clauseInterlocuteur ? "OUI" : "NON"}
-Clause de préavis pour mission récurrente: ${form.clausePreavis ? `OUI (${form.preavisJours} jours)` : "NON"}
-
-══════════════════════════════════════════════
-STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
-══════════════════════════════════════════════
-
-EN-TÊTE : Titre "CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", puis la date suivante en toutes lettres, à utiliser EXACTEMENT telle quelle sans la modifier ni la recalculer : "${todayFull}". Numéro de contrat à utiliser EXACTEMENT tel quel, ne jamais en inventer un autre : ${contractRef}. Mention "ENTRE LES SOUSSIGNÉS".${isEntrepreneurIndividuel(form.freelanceLegalStatus) ? ` Le Prestataire est un entrepreneur individuel : écris son nom EXACTEMENT comme dans « Prestataire » ci-dessus, avec la mention « EI » juste après son nom (obligatoire sur ses contrats), dans la présentation des parties comme dans les signatures.` : ""}
-
-ARTICLE 1 — INDÉPENDANCE DU PRESTATAIRE ET ABSENCE DE LIEN DE SUBORDINATION
-Rédige une clause affirmant EXPLICITEMENT que :
-- Le Prestataire exerce son activité en toute indépendance et autonomie ;
-- Il conserve l'entière liberté de choix de ses horaires de travail, de son matériel, de ses méthodes et de son organisation ;
-- Le présent contrat ne crée en aucun cas un lien de subordination au sens du droit du travail (art. L1221-1 C.trav.) ;
-- Le Prestataire peut exercer d'autres missions simultanément pour d'autres clients ;
-- Le Client s'interdit expressément toute directive, instruction ou contrôle portant sur les moyens d'exécution.
-Cite l'article L1221-1 du Code du travail et la jurisprudence Soc. 13 nov. 1996 sur le faisceau d'indices.
-
-ARTICLE 2 — OBJET DU CONTRAT ET DESCRIPTION DE LA MISSION
-Objet général, puis la description de la mission et des livrables, reprise FIDÈLEMENT depuis la description fournie par le Prestataire. Tu peux la reformuler dans un style juridique et la présenter en énumération, mais n'ajoute AUCUN livrable, AUCUNE prestation, AUCUNE exclusion, AUCUNE quantité, AUCUNE fréquence et AUCUN délai qui n'y figure pas.
-
-ARTICLE 3 — DÉLAIS, PLANNING ET PROCÉDURE DE VALIDATION (RECETTE)
-Rédige les dates de début/fin. Puis inclus OBLIGATOIREMENT cette clause de recette :
-"À compter de la livraison de chaque livrable, le Client dispose d'un délai de SEPT (7) JOURS OUVRÉS pour formuler par écrit (email avec accusé de réception) ses observations ou réserves motivées et circonstanciées. À l'expiration de ce délai sans retour écrit du Client, la prestation est réputée définitivement acceptée sans réserve, ${recetteEnd}. Les retours oraux ou non circonstanciés ne seront pas pris en compte."
-${form.clauseInterlocuteur ? (form.typeClient === "particulier"
-  ? `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Le Client est l'interlocuteur de référence du Prestataire pour la validation des livrables et la transmission des instructions. S'il souhaite qu'un tiers intervienne pour son compte, il en informe préalablement le Prestataire par écrit en précisant l'identité et le rôle de cette personne. Les instructions d'un tiers non désigné ne sont opposables au Prestataire qu'après confirmation écrite du Client."`
-  : `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Lorsque plusieurs personnes sont susceptibles d'intervenir pour le compte du Client dans le suivi de la mission, le Client désigne un interlocuteur unique, dûment habilité, chargé de la validation des livrables et de la transmission des instructions au Prestataire. Le Prestataire n'est tenu de prendre en compte que les observations, validations ou demandes de modification émanant de cet interlocuteur ou expressément confirmées par écrit par celui-ci. Toute instruction contradictoire émanant d'une autre personne intervenant pour le compte du Client ne peut engager le Prestataire ni justifier un dépassement du périmètre ou des délais convenus. L'identité et les coordonnées de l'interlocuteur sont précisées au contrat ou communiquées par écrit avant le commencement de la mission. Tout changement est notifié par écrit dans les meilleurs délais."`)
-  : ""}
-
-ARTICLE 4 — HONORAIRES, MODALITÉS DE PAIEMENT ET ACOMPTE
-${pricing.b2c ? `Montant total TTC : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Montant total HT : ${form.price} €`}
-Inclure OBLIGATOIREMENT :
-${acomptePct > 0
-  ? `- Un acompte de ${acomptePct} % soit ${fmtEuro(pricing.acompte)} € ${U} dû à la signature du présent contrat, dont le versement conditionne le démarrage de la mission (condition suspensive) ;
-- Le solde de ${100 - acomptePct} % soit ${fmtEuro(pricing.solde)} € ${U} exigible à la livraison/recette finale de la mission, payable ${soldeTermsLabel}. Seul l'acompte est dû à la signature : le solde n'est jamais payable à la commande ni à la signature ;`
-  : `- Aucun acompte n'est demandé. La totalité des honoraires, soit 100 % du montant (${fmtEuro(pricing.total)} € ${U}), est due selon le délai de paiement convenu : ${paymentTermsLabel} ;`}
-${form.latePaymentPenalty
-  ? (form.typeClient === "particulier"
-    ? `- Le client étant un PARTICULIER (B2C), la clause doit IMPÉRATIVEMENT s'intituler "intérêts de retard" (jamais "pénalités de retard", terme réservé au Code de commerce entre professionnels et inapplicable à un consommateur), utiliser le taux d'intérêt légal en vigueur en France applicable aux consommateurs, ET exiger une mise en demeure préalable conformément à l'article 1231-6 du Code civil — ces intérêts ne courent qu'à compter de cette mise en demeure, jamais automatiquement dès la date d'échéance (et non le Code de commerce ni l'indemnité forfaitaire de 40 €, strictement réservés aux professionnels) : "En cas de retard de paiement, une mise en demeure sera préalablement adressée au Client par lettre recommandée ou courrier électronique avec accusé de réception. À défaut de règlement, des intérêts de retard calculés au taux d'intérêt légal en vigueur seront appliqués sur les sommes dues à compter de la date de cette mise en demeure et jusqu'au complet paiement, conformément à l'article 1231-6 du Code civil et au droit de la consommation."`
-    : `- La clause légale de pénalités de retard réservée aux professionnels : "Conformément à l'article L441-10 du Code de commerce, toute somme non réglée à l'échéance porte, de plein droit et sans qu'un rappel soit nécessaire, des pénalités de retard au taux d'intérêt appliqué par la Banque centrale européenne à son opération de refinancement la plus récente, majoré de dix (10) points de pourcentage, sauf stipulation d'un autre taux conforme aux limites légales. Les pénalités sont exigibles à compter du jour suivant la date de règlement figurant sur la facture. En sus, tout professionnel en situation de retard de paiement est de plein droit débiteur de l'indemnité forfaitaire pour frais de recouvrement fixée à quarante euros (40 €) par l'article D441-5 du Code de commerce. Lorsque les frais de recouvrement exposés sont supérieurs à ce montant, le Prestataire peut demander une indemnisation complémentaire sur justification."`)
-  : `- Indique explicitement : "Pénalités de retard : Non stipulées."`}
-${pricing.b2c
-  ? `- Inclus OBLIGATOIREMENT, mot pour mot, la phrase suivante : "Lorsque le présent contrat est conclu hors établissement, aucun paiement ne peut être exigé ni reçu du Client avant l'expiration d'un délai de sept jours à compter de sa conclusion, sauf pour des travaux d'entretien ou de réparation à réaliser en urgence au domicile du Client et expressément sollicités par lui, dans la limite des pièces de rechange et travaux strictement nécessaires pour répondre à l'urgence (article L221-10 du Code de la consommation)."
-- Le Client étant un consommateur, le prix doit OBLIGATOIREMENT être exprimé toutes taxes comprises : n'écris jamais « HT » ni « hors taxes » dans le contrat, et n'écris jamais qu'une taxe s'ajoutera au prix. Inclus cette phrase : "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent aux montants que le Client aura effectivement à payer (${pricing.taxNote})."`
-  : pricing.tvaApplicable
-    ? `- Toutes les sommes sont exprimées hors taxes ; la TVA s'y ajoute au taux en vigueur.`
-    : `- Le Prestataire bénéficie de la franchise en base de TVA. Inclus OBLIGATOIREMENT, mot pour mot, la phrase suivante : "TVA non applicable, article 293 B du Code général des impôts : les montants indiqués au présent contrat sont les montants effectivement dus par le Client." N'écris jamais qu'une TVA pourrait s'ajouter au prix.`}
-${form.clauseSuspension ? `- Inclus OBLIGATOIREMENT la clause de suspension suivante : "En cas de retard de paiement de toute somme exigible au titre du présent contrat persistant plus de huit (8) jours après une mise en demeure adressée par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception, restée sans effet, le Prestataire peut suspendre l'exécution de la mission jusqu'au complet règlement des sommes dues. Cette suspension ne constitue pas une faute du Prestataire et n'ouvre pas droit à indemnité au profit du Client. Les délais d'exécution affectés par la suspension sont eux-mêmes suspendus et prorogés d'une durée correspondant à la période de suspension, sans que le retard qui en résulte puisse être imputé au Prestataire."` : ""}
-
-ARTICLE 5 — RÉVISIONS ET MODIFICATIONS DU PÉRIMÈTRE
-Nombre de révisions incluses : ${form.revisions}. Clause de gestion du "scope creep" : toute demande hors périmètre fait l'objet d'un avenant écrit et facturé au tarif horaire du Prestataire.
-
-ARTICLE 6 — ${form.categorieMetier === "artisanat" ? "GARANTIE DE BONNE EXÉCUTION ET CONFORMITÉ AUX NORMES MÉTIER" : form.categorieMetier === "conseil" ? "PROPRIÉTÉ INTELLECTUELLE ET CONFIDENTIALITÉ" : "PROPRIÉTÉ INTELLECTUELLE ET CESSION DES DROITS SUSPENDUE AU PAIEMENT"}
-Inclus OBLIGATOIREMENT, mot pour mot et SANS reformuler ni raccourcir, la clause suivante :
-${form.categorieMetier === "artisanat"
-  ? `"Le Prestataire garantit la conformité de son intervention aux normes techniques et réglementaires en vigueur applicables à son secteur d'activité, à la nature des travaux effectivement réalisés ainsi qu'aux spécifications convenues au contrat et, le cas échéant, au devis accepté. Il s'engage à respecter les règles de l'art et les obligations de sécurité propres à sa profession. Dans le cadre de la mission qui lui est confiée et de sa compétence professionnelle, le Prestataire informe et conseille le Client sur les difficultés, incompatibilités, anomalies apparentes ou risques qu'il peut raisonnablement identifier et qui sont susceptibles d'affecter la bonne exécution, la conformité, la sécurité ou la pérennité des travaux. La portée de ce devoir s'apprécie au regard de la mission effectivement confiée au Prestataire. Lorsque leurs conditions légales d'application sont réunies, le Prestataire est tenu notamment de la garantie de parfait achèvement prévue à l'article 1792-6 du Code civil, pendant un an à compter de la réception ; de la garantie de bon fonctionnement prévue à l'article 1792-3 du Code civil, d'une durée minimale de deux ans à compter de la réception, pour les éléments d'équipement entrant dans son champ d'application ; et de la responsabilité prévue aux articles 1792 et 1792-2 du Code civil pour les dommages entrant dans leur champ d'application. Conformément à l'article 1792-4-1, les responsabilités et garanties relevant des articles 1792 à 1792-2 prennent fin dix ans après la réception des travaux. Lorsque les travaux relèvent de ce régime, la réception est prononcée contradictoirement conformément à l'article 1792-6 du Code civil ; la date de réception constitue le point de départ des garanties précitées. Conformément à l'article 1792-5 du Code civil, aucune stipulation du présent contrat ne peut exclure ou limiter les responsabilités et garanties impératives visées par ce texte."`
-  : form.categorieMetier === "conseil"
-  ? `"Pour les livrables susceptibles d'être protégés par un droit de propriété intellectuelle, le Prestataire demeure titulaire des droits qui y sont attachés jusqu'au paiement intégral et effectif des honoraires dus. Sous réserve de ce paiement, le Prestataire concède au Client, pour ses besoins propres et aux fins pour lesquelles les livrables ont été réalisés, une licence non exclusive lui permettant d'utiliser, de reproduire, de représenter et, lorsque cela est nécessaire à l'usage convenu, d'adapter les livrables. Cette licence est consentie pour le monde entier et pendant toute la durée légale de protection applicable. Sauf stipulation contraire, cette licence n'autorise pas la revente des livrables en tant que produit autonome, leur commercialisation séparée ni leur concession sous licence à des tiers. Chaque Partie demeure titulaire des éléments, contenus, documents, méthodes et outils qu'elle détenait antérieurement à la mission ou qu'elle développe indépendamment de celle-ci et garantit disposer des droits nécessaires sur les éléments qu'elle remet à l'autre Partie pour l'exécution du contrat. Le Prestataire conserve notamment la propriété de ses méthodologies, outils, modèles, trames, processus et savoir-faire. Les obligations contractuelles de confidentialité des Parties sont régies par l'article 7 du présent contrat. Toute utilisation du nom, de la marque ou du logo du Client, ainsi que toute reproduction d'extraits des livrables à titre de référence commerciale ou de portfolio, est soumise à l'accord écrit préalable du Client."`
-  : `"(a) Éléments préexistants et droits pendant la mission : le Prestataire demeure titulaire des droits portant sur ses méthodologies, outils, modèles, bibliothèques, composants, codes génériques, savoir-faire et, plus généralement, sur tous les éléments préexistants à la mission ou développés indépendamment de celle-ci. Jusqu'au paiement intégral et effectif des honoraires dus, le Prestataire demeure titulaire des droits patrimoniaux portant sur les créations originales spécifiquement réalisées dans le cadre de la mission. Le Client bénéficie toutefois, avant paiement complet, d'une autorisation provisoire, non exclusive et strictement limitée aux opérations de test, de recette et de validation prévues au contrat.
-(b) Cession des créations spécifiques après paiement : sous réserve du paiement intégral et effectif des honoraires, le Prestataire cède au Client les droits patrimoniaux portant sur les créations originales spécifiquement réalisées pour lui dans le cadre de la mission et expressément identifiées parmi les livrables. La cession ne porte pas sur des œuvres futures indéterminées. Pour chaque catégorie de création concernée, les droits cédés sont spécifiés distinctement et le domaine d'exploitation est délimité quant à son étendue, sa destination, son lieu et sa durée, conformément à l'article L131-3 du Code de la propriété intellectuelle. Sauf précision différente au contrat, la cession comprend, dans la mesure nécessaire aux finalités du projet : le droit de reproduction ; le droit de représentation ; le droit d'adaptation, de transformation et d'arrangement ; ainsi que le droit de traduction lorsque la nature du livrable le justifie. Elle est consentie pour le monde entier et pendant la durée légale de protection applicable, pour les exploitations correspondant au projet et aux finalités décrits au contrat. La cession est consentie à titre exclusif.
-(c) Éléments tiers : les composants, logiciels, bibliothèques, contenus, polices, images et autres éléments appartenant à des tiers demeurent soumis à leurs licences propres.
-(d) Fichiers sources et documentation : lorsque la nature de la mission le justifie et que ces éléments sont compris dans le périmètre contractuel, le Prestataire remet au Client les fichiers sources, codes sources, fichiers natifs et documentations nécessaires à l'exercice effectif des droits cédés.
-(e) Garanties : le Prestataire déclare disposer des droits nécessaires pour consentir la cession et garantit la jouissance paisible des droits cédés, sous réserve des éléments fournis ou imposés par le Client et des éléments appartenant à des tiers expressément identifiés. Réciproquement, le Client garantit disposer des droits nécessaires sur les contenus, textes, images, signes, données et autres éléments qu'il fournit au Prestataire.
-(f) Références commerciales : toute utilisation du nom, de la marque ou du logo du Client, ainsi que toute reproduction d'extraits des livrables dans un portfolio ou une communication commerciale du Prestataire, est soumise à l'accord écrit préalable du Client.
-Lorsque le livrable comprend un logiciel ou des éléments logiciels protégés, la cession couvre, dans le périmètre défini ci-dessus et sous réserve des dispositions impératives, les droits d'exploitation visés à l'article L122-6 du Code de la propriété intellectuelle, notamment la reproduction permanente ou provisoire, la traduction, l'adaptation, l'arrangement ou toute autre modification, ainsi que la mise sur le marché des exemplaires dans les conditions convenues. Lorsque le Prestataire est l'auteur personne physique du logiciel, la rémunération correspondant à la cession des droits peut être évaluée forfaitairement, conformément au 5° de l'article L131-4 du Code de la propriété intellectuelle. Lorsque le prix global du contrat rémunère à la fois la prestation et cette cession, le contrat l'indique expressément. Les droits moraux de l'auteur du logiciel s'exercent dans les conditions particulières prévues à l'article L121-7 du Code de la propriété intellectuelle.
-Lorsque le Prestataire est l'auteur personne physique de créations protégées autres qu'un logiciel et qu'une cession de droits d'auteur est consentie, la rémunération attachée à cette cession respecte l'article L131-4 du Code de la propriété intellectuelle : elle est appropriée et proportionnelle aux recettes provenant de la vente ou de l'exploitation, sauf lorsqu'une rémunération forfaitaire est légalement admise. Lorsque l'article L131-5-1 est applicable, le cessionnaire respecte l'obligation de transparence et de reddition d'informations qu'il prévoit. En cas de cession exclusive, le droit de résiliation pour absence d'exploitation prévu à l'article L131-5-2 est applicable lorsque ses conditions sont réunies. La cession porte uniquement sur les droits patrimoniaux cessibles ; le droit moral de l'auteur demeure régi par l'article L121-1 du Code de la propriété intellectuelle."`}
-
-ARTICLE 7 — CONFIDENTIALITÉ ET NON-SOLICITATION
-Clause de confidentialité réciproque pendant la mission et 3 ans après. Clause de non-sollicitation du personnel du Prestataire pendant 24 mois.
-
-ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE — OBLIGATION DE MOYENS ET PLAFONNEMENT
-Rédige OBLIGATOIREMENT :
-"Le Prestataire est soumis à une OBLIGATION DE MOYENS au sens du droit civil français : il s'engage à mettre en œuvre tous les moyens raisonnables et les compétences professionnelles requises pour atteindre les objectifs de la mission, sans garantir un résultat déterminé. La responsabilité du Prestataire ne pourra être engagée qu'en cas de faute prouvée par le Client. En tout état de cause, la responsabilité totale et cumulée du Prestataire au titre du présent contrat est PLAFONNÉE au montant total des honoraires effectivement perçus par le Prestataire pour la mission considérée, à l'exclusion de tout préjudice indirect, perte de chiffre d'affaires, perte de données ou préjudice commercial."
-${form.clauseSecurite ? (form.categorieMetier === "artisanat"
-  ? `Inclus OBLIGATOIREMENT, en complément, la clause de sécurité et assurance suivante, et n'aborde ce sujet nulle part ailleurs dans le contrat (ne crée pas d'article séparé sur l'assurance) : "Le Prestataire déclare avoir souscrit et s'engage à maintenir pendant la durée de la mission les assurances rendues obligatoires par la réglementation applicable à son activité et à la nature des travaux réalisés. Lorsque sa responsabilité décennale est susceptible d'être engagée sur le fondement des articles 1792 et suivants du Code civil, le Prestataire est couvert par l'assurance obligatoire prévue à l'article L241-1 du Code des assurances. À l'ouverture du chantier, il justifie de cette assurance dans les conditions légales applicables. L'attestation d'assurance correspondante est notamment jointe aux devis et factures lorsque l'article L243-2 du Code des assurances l'exige. Le Client s'engage à signaler par écrit au Prestataire, avant le début de la mission, tout risque, danger ou anomalie connu du lieu d'intervention. Le Client demeure responsable des dommages directement imputables à un manquement prouvé à cette obligation d'information. Les montants garantis par les polices d'assurance ne constituent pas, par eux-mêmes, une limitation contractuelle de responsabilité."`
-  : form.categorieMetier === "digital"
-  ? `Inclus OBLIGATOIREMENT, en complément, la clause de sécurité et assurance suivante, et n'aborde ce sujet nulle part ailleurs dans le contrat (ne crée pas d'article séparé sur l'assurance) : "Le Prestataire indique dans le contrat les assurances professionnelles qu'il a effectivement souscrites pour son activité et s'engage à maintenir pendant la durée de la mission les garanties ainsi déclarées. Lorsqu'il a déclaré disposer d'une assurance couvrant certains risques cyber liés à son activité, cette garantie est également maintenue pendant la durée de la mission. Les attestations correspondantes sont transmises au Client sur demande. Le Client informe le Prestataire des contraintes techniques, règles de sécurité, restrictions d'accès et particularités de son environnement informatique nécessaires à la bonne exécution de la mission. Les montants garantis par les polices d'assurance ne constituent pas, par eux-mêmes, une limitation contractuelle de responsabilité."`
-  : `Inclus OBLIGATOIREMENT, en complément, la clause de sécurité et assurance suivante, et n'aborde ce sujet nulle part ailleurs dans le contrat (ne crée pas d'article séparé sur l'assurance) : "Le Prestataire indique dans le contrat les assurances professionnelles qu'il a effectivement souscrites pour son activité. Il s'engage à maintenir pendant la durée de la mission les garanties ainsi déclarées et transmet au Client, sur demande, une attestation en cours de validité. Le Client informe le Prestataire de toute contrainte particulière connue susceptible d'affecter l'exécution de la mission. Les montants garantis par les polices d'assurance ne constituent pas, par eux-mêmes, une limitation contractuelle de responsabilité."`)
-  : ""}
-
-ARTICLE 9 — RÉSILIATION
-Conditions de résiliation par l'une ou l'autre des parties. ${form.clauseDedit ? `Ne mentionne PAS que l'acompte est automatiquement et intégralement conservé comme indemnité forfaitaire fixe en cas de résiliation par le Client : ce sujet est entièrement régi par la clause de dédommagement ci-dessous, qui prévoit une indemnité déterminée selon l'avancement réel de la mission, et ne doit pas être contredite ou dupliquée ici.` : `En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire.`} En cas de résiliation par le Prestataire pour faute du Client, les sommes dues pour les prestations réalisées sont immédiatement exigibles.
-${form.clauseDedit ? (form.typeClient === "particulier"
-  ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "Hors exercice, le cas échéant, d'un droit légal de rétractation, en cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Lorsque la résiliation n'est pas motivée par un manquement du Prestataire, une indemnité complémentaire peut être due au titre des frais effectivement engagés et du préjudice direct, proportionné et dûment justifié résultant de la résiliation. Son montant tient compte notamment de l'état d'avancement de la mission. Toute somme déjà versée s'impute sur les montants effectivement dus. Le surplus éventuel est restitué au Client. Lorsqu'un droit légal de rétractation est applicable, notamment pour certains contrats conclus à distance ou hors établissement, les conséquences financières de son exercice sont déterminées par les dispositions impératives applicables."`
-  : acomptePct > 0
-  ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Une indemnité complémentaire peut être due au Prestataire au titre des frais non récupérables effectivement engagés pour la mission et du temps spécifiquement réservé qui n'a raisonnablement pas pu être réaffecté. Le montant de cette indemnité complémentaire est déterminé d'un commun accord entre les Parties au regard du préjudice direct effectivement subi. À défaut d'accord amiable, le Prestataire peut réclamer la réparation du préjudice direct, certain et dûment justifié. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due, sous réserve des stipulations du contrat relatives à l'acompte. Les sommes déjà versées s'imputent sur les sommes effectivement dues au titre de la résiliation et ne peuvent conduire à indemniser deux fois un même préjudice."`
-  : `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Une indemnité complémentaire peut être due au Prestataire au titre des frais non récupérables effectivement engagés pour la mission et du temps spécifiquement réservé qui n'a raisonnablement pas pu être réaffecté. Le montant de cette indemnité complémentaire est déterminé d'un commun accord entre les Parties au regard du préjudice direct effectivement subi. À défaut d'accord amiable, le Prestataire peut réclamer la réparation du préjudice direct, certain et dûment justifié. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due."`)
-  : ""}
-${form.clauseRespect ? `Inclus OBLIGATOIREMENT, en complément, la clause de bonne conduite suivante : "Le Client s'engage à faire preuve de respect et de courtoisie dans l'ensemble de ses échanges avec le Prestataire, quel qu'en soit le support (écrit, oral, téléphonique ou en personne). Tout comportement abusif, insultant, dégradant, menaçant ou constitutif de harcèlement à l'égard du Prestataire constitue un manquement grave aux obligations essentielles du présent contrat. Sauf urgence rendant manifestement impossible la poursuite de la relation contractuelle, le Prestataire met préalablement le Client en demeure, par écrit, de cesser le comportement reproché dans un délai raisonnable. Cette mise en demeure indique qu'à défaut de cessation du manquement, le Prestataire pourra mettre fin au contrat. Si le manquement persiste, le Prestataire notifie au Client la résolution du contrat et les raisons qui la motivent. Les sommes dues au titre des prestations déjà réalisées demeurent exigibles. En cas d'urgence, notamment en présence de menace grave, de violence ou de harcèlement caractérisé rendant impossible la poursuite de la relation, le Prestataire peut notifier immédiatement la résolution du contrat, par écrit et de manière motivée."` : ""}
-${form.clausePreavis ? (form.typeClient === "particulier"
-  ? `Inclus OBLIGATOIREMENT, en complément, la clause de préavis suivante : "Lorsque la mission conclue avec un Client consommateur est à durée indéterminée et présente un caractère récurrent, chacune des Parties peut y mettre fin sous réserve d'un préavis de trente (30) jours calendaires notifié par écrit, sans préjudice de toute disposition impérative plus favorable au Client. Lorsque les conditions de l'article L215-1-1 du Code de la consommation sont réunies, le Client peut notifier la résiliation au moyen de la fonctionnalité électronique prévue par ce texte. Lorsque le contrat est conclu pour une durée déterminée avec une clause de reconduction tacite, les obligations d'information et de non-reconduction prévues par l'article L215-1 du Code de la consommation sont applicables. Lorsque l'article L215-4 est applicable, le contrat reproduit les dispositions exigées par ce texte."`
-  : `Inclus OBLIGATOIREMENT, en complément, la clause de préavis suivante : "Lorsque la mission présente un caractère récurrent ou continu, chacune des Parties peut mettre fin à la collaboration sous réserve de respecter un préavis de ${({"15":"quinze (15)","30":"trente (30)","45":"quarante-cinq (45)","60":"soixante (60)"})[form.preavisJours] || form.preavisJours} jours calendaires, notifié par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception. Pendant le préavis, les prestations convenues se poursuivent et restent dues dans les conditions contractuelles habituelles. Le préavis ne s'applique pas en cas de résolution pour manquement grave lorsque les conditions permettant une cessation sans préavis sont réunies. Pour les missions auxquelles elle s'applique, la présente clause se substitue à tout autre délai général de résiliation sans faute incompatible avec le préavis choisi."`)
-  : ""}
-
-ARTICLE 10 — FORCE MAJEURE
-Clause standard de force majeure conforme à l'art. 1218 du Code civil.
-
-ARTICLE 11 — ${form.typeClient === "particulier" ? "DROIT APPLICABLE ET RÈGLEMENT DES LITIGES" : "DROIT APPLICABLE, MÉDIATION ET ATTRIBUTION DE JURIDICTION"}
-${form.typeClient === "particulier"
-  ? `Le Client étant un consommateur, rédige cet article EXACTEMENT ainsi, mot pour mot, sans ajouter aucune obligation de médiation préalable ni aucune clause attribuant compétence à un tribunal : "Le présent contrat est soumis au droit français. En cas de litige, le Client peut recourir gratuitement à un médiateur de la consommation en vue de la résolution amiable du litige, dans les conditions prévues aux articles L611-1 et suivants du Code de la consommation. Ce recours est facultatif et ne constitue pas un préalable obligatoire à la saisine du juge. Le Client peut saisir, à son choix, l'une des juridictions territorialement compétentes en vertu du Code de procédure civile ou la juridiction du lieu où il demeurait au moment de la conclusion du contrat ou de la survenance du fait dommageable, conformément à l'article R631-3 du Code de la consommation."`
-  : `Droit français. En cas de litige, les parties s'engagent à tenter une médiation avant toute action judiciaire. Attribution de compétence au Tribunal de commerce ou au Tribunal judiciaire compétent du ressort du domicile du Prestataire.`}
-
-ARTICLE 12 — DISPOSITIONS GÉNÉRALES
-Intégralité de l'accord, divisibilité des clauses, absence de renonciation, hiérarchie des documents contractuels.
-
-ARTICLE 13 — SIGNATURES
-Bloc de signature avec : "Lu et approuvé — Bon pour accord", Nom, Qualité — pour chacune des deux parties. NE PAS inclure de lignes "Date :" ni "Lieu :" ni de ligne de signature à remplir à la main (la signature électronique réelle, datée, s'affiche séparément juste après cet article — ne pas la dupliquer ici). Termine impérativement par la mention : "Contrat établi et signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie."
-
-══════════════════════════════════════════════
-CONSIGNES DE RÉDACTION
-══════════════════════════════════════════════
-- Commence DIRECTEMENT par l'en-tête du contrat, sans introduction ni commentaire.
-- Rédige chaque article avec des sous-paragraphes numérotés. Chaque sous-paragraphe est sur sa propre ligne et commence par son numéro suivi d'un point et d'une espace : « 4.1. », « 4.2. ». Chaque titre d'article est seul sur sa ligne, sous la forme « ARTICLE 4 — TITRE ». Pour une énumération, une ligne par élément, commençant par « a) », « b) », « c) ».
-- Utilise un registre juridique français précis, sans jargon inutile mais avec la rigueur d'un acte d'avocat.
-- Cite les fondements légaux (articles de loi) entre parenthèses, uniquement quand ils sont certains.
-- Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
-- Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.
-- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € ${U}"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
-- Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").
-- Ne cite un article de loi que si tu es certain de son numéro exact. N'écris JAMAIS de numéro d'article incomplet ou approximatif (par exemple « L221-... ») : dans le doute, ne cite pas d'article.
-- N'ajoute aucune clause qui contredit ou affaiblit les clauses imposées ci-dessus, et ne remplace jamais une clause imposée par ta propre formulation.
-
-══════════════════════════════════════════════
-RÈGLES ABSOLUES — À RESPECTER À LA LETTRE
-══════════════════════════════════════════════
-1. Suis la structure ci-dessus exactement : 13 articles, dans cet ordre, avec ces titres. N'ajoute aucun article. Dans chaque article, n'écris que ce que sa consigne demande.
-2. N'invente AUCUNE information absente des données de la mission : pas de moyen de paiement, de lieu, de délai, de montant, de fréquence, de garantie, de pénalité ni d'obligation supplémentaire. Si une information n'est pas fournie, ne l'évoque pas.
-3. Les clauses imposées « mot pour mot » sont recopiées exactement, SANS guillemets autour, sans reformulation et sans phrase ajoutée au milieu.
-4. Ne commente pas ta réponse et n'ajoute aucune note, aucun conseil ni aucun avertissement en dehors du contrat.`;
+      const prompt = buildContractPrompt(form, profile);
 
       setStreamingText("");
 
@@ -2512,7 +2724,7 @@ ${contract}
 RETOUR DU CLIENT (ses demandes de modification avant signature) :
 "${reviseMessage.trim()}"
 
-Ta tâche : réécris le contrat COMPLET en intégrant les demandes légitimes du client, tout en gardant le prestataire protégé. Garde exactement la même structure, la même mise en forme et le même style que le contrat original (mêmes articles numérotés, mêmes titres). Modifie uniquement ce qui est concerné par le retour du client : toutes les autres clauses doivent être reprises MOT POUR MOT, sans les reformuler. Si une demande est déraisonnable ou dangereuse pour le prestataire, adapte-la de façon équilibrée plutôt que de la refuser.${form.typeClient === "particulier" ? " Le client est un particulier : les prix restent exprimés toutes taxes comprises (TTC)." : ""}
+Ta tâche : réécris le contrat COMPLET en intégrant les demandes légitimes du client, tout en gardant le prestataire protégé. Garde exactement la même structure, la même mise en forme et le même style que le contrat original (mêmes articles numérotés, mêmes titres). Modifie uniquement ce qui est concerné par le retour du client : toutes les autres clauses doivent être reprises MOT POUR MOT, sans les reformuler. Si une demande est déraisonnable ou dangereuse pour le prestataire, adapte-la de façon équilibrée plutôt que de la refuser. Garde toutes les mentions légales du contrat (mention « EI », TVA, délais légaux, médiateur, rétractation).${form.typeClient === "particulier" ? " Le client est un particulier : les prix restent exprimés toutes taxes comprises (TTC). N'ajoute jamais de plafond ni d'exclusion de responsabilité, de pénalités de retard, d'indemnité forfaitaire de 40 €, de clause de non-sollicitation ni de clause qui impose un tribunal : avec un particulier, ces clauses sont interdites ou sans effet." : ""}
 
 Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire avant ou après, sans backticks.`;
 
@@ -2562,26 +2774,33 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
   };
 
   // ── Yousign : envoyer pour signature ──
-  const downloadPDF = (overrideForm, overrideContract, overrideFreelanceSig, overrideClientSig, overrideSignedAt, overrideRetractationWaivedAt) => {
+  const downloadPDF = (overrideForm, overrideContract, overrideFreelanceSig, overrideClientSig, overrideSignedAt, overrideRetractationWaivedAt, overrideExtra) => {
     const rawForm = overrideForm || form;
-    const pForm = {
+    const pContract = normalizeContractText(overrideContract || contract);
+    // Si le formulaire n'a pas gardé le statut juridique, on suit le texte du contrat (« Nom EI »)
+    const pForm = resolveLegalStatus({
       freelanceName: "", freelanceActivity: "", freelanceSiret: "", freelanceAddress: "", freelancePhone: "",
       freelanceEmail: "", clientName: "", clientCompany: "", clientAddress: "",
       clientEmail: "", missionTitle: "", missionDescription: "", startDate: "",
       endDate: "", price: "", paymentTerms: "", revisions: "", latePaymentPenalty: false,
       acomptePourcentage: "0", typeClient: "professionnel", categorieMetier: "autre", clauseDedit: true, clauseRespect: true, clauseSuspension: true, clauseSecurite: true, clauseInterlocuteur: true, clausePreavis: true, preavisJours: "30",
       ...rawForm,
-    };
-    const pContract = normalizeContractText(overrideContract || contract);
+    }, pContract);
     const pFreelanceSig = overrideFreelanceSig || null;
     const pClientSig = overrideClientSig || null;
     const pSignedAt = overrideSignedAt || null;
     const pRetractationWaivedAt = overrideRetractationWaivedAt || null;
+    // Date de signature du freelance, et lieu de signature déclaré (signature en présence d'un particulier)
+    const pExtra = overrideExtra || {};
+    const pFreelanceSignedAt = pExtra.signedByFreelanceAt || null;
+    const pPayFrom = pForm.typeClient === "particulier" && pExtra.signatureLocation === "hors_etablissement" && pSignedAt
+      ? paymentAllowedFrom(pSignedAt) : null;
     if (!jsPDFReady || !window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
     if (!overrideForm) setPdfLoad(true);
     try {
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "mm", format: "a4" });
+      doc.setProperties({ title: `Contrat — ${pForm.missionTitle || "Mission"}`, creator: `Freeley ${APP_VERSION}` });
       const PW = 210, PH = 297;
       const ML = 22, MR = 22, cw = PW - ML - MR;
       const HEADER_H = 16, FOOTER_H = 14, BODY_TOP = HEADER_H + 8, BODY_BOT = PH - FOOTER_H - 6;
@@ -2612,6 +2831,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       const d1 = pForm.startDate ? new Date(pForm.startDate).toLocaleDateString("fr-FR") : "Non défini";
       const d2 = pForm.endDate   ? new Date(pForm.endDate).toLocaleDateString("fr-FR")   : "Non défini";
       const today = new Date().toLocaleDateString("fr-FR");
+      // Date du contrat : celle écrite en tête du contrat, pas le jour où l'on télécharge le PDF
+      const contractDate = (String(pContract || "").slice(0, 900).match(/\d{1,2}(?:er)? (?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre) \d{4}/i) || [])[0] || today;
+      const payFromLabel = pPayFrom ? new Date(pPayFrom).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) : null;
 
       /* ── HEADER (pages intérieures) ── */
       const drawHeader = () => {
@@ -2637,7 +2859,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         doc.line(ML, PH - FOOTER_H + 1, PW - MR, PH - FOOTER_H + 1);
         doc.setFont("helvetica","italic"); doc.setFontSize(6.5);
         doc.setTextColor(...GREY);
-        doc.text(`Généré le ${today} via Freeley — Document indicatif, à valider par un professionnel pour missions importantes.`, ML, PH - FOOTER_H + 6);
+        // Pas de « document indicatif » sur un contrat signé : le client pourrait croire qu'il ne l'engage pas
+        doc.text(`${contractNumber ? `Contrat ${contractNumber} — ` : ""}Document généré via Freeley le ${today}`, ML, PH - FOOTER_H + 6);
         doc.setFont("helvetica","bold"); doc.setFontSize(7);
         doc.setTextColor(...NAVYL);
         doc.text(`Page ${pageNum} / ${total}`, PW - MR, PH - FOOTER_H + 6, { align:"right" });
@@ -2688,7 +2911,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       }
       doc.setFont("helvetica","normal"); doc.setFontSize(7);
       doc.setTextColor(180, 210, 240);
-      doc.text(`Fait le ${today}`, PW - MR, 35, { align:"right" });
+      doc.text(`Fait le ${contractDate}`, PW - MR, 35, { align:"right" });
 
       // ── Bloc titre mission (sous la bande) ──
       let cy = 58;
@@ -2762,13 +2985,14 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       ];
       if (pricing.b2c) tableRows.push(["TVA", pricing.tvaApplicable ? `Incluse : ${fmtEuro(pricing.total - pricing.ht)} € (20 %)` : "Non applicable — art. 293 B du CGI"]);
       else tableRows.push(["TVA", pricing.tvaApplicable ? "En sus, au taux en vigueur" : "Non applicable — art. 293 B du CGI"]);
+      // Signé hors établissement avec un particulier : rien ne se paie avant le 8e jour (art. L221-10 C. conso)
       if (acomptePctPdf > 0) {
-        tableRows.push([`Acompte (${acomptePctPdf} %)`, `${fmtEuro(pricing.acompte)} € — dû à la signature`]);
+        tableRows.push([`Acompte (${acomptePctPdf} %)`, payFromLabel ? `${fmtEuro(pricing.acompte)} € — payable à partir du ${payFromLabel} (délai légal de 7 jours)` : `${fmtEuro(pricing.acompte)} € — dû à la signature`]);
         tableRows.push([`Solde (${100 - acomptePctPdf} %)`, `${fmtEuro(pricing.solde)} € — dû à la livraison`]);
       }
       // Avec un acompte, « Comptant » veut dire : solde payé dès réception de sa facture (jamais « à la commande »)
       tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant"
-        ? (acomptePctPdf > 0 ? "Solde dès réception de la facture" : "Comptant à la commande")
+        ? (acomptePctPdf > 0 ? "Solde dès réception de la facture" : (payFromLabel ? `Comptant, payable à partir du ${payFromLabel} (délai légal de 7 jours)` : "Comptant à la commande"))
         : `${pForm.paymentTerms} jours nets`]);
       tableRows.push(["Révisions incluses", `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
       if (pricing.b2c) tableRows.push(["Intérêts de retard", pForm.latePaymentPenalty ? "Oui — Taux d'intérêt légal, après mise en demeure" : "Non stipulés"]);
@@ -2817,8 +3041,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       // Note de bas de page de garde
       doc.setFont("helvetica","italic"); doc.setFontSize(6.8);
       doc.setTextColor(...GREY);
-      doc.text("Les droits de propriété intellectuelle sont cédés sous condition suspensive du paiement intégral des honoraires.", ML, cy);
-      cy += 5;
+      // Ce que dit l'article 6 du métier : cession (création, digital), licence (conseil), rien (artisanat)
+      const piNote = pForm.categorieMetier === "artisanat" ? ""
+        : pForm.categorieMetier === "conseil" ? "Les livrables font l'objet d'une licence d'utilisation, accordée après le paiement intégral des honoraires."
+        : (pForm.contenuNumeriquePret && pForm.typeClient === "particulier") ? "Le contenu fourni fait l'objet d'une licence d'utilisation, accordée après le paiement intégral des honoraires."
+        : "Les droits de propriété intellectuelle sont cédés sous condition suspensive du paiement intégral des honoraires.";
+      if (piNote) { doc.text(piNote, ML, cy); cy += 5; }
       doc.text("Contrat soumis au droit français. Généré par Freeley. À faire relire pour toute mission sensible.", ML, cy);
 
       /* ══════════════════════════════════════════
@@ -2990,7 +3218,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         try { doc.addImage(pFreelanceSig, "PNG", ML + 4, y + 33, bw - 8, 16); } catch(e) {}
         doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
         drawCheck(ML + 5.6, y + 54.4, 2.6, GREEN);
-        doc.text("Signé électroniquement", ML + 8.5, y + 55.5);
+        doc.text(pFreelanceSignedAt ? `Signé électroniquement le ${new Date(pFreelanceSignedAt).toLocaleDateString("fr-FR")}` : "Signé électroniquement", ML + 8.5, y + 55.5);
       } else {
         doc.setDrawColor(...NAVY); doc.setLineWidth(0.6);
         doc.line(ML + 4, y + 50, ML + bw - 4, y + 50);
@@ -3070,7 +3298,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
 
       // ── Annexe : information officielle sur la rétractation + formulaire (clients particuliers) ──
       if (pForm.typeClient === "particulier") {
-        const annexTitles = ["Droit de rétractation", "Effets de rétractation", "Modèle de formulaire de rétractation"];
+        const annexTitles = ["Droit de rétractation", "Effets de rétractation", "Perte du droit de rétractation", "Modèle de formulaire de rétractation"];
         const writeAnnex = (txt) => {
           txt.split("\n\n").forEach(par => {
             const isTitle = annexTitles.includes(par);
@@ -3254,6 +3482,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       skills: [], photo: null,
       companyName: "", legalStatus: "", tvaNumber: "", address: "",
       iban: "", bic: "", bankName: "", logo: null,
+      mediateur: "", assurance: "",
     });
     try { localStorage.removeItem("freeley_profile"); } catch(e) {}
   };
@@ -3594,7 +3823,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         historyView={historyView}
         setHistoryView={setHistoryView}
         onBack={() => goToScreen("app")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt)}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt })}
         onDelete={async (id) => { await deleteFromHistory(id); const hist = await getHistory(); setHistory(hist); if (historyView?.id === id) setHistoryView(null); }}
         onDuplicate={async (entry) => {
           const dupForm = { ...(entry.form || {}), missionTitle: (entry.missionTitle || entry.form?.missionTitle || "") + " (copie)" };
@@ -3667,7 +3896,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       <ArchivesPage
         history={history}
         onBack={() => goToScreen("history")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt)}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt })}
         profile={profile}
         authUser={authUser}
         onRestore={async (id) => {
@@ -4232,56 +4461,62 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 Les clauses de protection ci-dessous ont fait l'objet d'une revue juridique par une juriste en droit des affaires et du numérique.
               </div>
 
-              {/* Pénalités de retard */}
+              {/* Retard de paiement : « intérêts de retard » pour un particulier (au choix), « pénalités de
+                  retard » entre professionnels (toujours écrites dans le contrat : la loi l'impose) */}
+              {(() => { const latePro = form.typeClient !== "particulier"; const lateOn = latePro || form.latePaymentPenalty; return (
               <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
-                  <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>PÉNALITÉS DE RETARD DE PAIEMENT</label>
-                  <LegalTooltip text="Obligatoire en B2B (art. L441-10 C.com.). Taux = 3× le taux directeur BCE + 40€ d'indemnité forfaitaire. Protège le freelance en cas de retard de paiement." />
+                  <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>{latePro ? "PÉNALITÉS DE RETARD DE PAIEMENT" : "INTÉRÊTS DE RETARD DE PAIEMENT"}</label>
+                  <LegalTooltip text={latePro
+                    ? "Entre professionnels, la loi oblige à les écrire dans le contrat (article L441-10 du Code de commerce). Taux : celui de la Banque centrale européenne, majoré de 10 points. S'y ajoute une indemnité forfaitaire de 40 € pour frais de recouvrement."
+                    : "Avec un particulier, ce sont des intérêts au taux d'intérêt légal. Ils ne courent qu'après une mise en demeure (article 1231-6 du Code civil). L'indemnité de 40 € est réservée aux professionnels."} />
                 </div>
                 <div
-                  onClick={() => update("latePaymentPenalty", !form.latePaymentPenalty)}
+                  onClick={() => { if (!latePro) update("latePaymentPenalty", !form.latePaymentPenalty); }}
                   style={{
                     display:"flex", alignItems:"flex-start", gap:14,
                     padding:"16px 18px",
-                    background: form.latePaymentPenalty ? "#F0FDF4" : C.white,
-                    border:`1.5px solid ${form.latePaymentPenalty ? "#86EFAC" : C.border}`,
-                    borderRadius:10, cursor:"pointer",
+                    background: lateOn ? "#F0FDF4" : C.white,
+                    border:`1.5px solid ${lateOn ? "#86EFAC" : C.border}`,
+                    borderRadius:10, cursor: latePro ? "default" : "pointer",
                     transition:"all 0.2s",
                   }}
                 >
                   {/* Toggle pill */}
                   <div style={{
                     width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
-                    background: form.latePaymentPenalty ? "#16A34A" : C.creamDD,
+                    background: lateOn ? "#16A34A" : C.creamDD,
                     position:"relative", transition:"background 0.2s",
+                    opacity: latePro ? 0.7 : 1,
                   }}>
                     <div style={{
-                      position:"absolute", top:3, left: form.latePaymentPenalty ? 21 : 3,
+                      position:"absolute", top:3, left: lateOn ? 21 : 3,
                       width:18, height:18, borderRadius:"50%", background:C.white,
                       boxShadow:"0 1px 4px #00000030",
                       transition:"left 0.2s",
                     }}/>
                   </div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: form.latePaymentPenalty ? "#15803D" : C.textM, marginBottom:3 }}>
-                      {form.latePaymentPenalty ? "✓ Clause activée — Contrat renforcé" : "Clause désactivée"}
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color: lateOn ? "#15803D" : C.textM, marginBottom:3 }}>
+                      {latePro ? "✓ Toujours incluses entre professionnels" : (lateOn ? "✓ Clause activée — Contrat renforcé" : "Clause désactivée")}
                     </div>
-                    <div style={{ fontFamily:T.body, fontSize:12, color: form.latePaymentPenalty ? "#16A34A" : C.textL, lineHeight:1.5 }}>
-                      {form.latePaymentPenalty
-                        ? (form.typeClient === "particulier"
-                          ? "✓ Clause activée — Taux d'intérêt légal en vigueur applicable aux consommateurs"
-                          : "Taux BCE + 10 pts · Indemnité 40€ · Art. L441-10 C.com. — Fortement recommandé")
-                        : "Active cette clause pour protéger ton paiement en cas de retard client"}
+                    <div style={{ fontFamily:T.body, fontSize:12, color: lateOn ? "#16A34A" : C.textL, lineHeight:1.5 }}>
+                      {latePro
+                        ? "Taux de la BCE majoré de 10 points, et indemnité de 40 € pour frais de recouvrement. La loi oblige à les écrire dans tout contrat entre professionnels (article L441-10 du Code de commerce)."
+                        : lateOn
+                          ? "Taux d'intérêt légal, seulement après une mise en demeure (article 1231-6 du Code civil)."
+                          : "Active cette clause pour protéger ton paiement en cas de retard du client."}
                     </div>
                   </div>
                 </div>
               </div>
+              ); })()}
 
               {/* Clause de dédommagement en cas d'annulation */}
               <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
                   <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE DÉDOMMAGEMENT EN CAS D'ANNULATION</label>
-                  <LegalTooltip text="Si le client annule la mission après que vous avez commencé à travailler, cette clause vous permet de réclamer un dédommagement pour le temps déjà investi — à négocier selon l'avancement réel. Avant le début des travaux, seul l'acompte déjà versé reste dû." />
+                  <LegalTooltip text="Si le client annule la mission après que tu as commencé à travailler, cette clause te permet de réclamer un dédommagement pour le temps déjà investi, à négocier selon l'avancement réel. Avant le début des travaux, aucun dédommagement n'est dû." />
                 </div>
                 <div
                   onClick={() => update("clauseDedit", !form.clauseDedit)}
@@ -4311,7 +4546,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                       {form.clauseDedit ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseDedit ? "#16A34A" : C.textL, lineHeight:1.5 }}>
-                      Si le client annule la mission après que vous avez commencé à travailler, cette clause vous permet de réclamer un dédommagement pour le temps déjà investi — à négocier selon l'avancement réel. Avant le début des travaux, seul l'acompte déjà versé reste dû.
+                      Si le client annule la mission après que tu as commencé à travailler, cette clause te permet de réclamer un dédommagement pour le temps déjà investi, à négocier selon l'avancement réel. Avant le début des travaux, aucun dédommagement n'est dû.
                     </div>
                   </div>
                 </div>
@@ -4321,7 +4556,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
                   <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE BONNE CONDUITE ET RESPECT MUTUEL</label>
-                  <LegalTooltip text="Si le client a un comportement irrespectueux, insultant ou abusif envers vous, cette clause vous permet — après un avertissement écrit — de résilier le contrat à ses torts, sans préavis ni indemnité de votre part." />
+                  <LegalTooltip text="Si le client a un comportement irrespectueux, insultant ou abusif envers toi, cette clause te permet, après un avertissement écrit, de mettre fin au contrat à ses torts, sans préavis ni indemnité de ta part." />
                 </div>
                 <div
                   onClick={() => update("clauseRespect", !form.clauseRespect)}
@@ -4351,7 +4586,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                       {form.clauseRespect ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseRespect ? "#16A34A" : C.textL, lineHeight:1.5 }}>
-                      Si le client a un comportement irrespectueux, insultant ou abusif envers vous, cette clause vous permet — après un avertissement écrit — de résilier le contrat à ses torts, sans préavis ni indemnité de votre part.
+                      Si le client a un comportement irrespectueux, insultant ou abusif envers toi, cette clause te permet, après un avertissement écrit, de mettre fin au contrat à ses torts, sans préavis ni indemnité de ta part.
                     </div>
                   </div>
                 </div>
@@ -4361,7 +4596,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
                   <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE SUSPENSION EN CAS DE RETARD DE PAIEMENT</label>
-                  <LegalTooltip text="Si le client ne paie pas dans les temps (après mise en demeure restée sans effet 8 jours), cette clause vous autorise à arrêter le travail jusqu'au paiement, sans que ce soit considéré comme une faute de votre part." />
+                  <LegalTooltip text="Si le client ne paie pas à temps (après une mise en demeure restée sans effet pendant 8 jours), cette clause t'autorise à arrêter le travail jusqu'au paiement, sans que ce soit considéré comme une faute de ta part." />
                 </div>
                 <div
                   onClick={() => update("clauseSuspension", !form.clauseSuspension)}
@@ -4391,7 +4626,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                       {form.clauseSuspension ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseSuspension ? "#16A34A" : C.textL, lineHeight:1.5 }}>
-                      Si le client ne paie pas dans les temps (après mise en demeure restée sans effet 8 jours), cette clause vous autorise à arrêter le travail jusqu'au paiement, sans que ce soit considéré comme une faute de votre part.
+                      Si le client ne paie pas à temps (après une mise en demeure restée sans effet pendant 8 jours), cette clause t'autorise à arrêter le travail jusqu'au paiement, sans que ce soit considéré comme une faute de ta part.
                     </div>
                   </div>
                 </div>
@@ -4401,7 +4636,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
                     <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>LIVRABLE : CONTENU NUMÉRIQUE DÉJÀ EXISTANT</label>
-                    <LegalTooltip text="À cocher si vous vendez quelque chose déjà tout prêt à l'avance, comme un template ou un fichier que vous proposez tel quel à plusieurs clients. Ne cochez pas si vous réalisez un travail fait spécialement pour ce client. Si coché : dès que le client accepte de perdre son droit de rétractation, envoyez-lui l'email de confirmation qui apparaîtra sur la page du contrat, et faites-le avant de lui livrer le contenu." />
+                    <LegalTooltip text="À cocher si tu vends quelque chose déjà tout prêt à l'avance, comme un template ou un fichier que tu proposes tel quel à plusieurs clients. Ne coche pas si tu réalises un travail fait spécialement pour ce client. Si c'est coché : dès que le client accepte de perdre son droit de rétractation, envoie-lui l'email de confirmation qui apparaîtra sur la page du contrat, et fais-le avant de lui livrer le contenu." />
                   </div>
                   <div
                     onClick={() => update("contenuNumeriquePret", !form.contenuNumeriquePret)}
@@ -4442,7 +4677,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
                   <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE DE SÉCURITÉ ET ASSURANCE PROFESSIONNELLE</label>
-                  <LegalTooltip text="Le client doit signaler par écrit tout danger connu du lieu d'intervention (installation défectueuse, matériaux dangereux, accès instable...), et vous confirmez être couvert par votre assurance professionnelle. Recommandé pour les métiers manuels et les interventions sur site." />
+                  <LegalTooltip text="Le client doit signaler par écrit tout danger connu du lieu d'intervention (installation défectueuse, matériaux dangereux, accès instable...), et tu confirmes être couvert par ton assurance professionnelle. Indique-la dans ton profil : elle sera écrite dans le contrat. Recommandé pour les métiers manuels et les interventions sur site." />
                 </div>
                 <div
                   onClick={() => update("clauseSecurite", !form.clauseSecurite)}
@@ -4472,7 +4707,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                       {form.clauseSecurite ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseSecurite ? "#16A34A" : C.textL, lineHeight:1.5 }}>
-                      Le client doit signaler par écrit tout danger connu du lieu d'intervention (installation défectueuse, matériaux dangereux, accès instable...), et vous confirmez être couvert par votre assurance professionnelle. Recommandé pour les métiers manuels et les interventions sur site.
+                      Le client doit signaler par écrit tout danger connu du lieu d'intervention (installation défectueuse, matériaux dangereux, accès instable...), et tu confirmes être couvert par ton assurance professionnelle. Indique-la dans ton profil : elle sera écrite dans le contrat. Recommandé pour les métiers manuels et les interventions sur site.
                     </div>
                   </div>
                 </div>
@@ -4482,7 +4717,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <div className="fade-up fade-up-5" style={{ marginBottom:24 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
                   <label style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLAUSE D'INTERLOCUTEUR UNIQUE CÔTÉ CLIENT</label>
-                  <LegalTooltip text="Le client désigne une seule personne habilitée à valider les livrables et donner des instructions. Vous n'êtes pas tenu de suivre des consignes contradictoires venant de quelqu'un d'autre chez le client." />
+                  <LegalTooltip text="Le client désigne une seule personne habilitée à valider les livrables et à donner des instructions. Tu n'es pas tenu de suivre des consignes contradictoires venant de quelqu'un d'autre chez le client." />
                 </div>
                 <div
                   onClick={() => update("clauseInterlocuteur", !form.clauseInterlocuteur)}
@@ -4512,7 +4747,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                       {form.clauseInterlocuteur ? "✓ Clause activée — Fortement recommandé" : "Clause désactivée"}
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:12, color: form.clauseInterlocuteur ? "#16A34A" : C.textL, lineHeight:1.5 }}>
-                      Le client désigne une seule personne habilitée à valider les livrables et donner des instructions. Vous n'êtes pas tenu de suivre des consignes contradictoires venant de quelqu'un d'autre chez le client.
+                      Le client désigne une seule personne habilitée à valider les livrables et à donner des instructions. Tu n'es pas tenu de suivre des consignes contradictoires venant de quelqu'un d'autre chez le client.
                     </div>
                   </div>
                 </div>
@@ -4562,6 +4797,21 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                   </div>
                 )}
               </div>
+
+              {/* Avant la rédaction : ce qui manque pour que le contrat soit complet. On prévient, on ne bloque pas. */}
+              {(() => {
+                const notes = [];
+                if (form.typeClient === "particulier" && !String(profile?.mediateur || "").trim()) notes.push("Ton client est un particulier : la loi t'oblige à adhérer à un médiateur de la consommation et à donner ses coordonnées au client (article L612-1 du Code de la consommation). Indique ton médiateur dans ton profil : il sera écrit dans le contrat.");
+                if (form.clauseSecurite && !String(profile?.assurance || "").trim()) notes.push("La clause d'assurance annonce que tes assurances sont indiquées dans le contrat. Indique ton assurance dans ton profil, ou décoche la clause.");
+                if (!notes.length) return null;
+                return (
+                  <div style={{ padding:"12px 16px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:8, color:"#92400E", fontSize:12.5, fontFamily:T.body, lineHeight:1.6, marginTop:8 }}>
+                    {notes.map((n, i) => <div key={i} style={{ marginBottom: i < notes.length - 1 ? 8 : 0 }}>⚠️ {n}</div>)}
+                    <span onClick={goToProfileFacturation} style={{ display:"inline-block", marginTop:8, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Compléter mon profil →</span>
+                    <div style={{ marginTop:6, fontSize:11.5, color:"#A16207" }}>Tu peux quand même générer le contrat maintenant.</div>
+                  </div>
+                );
+              })()}
 
               {apiError && (
                 <div style={{ padding:"12px 16px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, color:C.error, fontSize:13, fontFamily:T.body, marginTop:8 }}>
@@ -4821,6 +5071,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             </div>
           </div>
 
+          {/* Contrôle automatique du texte rédigé (prévient, ne bloque rien) */}
+          <ContractCheckBox text={contract} form={form} profile={profile} onGoToProfile={goToProfileFacturation} />
+
           {/* Contract body — rendered Markdown */}
           <div className="fade-up fade-up-2">
             <MarkdownContract
@@ -4992,6 +5245,7 @@ function renderInvoicePDF({
 }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
+  doc.setProperties({ title: `Facture ${invoiceNum || ""}`.trim(), creator: `Freeley ${APP_VERSION}` });
   const PW = 210, ML = 20, MR = 20, cw = PW - ML - MR;
   const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80], GREY = [110, 110, 110];
   const p = profile || {};
@@ -5031,6 +5285,8 @@ function renderInvoicePDF({
   yL += line(freelanceSiret ? "SIRET : " + freelanceSiret : (p.siret ? "SIRET : " + p.siret : ""), ML, yL);
   yL += line(freelanceEmail, ML, yL);
   yL += line(p.tvaNumber ? "TVA : " + p.tvaNumber : "", ML, yL);
+  // Assurance professionnelle : obligatoire sur les factures quand le métier impose une assurance (bâtiment…)
+  yL += line(p.assurance ? "Assurance : " + p.assurance : "", ML, yL);
   const cx = ML + colW + 8;
   yR += line(clientName, cx, yR);
   yR += line(clientCompany, cx, yR);
@@ -5965,7 +6221,30 @@ CONSIGNES :
 }
 
 /* ══════════════════════════════════════════ MARKDOWN CONTRACT RENDERER ══ */
-function MarkdownContract({ text, form, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, signedByFreelanceAt, retractationWaivedAt }) {
+// Résultat du contrôle automatique (checkContractText), affiché au-dessus du contrat
+function ContractCheckBox({ text, form, profile, onGoToProfile }) {
+  if (!String(text || "").trim()) return null;
+  const issues = checkContractText(text, form || {}, profile || {});
+  if (!issues.length) return (
+    <div data-testid="contract-check" style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"10px 14px", marginBottom:16, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.5 }}>
+      <span style={{ fontSize:14 }}>✓</span>
+      <span>Contrôle automatique : rien d'anormal dans les points vérifiés (mentions obligatoires, montants, dates, clauses interdites avec un particulier).</span>
+    </div>
+  );
+  const needsProfile = issues.some(m => m.includes("profil"));
+  return (
+    <div data-testid="contract-check" style={{ padding:"14px 16px", marginBottom:16, background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, fontFamily:T.body, color:"#92400E", lineHeight:1.55 }}>
+      <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>⚠️ Contrôle automatique : {issues.length === 1 ? "1 point à vérifier" : `${issues.length} points à vérifier`} avant de faire signer</div>
+      {issues.map((m, i) => <div key={i} style={{ fontSize:12.5, marginBottom:6 }}>• {m}</div>)}
+      <div style={{ fontSize:11.5, color:"#A16207", marginTop:4 }}>Pour corriger, utilise « Réviser le contrat » en décrivant le problème, ou refais le contrat. Freeley ne bloque pas la signature.</div>
+      {needsProfile && onGoToProfile && <span onClick={onGoToProfile} style={{ display:"inline-block", marginTop:8, fontSize:12.5, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Compléter mon profil →</span>}
+    </div>
+  );
+}
+
+function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, signedByFreelanceAt, retractationWaivedAt }) {
+  // Formulaire sans statut juridique : on suit le texte du contrat (« Nom EI »)
+  const form = resolveLegalStatus(rawForm, text);
   if (!text) return null;
 
   // ── Inline renderer: **bold** → <strong>
@@ -6354,12 +6633,12 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
     "ARTICLE 3 — DÉLAIS ET PROCÉDURE DE VALIDATION",
     "ARTICLE 4 — HONORAIRES ET MODALITÉS DE PAIEMENT",
     "ARTICLE 5 — RÉVISIONS ET MODIFICATIONS",
-    "ARTICLE 6 — PROPRIÉTÉ INTELLECTUELLE",
+    form?.categorieMetier === "artisanat" ? "ARTICLE 6 — GARANTIE DE BONNE EXÉCUTION" : "ARTICLE 6 — PROPRIÉTÉ INTELLECTUELLE",
     "ARTICLE 7 — CONFIDENTIALITÉ",
     "ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE",
     "ARTICLE 9 — RÉSILIATION",
     "ARTICLE 10 — FORCE MAJEURE",
-    "ARTICLE 11 — DROIT APPLICABLE ET JURIDICTION",
+    form?.typeClient === "particulier" ? "ARTICLE 11 — DROIT APPLICABLE ET LITIGES" : "ARTICLE 11 — DROIT APPLICABLE ET JURIDICTION",
     "ARTICLE 12 — DISPOSITIONS GÉNÉRALES",
     "ARTICLE 13 — SIGNATURES",
   ];
@@ -6452,14 +6731,14 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
             {/* Prestataire */}
             <div style={{ background:"#253D5E", borderRadius:8, padding:"12px 14px" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:"#5A7A9A", marginBottom:6 }}>PRESTATAIRE</div>
-              <div style={{ fontFamily:T.body, fontSize:13, color:C.white, fontWeight:600 }}>{form.freelanceName || "—"}</div>
+              <div style={{ fontFamily:T.body, fontSize:13, color:C.white, fontWeight:600 }}>{contractFreelanceName(form) || "—"}</div>
               <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:2 }}>{form.freelanceActivity || "—"}</div>
             </div>
             {/* Client */}
             <div style={{ background:"#253D5E", borderRadius:8, padding:"12px 14px" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:"#5A7A9A", marginBottom:6 }}>CLIENT</div>
               <div style={{ fontFamily:T.body, fontSize:13, color:C.white, fontWeight:600 }}>{form.clientName || "—"}</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:2 }}>{form.clientCompany || "—"}</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:2 }}>{form.typeClient === "particulier" ? "Particulier" : (form.clientCompany || "—")}</div>
             </div>
           </div>
         </div>
@@ -11910,6 +12189,11 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
         </div>
       )}
 
+      {/* Contrôle automatique : seulement tant que le contrat n'est pas signé (on peut encore le corriger) */}
+      {historyView.signatureStatus !== "signed" && !historyView.isStandaloneInvoice && (
+        <ContractCheckBox text={historyView.contract} form={historyView.form} profile={profile} onGoToProfile={onGoToProfileTva} />
+      )}
+
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
         <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} signedByFreelanceAt={historyView.signedByFreelanceAt} retractationWaivedAt={historyView.retractationWaivedAt} />
@@ -12900,7 +13184,8 @@ ${freelanceName}`;
                 {depositPct === 100 ? "Facture — Paiement comptant" : "Facture d'acompte"}
               </div>
               <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:1 }}>
-                {depositPct === 100 ? "100% du montant total HT — règlement immédiat" : `${depositPct}% du montant total HT`}
+                {/* Particulier sans TVA : le montant saisi est le prix à payer, donc TTC */}
+                {(() => { const u = form?.typeClient === "particulier" && !tvaApplicableUI ? "TTC" : "HT"; return depositPct === 100 ? `100% du montant total ${u} — règlement immédiat` : `${depositPct}% du montant total ${u}`; })()}
               </div>
             </div>
           </div>
@@ -14483,6 +14768,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const paymentEarly = !!paymentNotBefore;
   const early = useEarlyPaymentGuard({ contractId, payNotBefore: paymentNotBefore, active: paymentEarly, savedAck: null });
   const canValidateFreelance = freelanceHasStrokes && (!isParticulier || !!signLocation);
+  // Moyens de paiement réellement disponibles : on ne parle pas d'IBAN s'il manque, ni de carte sans Stripe
+  const hasIban = !!String(profile?.iban || "").trim();
+  const payWays = `${hasIban ? "par virement (IBAN sur la facture)" : "par virement"}${stripeConnectReady && stripeConnectAccountId ? " ou par carte" : ""}`;
   const [showContractText, setShowContractText] = useState(false);
   const profileIncomplete = !(profile?.firstName && profile?.lastName && profile?.jobTitle);
   const [tactileRetractationChecked, setTactileRetractationChecked] = useState(false);
@@ -14764,7 +15052,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     Ton client est un particulier. La loi ne fixe pas les mêmes règles de paiement selon l'endroit où le contrat est signé. Choisis la réponse qui correspond à la réalité : elle sera enregistrée dans le contrat, avec la date et l'heure, et elle engage ta responsabilité.
                   </div>
                   {[
-                    { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement.", rule:"Le client peut payer l'acompte tout de suite." },
+                    { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement.", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
                     { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un salon, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander." },
                     { key:"urgence", title:"Chez le client, pour une réparation urgente qu'il m'a demandée", sub:"Par exemple un dépannage urgent à son domicile, à sa demande.", rule:"La loi autorise alors le paiement tout de suite, mais seulement pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-10, 4°, du Code de la consommation). Si ta mission comprend autre chose, comme un contrat d'entretien, choisis plutôt « Chez le client ou ailleurs »." },
                   ].map(opt => (
@@ -14777,6 +15065,15 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       </span>
                     </label>
                   ))}
+                  {/* Dates de la mission incompatibles avec les 7 jours sans paiement */}
+                  {signLocation === "hors_etablissement" && !payAfterDelivery && form.startDate && paymentNotBefore && new Date(form.startDate).getTime() < new Date(paymentNotBefore).getTime() && (
+                    <div style={{ marginTop:4, padding:"10px 12px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:10, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
+                      📅 <strong>Attention aux dates.</strong> La mission doit démarrer le {frDate(form.startDate)}. Avec une signature chez le client, {isComptant ? "le paiement" : "l'acompte"} ne pourra être demandé qu'à partir du {frDate(paymentNotBefore)}. Comme ce paiement conditionne le démarrage, la mission ne pourra pas commencer avant.{" "}
+                      {/le démarrage est reporté au jour du versement/.test(contractText || "")
+                        ? "Le contrat le prévoit : le démarrage est reporté au jour du paiement, et la date de fin est décalée d'autant. Préviens ton client."
+                        : "Préviens ton client, et adapte les dates si besoin."}
+                    </div>
+                  )}
                 </div>
               )}
               <div style={{
@@ -14920,7 +15217,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
                       En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si {form.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
                     </div>
-                    <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(form)}{"\n\n"}{buildRetractationForm(form)}</div>
+                    <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(form, contractText))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(form, contractText))}</div>
                     <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
                       <input type="checkbox" checked={tactileRetractationChecked} onChange={e => setTactileRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
                       <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!form.contenuNumeriquePret)}</span>
@@ -15088,8 +15385,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     : paymentEarly
                     ? <>Signé hors établissement : d'après la loi, pas de paiement avant le <strong style={{ color:"#4ADE80" }}>{frDate(paymentNotBefore)}</strong>.</>
                     : isComptant
-                      ? <>Il reste à régler <strong style={{ color:"#4ADE80" }}>la totalité (100 %)</strong>, par virement (IBAN sur la facture) ou par carte.</>
-                      : <>Il reste à régler l'acompte de <strong style={{ color:"#4ADE80" }}>{acomptePct} %</strong>, par virement (IBAN sur la facture) ou par carte.</>
+                      ? <>Il reste à régler <strong style={{ color:"#4ADE80" }}>la totalité (100 %)</strong>, {payWays}.</>
+                      : <>Il reste à régler l'acompte de <strong style={{ color:"#4ADE80" }}>{acomptePct} %</strong>, {payWays}.</>
                   }
                 </div>
               </div>
@@ -15132,7 +15429,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     background:"#DCFCE7", border:"1.5px solid #86EFAC",
                     display:"flex", alignItems:"center", justifyContent:"center", fontSize:24,
                   }}>🏦</div>
-                  <div style={{ fontFamily:T.body, fontSize:9, color:"#166534", marginTop:4, fontWeight:600, lineHeight:1.4 }}>Par virement — IBAN sur la facture</div>
+                  <div style={{ fontFamily:T.body, fontSize:9, color:"#166534", marginTop:4, fontWeight:600, lineHeight:1.4 }}>{hasIban ? "Par virement — IBAN sur la facture" : "Par virement — ajoute ton IBAN dans ton profil"}</div>
                 </div>
               </div>
 
@@ -15186,7 +15483,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     <button onClick={() => { navigator.clipboard.writeText(tactilePaymentLink); setTactilePaymentCopied(true); setTimeout(()=>setTactilePaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{tactilePaymentCopied ? "Copié !" : "Copier"}</button>
                   </div>
                 )}
-                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:6, textAlign:"center" }}>Carte bancaire (Stripe) — ou par virement avec l'IBAN sur la facture</div>
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:6, textAlign:"center" }}>{hasIban ? "Carte bancaire (Stripe) — ou par virement avec l'IBAN sur la facture" : "Carte bancaire (Stripe) — ou par virement"}</div>
               </div>
 
               {/* Quand la mission peut commencer : d'après le contrat, la case cochée et la règle des 7 jours */}
@@ -15883,6 +16180,20 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 ⚠️ C'est à toi de vérifier ton statut réel et de tenir ce champ à jour — Freeley ne peut pas le déterminer à ta place.
               </div>
             </div>
+            <div style={{ marginTop:14 }}>
+              <label style={labelStyle}>MÉDIATEUR DE LA CONSOMMATION</label>
+              <input style={inputStyle} value={profile.mediateur || ""} placeholder="Nom du médiateur et adresse de son site internet" onChange={e => updateProfile("mediateur", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+              <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>
+                <strong>Obligatoire si tu travailles pour des particuliers</strong> (article L612-1 du Code de la consommation). Tu dois adhérer toi-même à un médiateur de la consommation, puis indiquer ici son nom et son site internet. Ils seront écrits dans tes contrats avec des particuliers.
+              </div>
+            </div>
+            <div style={{ marginTop:14 }}>
+              <label style={labelStyle}>ASSURANCE PROFESSIONNELLE</label>
+              <input style={inputStyle} value={profile.assurance || ""} placeholder="Assureur, numéro de contrat et zone couverte (ex. : France)" onChange={e => updateProfile("assurance", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+              <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>
+                Si tu as une assurance professionnelle, indique-la ici. Elle sera écrite dans tes contrats et sur tes factures. Pour certains métiers, comme le bâtiment avec la garantie décennale, la loi l'impose sur les devis et les factures.
+              </div>
+            </div>
           </div>
 
           {/* Facturation électronique — connexion Super PDP */}
@@ -16320,7 +16631,7 @@ function ClientSignaturePage({ contractId }) {
           <div style={{ fontSize:12.5, color:"#5A6B80", lineHeight:1.6, marginBottom:16 }}>
             En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si {content.form?.contenuNumeriquePret ? "la fourniture du contenu numérique" : "la prestation"} peut commencer avant la fin de ce délai.
           </div>
-          <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(content.form || {})}{"\n\n"}{buildRetractationForm(content.form || {})}</div>
+          <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(content.form || {}, content.contract))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(content.form || {}, content.contract))}</div>
           <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
             <input type="checkbox" checked={retractationChecked} onChange={e => setRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
             <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!content.form?.contenuNumeriquePret)}</span>
