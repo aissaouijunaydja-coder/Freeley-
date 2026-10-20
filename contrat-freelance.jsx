@@ -243,6 +243,7 @@ const getHistory = async () => {
       retractationExercisedAt: content.retractationExercisedAtServer || content.retractationExercisedAt || null,
       contentDeliveredAt: content.contentDeliveredAtServer || content.contentDeliveredAt || null,
       signatureLocation: content.signatureLocation || null,
+      clientPetitPro: content.clientPetitPro === true ? true : content.clientPetitPro === false ? false : null,
       earlyPaymentAck: content.earlyPaymentAck ? { ...content.earlyPaymentAck, atServer: content.earlyPaymentAckAtServer || null } : null,
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
@@ -410,11 +411,34 @@ const paymentAllowedFrom = (signedIso) => {
 };
 const frDate = (d) => d ? new Date(d).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" }) : "";
 
-// Lieu de la signature en présence avec un particulier, déclaré par le freelance
+// Lieu de la signature en présence, déclaré par le freelance (particulier ; professionnel depuis la version 222)
 const SIGNATURE_LOCATIONS = {
   locaux: "Dans mes locaux (bureau, atelier ou boutique où je travaille habituellement)",
   hors_etablissement: "Chez le client ou ailleurs (domicile, café, salon, chantier…)",
   urgence: "Chez le client, pour une réparation urgente qu'il m'a demandée",
+};
+
+// Version 222 : petite entreprise cliente (article L221-3 du Code de la consommation). Un contrat conclu hors
+// établissement avec un professionnel qui emploie au plus cinq salariés, et dont l'objet n'entre pas dans le champ
+// de son activité principale, donne à ce client les droits d'un consommateur : information et formulaire de
+// rétractation, délai de rétractation de 14 jours, aucun paiement pendant 7 jours (article L221-10). Le freelance
+// le déclare au moment de la signature en présence : Freeley ne vérifie pas, il prévient.
+const PETIT_PRO_ANSWERS = {
+  oui: "Oui, ou pas sûr : le client emploie au plus cinq salariés et le contrat n'entre pas dans son activité principale",
+  non: "Non : le client emploie plus de cinq salariés, ou le contrat entre dans son activité principale",
+};
+// Client protégé comme un consommateur : un particulier, ou une petite entreprise signée hors établissement.
+// « c » : le contenu enregistré du contrat (ou une fiche de Mes contrats). Même règle dans api/retraction.js.
+const isConsumerLikeContract = (form, c) => (form || {}).typeClient === "particulier"
+  || ((c || {}).signatureLocation === "hors_etablissement" && (c || {}).clientPetitPro === true);
+
+// SIRET (14 chiffres) ou SIREN (9 chiffres) écrit par groupes : 130 333 891 00013. Tout autre format reste tel quel.
+const fmtSiret = (v) => {
+  const s = String(v || "").trim();
+  const d = s.replace(/[\s.\-]/g, "");
+  if (/^\d{14}$/.test(d)) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6, 9)} ${d.slice(9)}`;
+  if (/^\d{9}$/.test(d)) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+  return s;
 };
 
 // ── Information légale sur la rétractation : modèle officiel (annexe à l'article R221-3 du Code de la
@@ -651,7 +675,27 @@ const submitContentDelivered = async (contractId) => {
   return { ok: false, reason: r.data.error || "" };
 };
 
-// Le client (particulier) demande expressément le démarrage avant la fin du délai de rétractation de 14 jours
+// Version 222 : signature en présence d'une petite entreprise protégée (art. L221-3 C. conso). Le lieu et la réponse
+// du freelance sont enregistrés dès sa signature, avant l'écran du client : le serveur en a besoin pour enregistrer
+// la case du client. Sans gravité si cela échoue : tout est enregistré de nouveau avec les deux signatures.
+const saveSignContextEarly = async (contractId, ctx) => {
+  try {
+    const existing = await readContractForUpdate(contractId);
+    if (!existing) return false;
+    const { error } = await supabase.rpc("update_contract_content", {
+      p_contract_id: contractId,
+      p_new_content: JSON.stringify({ ...existing.content, ...ctx }),
+      p_new_status: existing.status,
+    });
+    if (error) { console.error("[Freeley] Lieu de signature non enregistré :", error); return false; }
+    return true;
+  } catch (e) {
+    console.error("[Freeley] Lieu de signature non enregistré :", e);
+    return false;
+  }
+};
+
+// Le client (particulier ou petite entreprise protégée) demande expressément le démarrage avant la fin du délai de rétractation de 14 jours
 const submitRetractationWaiver = async (contractId, waiverText) => {
   const text = waiverText || RETRACTATION_WAIVER_TEXT_SERVICE; // preuve : texte exact vu et accepté par le client
   const r = await callRetractionApi({ action: "client-waive", contractId, waiverText: text });
@@ -847,7 +891,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "221";
+const APP_VERSION = "222";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -930,8 +974,10 @@ const checkContractText = (text, form = {}, profile = {}) => {
     if (has(/compétence exclusive|attribution de (compétence|juridiction)|tribunal de commerce/i)) add("Client particulier : le contrat impose un tribunal. C'est interdit avec un particulier.");
     if (!has(/L221-10/)) add("Client particulier : la règle des 7 jours sans paiement après une signature hors établissement n'apparaît pas.");
     if (!String(form.freelanceMediateur || "").trim()) add("Client particulier : ton médiateur de la consommation n'est pas indiqué, alors que la loi l'impose. Ajoute-le dans ton profil, puis refais le contrat.");
-  } else if (!has(/L441-10/)) {
-    add("Client professionnel : les pénalités de retard, obligatoires entre professionnels (article L441-10 du Code de commerce), n'apparaissent pas.");
+  } else {
+    if (!has(/L441-10/)) add("Client professionnel : les pénalités de retard, obligatoires entre professionnels (article L441-10 du Code de commerce), n'apparaissent pas.");
+    // Version 222 : petite entreprise signée hors établissement (article L221-3 du Code de la consommation)
+    if (!has(/L221-3\b/)) add("Client professionnel : la règle des petites entreprises signées hors de tes locaux (article L221-3 du Code de la consommation) n'apparaît pas.");
   }
 
   // Assurance annoncée par la clause, mais pas renseignée
@@ -995,6 +1041,10 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
       // Contrat hors établissement (art. L221-10 C. conso) : rien ne se paie pendant 7 jours. Si un paiement
       // conditionne le démarrage, le contrat dit ce que deviennent les dates de la mission.
       const horsEtabSentence = `"Lorsque le présent contrat est conclu hors établissement, aucun paiement ne peut être exigé ni reçu du Client avant l'expiration d'un délai de sept jours à compter de sa conclusion, sauf pour des travaux d'entretien ou de réparation à réaliser en urgence au domicile du Client et expressément sollicités par lui, dans la limite des pièces de rechange et travaux strictement nécessaires pour répondre à l'urgence (article L221-10 du Code de la consommation).${dueAtSigning ? " En dehors de ce cas d'urgence, la somme prévue à la signature n'est alors exigible qu'à l'expiration de ce délai. Si la date de démarrage prévue à l'article 3 tombe avant son versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée." : ""}"`;
+      // Client professionnel (version 222) : une petite entreprise signée hors établissement a les droits d'un
+      // consommateur (art. L221-3 C. conso). Phrase conditionnelle, comme celle du particulier : le contrat reste juste
+      // quel que soit l'endroit où il est signé.
+      const petitProSentence = `"Lorsque le présent contrat est conclu hors établissement, que son objet n'entre pas dans le champ de l'activité principale du Client et que celui-ci emploie au plus cinq salariés, le Client bénéficie des règles du Code de la consommation applicables aux contrats conclus hors établissement, notamment du droit de rétractation de quatorze jours et de l'interdiction de tout paiement avant l'expiration d'un délai de sept jours à compter de la conclusion du contrat (articles L221-3 et L221-10 du Code de la consommation).${dueAtSigning ? " Dans ce cas, la somme prévue à la signature n'est exigible qu'à l'expiration de ce délai. Si la date de démarrage prévue à l'article 3 tombe avant son versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée." : ""}"`;
       // Article 6 (création, digital, autre) : la clause dit que le contrat indique si le prix rémunère aussi la
       // cession des droits. On l'écrit vraiment, à l'article 4.
       const cessionInPrice = form.categorieMetier !== "artisanat" && form.categorieMetier !== "conseil";
@@ -1037,12 +1087,12 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
 DONNÉES DE LA MISSION
 ══════════════════════════════════════════════
 Prestataire        : ${contractFreelanceName(form)}${isCompany && form.freelanceLegalStatus ? "\nForme juridique    : " + form.freelanceLegalStatus + "\nReprésentant légal : " + form.freelanceName : ""}
-Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + form.freelanceSiret : ""}${form.freelanceTvaNumber ? "\nN° TVA Prestataire : " + form.freelanceTvaNumber : ""}
+Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + fmtSiret(form.freelanceSiret) : ""}${form.freelanceTvaNumber ? "\nN° TVA Prestataire : " + form.freelanceTvaNumber : ""}
 Adresse Prestataire: ${form.freelanceAddress}
 Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + fmtPhone(form.freelancePhone) : ""}${form.freelanceAssurance ? "\nAssurance professionnelle du Prestataire : " + form.freelanceAssurance : ""}${isB2C && form.freelanceMediateur ? "\nMédiateur de la consommation du Prestataire : " + form.freelanceMediateur : ""}
 
-Client             : ${form.clientName}${form.clientCompany ? " — " + form.clientCompany : ""}
-Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}${!isB2C && form.clientSiret ? "\nSIRET Client       : " + form.clientSiret : ""}
+Client             : ${form.clientName}${form.clientCompany && String(form.clientCompany).trim() !== String(form.clientName || "").trim() ? " — " + form.clientCompany : ""}
+Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}${!isB2C && form.clientSiret ? "\nSIRET Client       : " + fmtSiret(form.clientSiret) : ""}
 Adresse Client     : ${form.clientAddress || "Non communiquée"}
 Email Client       : ${form.clientEmail || "—"}
 
@@ -1096,9 +1146,10 @@ ${paymentSentences}
 ${pricing.b2c
   ? `- "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent aux montants que le Client aura effectivement à payer (${pricing.taxNote})."
 - ${horsEtabSentence}`
-  : pricing.tvaApplicable
+  : `${pricing.tvaApplicable
     ? `- "Toutes les sommes sont exprimées hors taxes ; la TVA s'y ajoute au taux en vigueur."`
-    : `- "TVA non applicable, article 293 B du Code général des impôts : les montants indiqués au présent contrat sont les montants effectivement dus par le Client."`}${cessionInPrice ? `
+    : `- "TVA non applicable, article 293 B du Code général des impôts : les montants indiqués au présent contrat sont les montants effectivement dus par le Client."`}
+- ${petitProSentence}`}${cessionInPrice ? `
 - "Le prix global du présent contrat rémunère à la fois ${existingContent ? "la fourniture du contenu numérique et les droits d'utilisation prévus à l'article 6" : "la réalisation de la prestation et la cession des droits prévue à l'article 6"}."` : ""}
 ${(form.latePaymentPenalty || !isB2C)
   ? (form.typeClient === "particulier"
@@ -2015,7 +2066,7 @@ const downloadSignedContractForClient = async (contractId) => {
     freelanceSignature: c.freelanceSignature || null, clientSignature: c.clientSignature || null,
     signedAt: c.signedByClientAtServer || c.signedByClientAt || null,
     retractationWaivedAt: c.retractationWaivedAtServer || c.retractationWaivedAt || null,
-    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null },
+    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null, clientPetitPro: c.clientPetitPro === true },
     profile: { tvaNumber: tvaFromText },
   });
   doc.save(fileName);
@@ -2039,11 +2090,17 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   const pClientSig = clientSignature || null;
   const pSignedAt = signedAt || null;
   const pRetractationWaivedAt = retractationWaivedAt || null;
-  // Date de signature du freelance, et lieu de signature déclaré (signature en présence d'un particulier)
+  // Date de signature du freelance, et lieu de signature déclaré (signature en présence)
   const pExtra = extra || {};
   const pFreelanceSignedAt = pExtra.signedByFreelanceAt || null;
-  const pPayFrom = pForm.typeClient === "particulier" && pExtra.signatureLocation === "hors_etablissement" && pSignedAt
+  // Client protégé comme un consommateur : particulier, ou petite entreprise signée hors établissement (version 222)
+  const pConsumer = isConsumerLikeContract(pForm, pExtra);
+  // Contenu numérique déjà existant : seulement avec un particulier (un contrat pro peut garder la case d'un essai)
+  const pDigital = pForm.typeClient === "particulier" && !!pForm.contenuNumeriquePret;
+  const pPayFrom = pConsumer && pExtra.signatureLocation === "hors_etablissement" && pSignedAt
     ? paymentAllowedFrom(pSignedAt) : null;
+  // SIRET du client professionnel, affiché dans ses cadres comme celui du prestataire (version 222)
+  const pClientSiret = pForm.typeClient !== "particulier" && String(pForm.clientSiret || "").trim() ? fmtSiret(pForm.clientSiret) : "";
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   doc.setProperties({ title: `Contrat — ${pForm.missionTitle || "Mission"}`, creator: `Freeley ${APP_VERSION}` });
@@ -2192,7 +2249,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   const actLines = doc.splitTextToSize(pForm.freelanceActivity, blockW - 8);
   actLines.forEach((l,i) => doc.text(l, ML + 4, cy + 24 + i*5));
   let offAct = cy + 24 + actLines.length * 5 + 2;
-  if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.setFontSize(7.5); doc.text(`SIRET : ${pForm.freelanceSiret}`, ML + 4, offAct); offAct += 5; }
+  if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.setFontSize(7.5); doc.text(`SIRET : ${fmtSiret(pForm.freelanceSiret)}`, ML + 4, offAct); offAct += 5; }
   doc.setFontSize(7.5); doc.setTextColor(...DARK);
   const addrLines1 = doc.splitTextToSize(pForm.freelanceAddress, blockW - 8);
   addrLines1.forEach((l,i) => doc.text(l, ML + 4, offAct + i*4.5));
@@ -2209,10 +2266,12 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   doc.text(pForm.clientName, cx2 + 4, cy + 17);
   doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
   if (pForm.clientCompany) { doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.text(pForm.clientCompany, cx2 + 4, cy + 24); }
+  let offCli = cy + (pForm.clientCompany ? 31 : 24);
+  if (pClientSiret) { doc.setFont("helvetica","normal"); doc.setTextColor(...GREY); doc.setFontSize(7.5); doc.text(`SIRET : ${pClientSiret}`, cx2 + 4, offCli); offCli += 5; doc.setTextColor(...DARK); }
   doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
   const addrLines2 = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", blockW - 8);
-  addrLines2.forEach((l,i) => doc.text(l, cx2 + 4, cy + (pForm.clientCompany ? 31 : 24) + i*4.5));
-  if (pForm.clientEmail) { doc.setTextColor(...NAVYL); const emailOffY = cy + (pForm.clientCompany ? 31 : 24) + addrLines2.length*4.5 + 2; doc.text(pForm.clientEmail, cx2 + 4, emailOffY); }
+  addrLines2.forEach((l,i) => doc.text(l, cx2 + 4, offCli + i*4.5));
+  if (pForm.clientEmail) { doc.setTextColor(...NAVYL); const emailOffY = offCli + addrLines2.length*4.5 + 2; doc.text(pForm.clientEmail, cx2 + 4, emailOffY); }
 
   cy += 64;
 
@@ -2461,7 +2520,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
   const actLinesS = doc.splitTextToSize(pForm.freelanceActivity, bw - 8);
   actLinesS.forEach((l,i) => doc.text(l, ML + 4, y + 23 + i*5));
-  if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.text(`SIRET : ${pForm.freelanceSiret}`, ML + 4, y + 30); }
+  if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.text(`SIRET : ${fmtSiret(pForm.freelanceSiret)}`, ML + 4, y + 30); }
   // Signature réelle si disponible, sinon ligne à remplir à la main
   if (pFreelanceSig) {
     try { doc.addImage(pFreelanceSig, "PNG", ML + 4, y + 33, bw - 8, 16); } catch(e) {}
@@ -2499,8 +2558,13 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
     doc.text(pForm.clientCompany, cx3 + 4, y + 23);
   }
   doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
-  const addrSig = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", bw - 8);
-  addrSig.forEach((l,i) => doc.text(l, cx3 + 4, y + (pForm.clientCompany ? 30 : 24) + i*4.5));
+  if (pClientSiret) {
+    // Client professionnel avec SIRET : comme le cadre du prestataire (l'adresse figure en page de garde)
+    doc.setTextColor(...GREY); doc.text(`SIRET : ${pClientSiret}`, cx3 + 4, y + 30); doc.setTextColor(...DARK);
+  } else {
+    const addrSig = doc.splitTextToSize(pForm.clientAddress || "Non communiquée", bw - 8);
+    addrSig.forEach((l,i) => doc.text(l, cx3 + 4, y + (pForm.clientCompany ? 30 : 24) + i*4.5));
+  }
   // Signature réelle si disponible, sinon ligne à remplir à la main
   if (pClientSig) {
     try { doc.addImage(pClientSig, "PNG", cx3 + 4, y + 33, bw - 8, 16); } catch(e) {}
@@ -2520,18 +2584,18 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
 
   y += 68;
 
-  // ── Mention renonciation au délai de rétractation (clients particuliers uniquement) ──
-  if (pForm.typeClient === "particulier") {
+  // ── Mention renonciation au délai de rétractation (particulier, ou petite entreprise protégée : version 222) ──
+  if (pConsumer) {
     if (pRetractationWaivedAt) {
       doc.setFillColor(...GREEN); doc.circle(ML + 2.5, y - 1.3, 2, "F");
       doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREEN);
-      doc.text(pForm.contenuNumeriquePret
+      doc.text(pDigital
         ? `Perte du droit de rétractation acceptée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`
         : `Démarrage avant la fin du délai de rétractation demandé le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
     } else {
       doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
       doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
-      doc.text(pForm.contenuNumeriquePret
+      doc.text(pDigital
         ? "Perte du droit de rétractation non acceptée à ce jour"
         : "Démarrage avant la fin du délai de rétractation non demandé à ce jour", ML + 7, y);
     }
@@ -2545,8 +2609,9 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
     ? `Contrat signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie. Droit français applicable. Freeley — ${today}`
     : `Contrat en attente de signature. Droit français applicable. Freeley — ${today}`, cw), ML, y);
 
-  // ── Annexe : information officielle sur la rétractation + formulaire (clients particuliers) ──
-  if (pForm.typeClient === "particulier") {
+  // ── Annexe : information officielle sur la rétractation + formulaire (particulier, ou petite entreprise
+  // signée hors établissement, art. L221-3 C. conso : version 222) ──
+  if (pConsumer) {
     const annexTitles = ["Droit de rétractation", "Effets de rétractation", "Perte du droit de rétractation", "Modèle de formulaire de rétractation"];
     const writeAnnex = (txt) => {
       txt.split("\n\n").forEach(par => {
@@ -2562,7 +2627,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
     doc.setFont("helvetica","bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
     doc.text("Annexe — Informations concernant l'exercice du droit de rétractation", ML, y);
     y += 9;
-    writeAnnex(buildRetractationNotice(pForm));
+    writeAnnex(buildRetractationNotice({ ...pForm, contenuNumeriquePret: pDigital }));
     y += 5;
     writeAnnex(buildRetractationForm(pForm));
   }
@@ -3256,8 +3321,14 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   // les emails retrouvent toujours les mêmes informations que le texte du contrat.
   const generateContract = async () => {
     const legalStatus = form.freelanceLegalStatus !== undefined ? form.freelanceLegalStatus : (profile?.legalStatus || "");
+    // Version 222 : pas d'espace en trop au début ou à la fin des noms (« Bonjour JUNAYD AISSAOUI , » dans l'email)
+    const trimmed = {};
+    ["freelanceName", "freelanceActivity", "freelanceEmail", "freelanceAddress", "freelanceSiret", "freelancePhone",
+     "clientName", "clientCompany", "clientEmail", "clientAddress", "clientSiret", "clientPhone", "missionTitle"]
+      .forEach(k => { if (typeof form[k] === "string") trimmed[k] = form[k].replace(/\s+/g, " ").trim(); });
     const genForm = {
       ...form,
+      ...trimmed,
       freelanceLegalStatus: legalStatus,
       freelanceCompanyName: !isEntrepreneurIndividuel(legalStatus) ? String(profile?.companyName || "").trim() : "",
       freelanceTvaNumber: String(profile?.tvaNumber || "").trim(),
@@ -3943,7 +4014,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
         historyView={historyView}
         setHistoryView={setHistoryView}
         onBack={() => goToScreen("app")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt })}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true })}
         onDelete={async (id) => { await deleteFromHistory(id); const hist = await getHistory(); setHistory(hist); if (historyView?.id === id) setHistoryView(null); }}
         onDuplicate={async (entry) => {
           const dupForm = { ...(entry.form || {}), missionTitle: (entry.missionTitle || entry.form?.missionTitle || "") + " (copie)" };
@@ -4016,7 +4087,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       <ArchivesPage
         history={history}
         onBack={() => goToScreen("history")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt })}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true })}
         profile={profile}
         authUser={authUser}
         onRestore={async (id) => {
@@ -4139,10 +4210,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       {showRadarModal && (
         <RadarClientModal
           onClose={() => setShowRadarModal(false)}
+          useLabel="✅ Utiliser cette entreprise pour ce contrat"
           onSelectCompany={(c) => {
             setForm(f => ({
               ...f,
-              clientName: c.nom_complet || f.clientName,
+              // Version 222 : le nom du contact déjà saisi est gardé ; sinon, le nom de l'entreprise
+              clientName: String(f.clientName || "").trim() ? f.clientName : (c.nom_complet || f.clientName),
               clientCompany: c.nom_complet || f.clientCompany,
               clientAddress: c.siege?.adresse || f.clientAddress,
               clientSiret: c.siege?.siret || c.siren || f.clientSiret,
@@ -5360,7 +5433,7 @@ const getOrReserveInvoiceNumber = async ({ authUser, contractId, key, avenantNum
 function renderInvoicePDF({
   invoiceNum, designation, missionTitle, montant,
   freelanceName, freelanceSiret, freelanceEmail, freelanceAddress,
-  clientName, clientCompany, clientAddress, clientEmail,
+  clientName, clientCompany, clientAddress, clientEmail, clientSiret,
   profile, typeClient, qrBase64, footNote, filename, dueDays = 0,
 }) {
   const { jsPDF } = window.jspdf;
@@ -5402,14 +5475,16 @@ function renderInvoicePDF({
   yL += line(withEI(p.companyName || freelanceName, p.legalStatus), ML, yL);
   yL += line(p.legalStatus, ML, yL);
   yL += line(freelanceAddress || p.address, ML, yL);
-  yL += line(freelanceSiret ? "SIRET : " + freelanceSiret : (p.siret ? "SIRET : " + p.siret : ""), ML, yL);
+  yL += line(freelanceSiret ? "SIRET : " + fmtSiret(freelanceSiret) : (p.siret ? "SIRET : " + fmtSiret(p.siret) : ""), ML, yL);
   yL += line(freelanceEmail, ML, yL);
   yL += line(p.tvaNumber ? "TVA : " + p.tvaNumber : "", ML, yL);
   // Assurance professionnelle : obligatoire sur les factures quand le métier impose une assurance (bâtiment…)
   yL += line(p.assurance ? "Assurance : " + p.assurance : "", ML, yL);
   const cx = ML + colW + 8;
   yR += line(clientName, cx, yR);
-  yR += line(clientCompany, cx, yR);
+  yR += line(clientCompany && String(clientCompany).trim() !== String(clientName || "").trim() ? clientCompany : "", cx, yR);
+  // Version 222 : SIREN/SIRET du client professionnel (nouvelle mention obligatoire des factures entre professionnels)
+  yR += line(typeClient !== "particulier" && String(clientSiret || "").trim() ? "SIRET : " + fmtSiret(clientSiret) : "", cx, yR);
   yR += line(clientAddress, cx, yR);
   yR += line(clientEmail, cx, yR);
   y = Math.max(yL, yR) + 8;
@@ -5429,6 +5504,10 @@ function renderInvoicePDF({
   const rowH = Math.max(10, descLines.length * 4.6 + 4);
   doc.setDrawColor(225,225,225); doc.line(ML, y + rowH, PW - MR, y + rowH);
   y += rowH + 6;
+  // Version 222 : nature de l'opération (nouvelle mention obligatoire des factures, réforme de la facture électronique)
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...GREY);
+  doc.text("Nature de l'opération : prestation de services", ML + 3, y);
+  y += 7;
 
   // Totaux — la TVA s'applique réellement si le profil a un numéro de TVA renseigné,
   // jamais un "non applicable" écrit en dur (ça doit refléter la vraie situation du freelance)
@@ -5501,13 +5580,13 @@ function renderInvoicePDF({
 }
 
 // Génère une vraie facture pour l'ajustement de prix d'un avenant — passe par le moteur commun
-const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, freelanceAddress) => {
+const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, freelanceAddress, clientSiret) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: "avenant", avenantNum });
     renderInvoicePDF({
       invoiceNum, designation: `Avenant n°${avenantNum}`, missionTitle, montant,
-      freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
+      freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, clientName, clientCompany, clientAddress, clientEmail, clientSiret, typeClient, profile,
       filename: `Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
@@ -5527,6 +5606,7 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
       invoiceNum, designation: finalDesignation, missionTitle, montant,
       freelanceName, freelanceSiret, freelanceEmail, freelanceAddress: extra.form?.freelanceAddress || "",
       clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
+      clientSiret: extra.clientSiret || extra.form?.clientSiret || "",
       footNote: spec ? spec.footNote : undefined, dueDays: spec ? spec.dueDays : 0,
       filename: `Facture_${invoiceNum}.pdf`,
     });
@@ -6362,7 +6442,7 @@ function ContractCheckBox({ text, form, profile, onGoToProfile }) {
   );
 }
 
-function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, signedByFreelanceAt, retractationWaivedAt }) {
+function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, signedByFreelanceAt, retractationWaivedAt, consumerLike }) {
   // Formulaire sans statut juridique : on suit le texte du contrat (« Nom EI »)
   const form = resolveLegalStatus(rawForm, text);
   if (!text) return null;
@@ -6680,17 +6760,18 @@ function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSigna
                   <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>En attente de signature…</span>
                 </div>
               )}
-              {form?.typeClient === "particulier" && (
+              {/* Particulier, ou petite entreprise protégée (art. L221-3 C. conso, version 222) */}
+              {(form?.typeClient === "particulier" || consumerLike) && (
                 <div style={{ marginTop: 10 }}>
                   {retractationWaivedAt ? (
                     <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 20, padding: "5px 12px" }}>
                       <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#16A34A" }} />
-                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>{form?.contenuNumeriquePret ? "✓ Perte du droit de rétractation acceptée le " : "✓ Démarrage avant la fin du délai de rétractation demandé le "}{new Date(retractationWaivedAt).toLocaleDateString("fr-FR")}</span>
+                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#15803D" }}>{form?.typeClient === "particulier" && form?.contenuNumeriquePret ? "✓ Perte du droit de rétractation acceptée le " : "✓ Démarrage avant la fin du délai de rétractation demandé le "}{new Date(retractationWaivedAt).toLocaleDateString("fr-FR")}</span>
                     </div>
                   ) : (
                     <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 20, padding: "5px 12px" }}>
                       <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#F59E0B" }} />
-                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>{form?.contenuNumeriquePret ? "Perte du droit de rétractation pas encore acceptée" : "Démarrage avant la fin du délai de rétractation pas encore demandé"}</span>
+                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>{form?.typeClient === "particulier" && form?.contenuNumeriquePret ? "Perte du droit de rétractation pas encore acceptée" : "Démarrage avant la fin du délai de rétractation pas encore demandé"}</span>
                     </div>
                   )}
                 </div>
@@ -7472,7 +7553,7 @@ function FeedbackBubble() {
 /* ══════════════════════════════════════════════════════════ RADAR CLIENT ══ */
 // Vérifie l'existence et le statut d'une entreprise via l'API publique gratuite
 // de l'État (recherche-entreprises.api.gouv.fr) — aucune clé requise.
-function RadarClientModal({ onClose, onSelectCompany }) {
+function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser cette entreprise pour la facture" }) {
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -7653,7 +7734,7 @@ function RadarClientModal({ onClose, onSelectCompany }) {
                     background:"#059669", marginTop:8,
                     color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer",
                   }}
-                >✅ Utiliser cette entreprise pour la facture</button>
+                >{useLabel}</button>
               )}
             </div>
           );
@@ -10813,7 +10894,9 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   // Contrat signé chez le client ou ailleurs (hors établissement) : la loi interdit tout paiement pendant
   // 7 jours. Freeley ne bloque pas : au premier clic sur un bouton de paiement, une fenêtre rappelle la
   // loi, et la réponse du freelance est enregistrée dans le contrat.
-  const payNotBefore = entry?.signatureLocation === "hors_etablissement" && entry?.signedByClientAt ? paymentAllowedFrom(entry.signedByClientAt) : null;
+  // Version 222 : le lieu est aussi enregistré pour un client professionnel ; les 7 jours ne valent que pour un
+  // particulier ou une petite entreprise protégée (art. L221-3 C. conso).
+  const payNotBefore = isConsumerLikeContract(entry?.form, entry) && entry?.signatureLocation === "hors_etablissement" && entry?.signedByClientAt ? paymentAllowedFrom(entry.signedByClientAt) : null;
   const earlyWindow = !!payNotBefore && Date.now() < payNotBefore.getTime() && !paid;
   const early = useEarlyPaymentGuard({ contractId: entry?.id, payNotBefore, active: earlyWindow, savedAck: entry?.earlyPaymentAck });
 
@@ -11739,7 +11822,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {entry.isStandaloneInvoice ? (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte")}
+                            onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte", { clientSiret: entry.form?.clientSiret })}
                             style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Télécharger la facture</button>
                           <SendElectronicInvoiceButton compact
@@ -11803,7 +11886,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && Array.isArray(entry.avenants) && entry.avenants.map(av => (
                         <React.Fragment key={av.num}>
                           <button
-                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, entry.form?.freelanceAddress)}
+                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, entry.form?.freelanceAddress, entry.form?.clientSiret)}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture avenant n°{av.num}</button>
                           <SendElectronicInvoiceButton compact
@@ -12382,7 +12465,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
-        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} signedByFreelanceAt={historyView.signedByFreelanceAt} retractationWaivedAt={historyView.retractationWaivedAt} />
+        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} signedByFreelanceAt={historyView.signedByFreelanceAt} retractationWaivedAt={historyView.retractationWaivedAt} consumerLike={isConsumerLikeContract(historyView.form, historyView)} />
       </div>
 
       {/* Liste des avenants déjà créés sur ce contrat */}
@@ -12448,7 +12531,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                         </div>
                       )}
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id, historyView.form?.freelanceAddress)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
+                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id, historyView.form?.freelanceAddress, historyView.form?.clientSiret)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
                         <SendElectronicInvoiceButton compact
                           contractId={historyView.id} invoiceKey="avenant" avenantNum={av.num}
                           designation={`Avenant n°${av.num}`} montant={av.ajustementMontant} missionTitle={historyView.missionTitle}
@@ -12891,6 +12974,18 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 }
 
 /* ══════════════════════════════════════════ INVOICE MODAL ══ */
+// Version 222 : le refus du service de facturation électronique expliqué en français simple. Le détail technique
+// reste affiché en dessous (utile pour comprendre un cas nouveau).
+const explainEInvoiceError = (result) => {
+  if (!result || result.success) return "";
+  const raw = `${result.error || ""} ${typeof result.details === "string" ? result.details : JSON.stringify(result.details || "")}`;
+  const mismatch = raw.match(/entreprise\s*\((\d+)\)[^.]*ne correspond pas au vendeur de la facture\s*\((\d+)\)/i);
+  if (mismatch) return `Envoi refusé, rien n'est parti. Ton compte de facturation électronique est relié à l'entreprise n° ${mismatch[1]}, mais cette facture est émise au nom du SIREN ${mismatch[2]}. Vérifie que le SIRET de ton profil est bien celui de l'entreprise que tu as connectée.`;
+  if (/HTTP 401|HTTP 403|unauthori[sz]ed|invalid_client|identifiants/i.test(raw)) return "Envoi refusé, rien n'est parti. Tes identifiants de facturation électronique ne sont pas reconnus. Vérifie-les dans ton profil.";
+  if (/Failed to fetch|NetworkError|réseau/i.test(raw)) return "Envoi impossible, rien n'est parti. Vérifie ta connexion internet, puis réessaie.";
+  return "Envoi refusé, rien n'est parti. Le détail technique est juste en dessous, si tu veux le transmettre.";
+};
+
 // Bouton d'envoi en facturation électronique — réutilisé sur TOUTES les factures de l'app
 // (facture libre, acompte, solde, avenant), pour que la loi B2B soit proposée de façon cohérente
 // partout, peu importe le type de facture. Un seul endroit à corriger si jamais un détail change.
@@ -12960,6 +13055,9 @@ function SendElectronicInvoiceButton({
         }}>
           {sending ? "⏳ Envoi…" : result?.success ? "✓ Envoyée" : result?.error ? "⚠ Échec — réessayer" : "📤 Facturation électronique"}
         </button>
+        {result?.error && (
+          <div style={{ marginTop:6, fontSize:11, color:C.error, fontFamily:T.body, lineHeight:1.45, maxWidth:320 }}>{explainEInvoiceError(result)}</div>
+        )}
         {result?.details && (
           <div style={{
             marginTop:6, padding:"8px 10px", background:"#FEF2F2", border:"1px solid #FECACA",
@@ -12999,9 +13097,12 @@ function SendElectronicInvoiceButton({
         }
       </button>
       {result?.error && (
-        <div style={{ marginTop:6, fontSize:11.5, color:C.error, fontFamily:T.body }}>
-          {result.error}
+        <div style={{ marginTop:6, fontSize:11.5, color:C.error, fontFamily:T.body, lineHeight:1.5 }}>
+          {explainEInvoiceError(result)}
         </div>
+      )}
+      {result?.details && (
+        <div style={{ marginTop:6, fontSize:10.5, color:C.textL, fontFamily:T.body }}>Détail technique ({result.error}) :</div>
       )}
       {result?.details && (
         <div style={{
@@ -13300,6 +13401,7 @@ ${freelanceName}`;
         clientCompany: form.clientCompany,
         clientAddress: form.clientAddress,
         clientEmail: form.clientEmail,
+        clientSiret: form.clientSiret,
         profile,
         typeClient: form.typeClient,
         qrBase64,
@@ -13917,7 +14019,8 @@ ${freelanceName}`;
           onSelectCompany={(c) => {
             setForm(f => ({
               ...f,
-              clientName: c.nom_complet || f.clientName,
+              // Version 222 : le nom du contact déjà saisi est gardé ; sinon, le nom de l'entreprise
+              clientName: String(f.clientName || "").trim() ? f.clientName : (c.nom_complet || f.clientName),
               clientCompany: c.nom_complet || f.clientCompany,
               clientAddress: c.siege?.adresse || f.clientAddress,
               clientSiret: c.siege?.siret || c.siren || f.clientSiret,
@@ -14943,23 +15046,43 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const clientName = form.clientName || "Jean Dupont";
   const [showDepositInvoiceModal, setShowDepositInvoiceModal] = useState(false);
   const isParticulier = form.typeClient === "particulier";
-  // Lieu de la signature (particulier uniquement), déclaré par le freelance : la loi permet un paiement
-  // tout de suite (dans ses locaux, ou réparation urgente demandée par le client) ou seulement après
-  // 7 jours (contrat hors établissement, art. L221-10 C. conso). Freeley ne bloque pas : pendant les
-  // 7 jours, le premier clic sur un bouton de paiement ouvre une fenêtre de confirmation.
+  // Lieu de la signature, déclaré par le freelance : la loi permet un paiement tout de suite (dans ses locaux, ou
+  // réparation urgente demandée par le client) ou seulement après 7 jours (contrat hors établissement, art. L221-10
+  // C. conso). Freeley ne bloque pas : pendant les 7 jours, le premier clic sur un bouton de paiement ouvre une
+  // fenêtre de confirmation. Version 222 : la question est aussi posée pour un client professionnel. Signé hors
+  // des locaux du freelance, une petite entreprise (5 salariés au plus, contrat hors de son activité principale)
+  // a les droits d'un particulier (art. L221-3 C. conso) : le freelance le déclare, Freeley applique les mêmes règles.
   const [signLocation, setSignLocation] = useState(null);
   const [signLocationAt, setSignLocationAt] = useState(null);
   const chooseSignLocation = (key) => { setSignLocation(key); setSignLocationAt(new Date().toISOString()); };
-  const paymentNotBefore = isParticulier && signLocation === "hors_etablissement" ? paymentAllowedFrom(new Date().toISOString()) : null;
+  const [petitPro, setPetitPro] = useState(null); // "oui" | "non" : client professionnel signé hors établissement
+  const [petitProAt, setPetitProAt] = useState(null);
+  const choosePetitPro = (key) => { setPetitPro(key); setPetitProAt(new Date().toISOString()); };
+  const petitProProtege = !isParticulier && signLocation === "hors_etablissement" && petitPro === "oui";
+  const consumerLike = isParticulier || petitProProtege;
+  // Contenu numérique déjà existant : proposé seulement pour un particulier. Un contrat pro peut garder la case d'un
+  // essai précédent : elle ne compte pas (le contrat pro est toujours écrit comme une prestation).
+  const isDigital = isParticulier && !!form.contenuNumeriquePret;
+  const noticeForm = { ...form, contenuNumeriquePret: isDigital };
+  // Ce qui est enregistré dans le contrat : le lieu, et pour un pro signé hors des locaux, la réponse « petite entreprise »
+  const signContext = () => (signLocation ? {
+    signatureLocation: signLocation, signatureLocationLabel: SIGNATURE_LOCATIONS[signLocation], signatureLocationDeclaredAt: signLocationAt,
+    ...(!isParticulier && signLocation === "hors_etablissement" && petitPro
+      ? { clientPetitPro: petitPro === "oui", clientPetitProLabel: PETIT_PRO_ANSWERS[petitPro], clientPetitProDeclaredAt: petitProAt }
+      : {}),
+  } : {});
+  const signContextSaveRef = useRef(null);
+  const paymentNotBefore = consumerLike && signLocation === "hors_etablissement" ? paymentAllowedFrom(new Date().toISOString()) : null;
   const paymentEarly = !!paymentNotBefore;
   const early = useEarlyPaymentGuard({ contractId, payNotBefore: paymentNotBefore, active: paymentEarly, savedAck: null });
   // Démarrage prévu au contrat avant le premier jour possible : rappelé au choix du lieu ET sur l'écran final
   const startPlanned = form.startDate ? new Date(form.startDate).getTime() : null;
   const startsBeforePayment = !!(startPlanned && paymentNotBefore && !payAfterDelivery && startPlanned < new Date(paymentNotBefore).getTime());
   const contractPostponesStart = /le démarrage est reporté au jour du versement/.test(contractText || "");
-  const retractLastDay = isParticulier ? retractationLastDay(new Date().toISOString()) : null;
+  const retractLastDay = consumerLike ? retractationLastDay(new Date().toISOString()) : null;
   const startsBeforeRetractationEnd = !!(startPlanned && retractLastDay && startPlanned <= retractLastDay.getTime());
-  const canValidateFreelance = freelanceHasStrokes && (!isParticulier || !!signLocation);
+  // Le lieu est demandé à tous (version 222) ; pour un pro signé hors des locaux, la réponse « petite entreprise » aussi
+  const canValidateFreelance = freelanceHasStrokes && !!signLocation && (isParticulier || signLocation !== "hors_etablissement" || !!petitPro);
   // Moyens de paiement réellement disponibles : on ne parle pas d'IBAN s'il manque, ni de carte sans Stripe
   const hasIban = !!String(profile?.iban || "").trim();
   const payWays = `${hasIban ? "par virement (IBAN sur la facture)" : "par virement"}${stripeConnectReady && stripeConnectAccountId ? " ou par carte" : ""}`;
@@ -14972,7 +15095,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const handleTactileRetractationContinue = async () => {
     if (!tactileRetractationChecked) { setTactileRetractationDone(true); return; }
     setTactileRetractationWaiving(true);
-    if (contractId) await submitRetractationWaiver(contractId, getRetractationWaiverText(!!form.contenuNumeriquePret));
+    // Petite entreprise : le serveur doit d'abord connaître le lieu et la réponse, enregistrés à la signature du freelance
+    if (signContextSaveRef.current) { try { await signContextSaveRef.current; } catch (e) {} }
+    if (contractId) await submitRetractationWaiver(contractId, getRetractationWaiverText(isDigital));
     setTactileRetractationWaiving(false);
     setTactileRetractationDone(true);
   };
@@ -15078,6 +15203,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     setFreelanceSignedAt(new Date().toISOString());
     setFreelanceSigned(true);
     setStep(1);
+    // Petite entreprise protégée (version 222) : lieu et réponse enregistrés tout de suite, avant l'écran du client
+    if (contractId && petitProProtege) signContextSaveRef.current = saveSignContextEarly(contractId, signContext());
   };
 
   const handleSimulateClient = () => {
@@ -15098,7 +15225,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
             ...parseContent(existing.content),
             freelanceSignature: freelanceSig, clientSignature: clientSig, signedByClientAt: new Date().toISOString(),
             signedByFreelanceAt: freelanceSignedAt || new Date().toISOString(),
-            ...(isParticulier && signLocation ? { signatureLocation: signLocation, signatureLocationLabel: SIGNATURE_LOCATIONS[signLocation], signatureLocationDeclaredAt: signLocationAt } : {}),
+            ...signContext(),
           };
           const { error: e2 } = await supabase.rpc("update_contract_content", {
             p_contract_id: contractId,
@@ -15237,37 +15364,63 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           {/* ────────── ÉTAPE 0 : Freelance signe ────────── */}
           {step === 0 && (
             <div style={{ animation:"fadeUp 0.35s ease both" }}>
-              {isParticulier && (
-                <div style={{ marginBottom:20 }}>
-                  <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:6 }}>Où signes-tu ce contrat ?</div>
-                  <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:10 }}>
-                    Ton client est un particulier. La loi ne fixe pas les mêmes règles de paiement selon l'endroit où le contrat est signé. Choisis la réponse qui correspond à la réalité : elle sera enregistrée dans le contrat, avec la date et l'heure, et elle engage ta responsabilité.
-                  </div>
-                  {[
-                    { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement.", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
-                    { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un salon, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander." },
-                    { key:"urgence", title:"Chez le client, pour une réparation urgente qu'il m'a demandée", sub:"Par exemple un dépannage urgent à son domicile, à sa demande.", rule:"La loi autorise alors le paiement tout de suite, mais seulement pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-10, 4°, du Code de la consommation). Si ta mission comprend autre chose, comme un contrat d'entretien, choisis plutôt « Chez le client ou ailleurs »." },
-                  ].map(opt => (
-                    <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor:"pointer", background: signLocation === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${signLocation === opt.key ? "#6366F1" : C.border}` }}>
-                      <input type="radio" name="signLocation" checked={signLocation === opt.key} onChange={() => chooseSignLocation(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
-                      <span style={{ fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.55 }}>
-                        <strong>{opt.title}</strong><br />
-                        <span style={{ color:C.textM }}>{opt.sub}</span><br />
-                        <span style={{ color: opt.key === "hors_etablissement" ? "#92400E" : "#166534" }}>{opt.rule}</span>
-                      </span>
-                    </label>
-                  ))}
-                  {/* Dates de la mission incompatibles avec les 7 jours sans paiement */}
-                  {startsBeforePayment && (
-                    <div style={{ marginTop:4, padding:"10px 12px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:10, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
-                      📅 <strong>Attention aux dates.</strong> La mission doit démarrer le {frDate(form.startDate)}. Avec une signature chez le client, {isComptant ? "le paiement" : "l'acompte"} ne pourra être demandé qu'à partir du {frDate(paymentNotBefore)}. Comme ce paiement conditionne le démarrage, la mission ne pourra pas commencer avant.{" "}
-                      {contractPostponesStart
-                        ? "Le contrat le prévoit : le démarrage est reporté au jour du paiement, et la date de fin est décalée d'autant. Préviens ton client."
-                        : "Préviens ton client, et adapte les dates si besoin."}
-                    </div>
-                  )}
+              {/* Version 222 : le lieu est demandé pour tous les clients (particulier ou professionnel) */}
+              <div style={{ marginBottom:20 }}>
+                <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:6 }}>Où signes-tu ce contrat ?</div>
+                <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:10 }}>
+                  {isParticulier
+                    ? "Ton client est un particulier. La loi ne fixe pas les mêmes règles de paiement selon l'endroit où le contrat est signé. Choisis la réponse qui correspond à la réalité : elle sera enregistrée dans le contrat, avec la date et l'heure, et elle engage ta responsabilité."
+                    : "Ton client est un professionnel. Si tu signes ailleurs que dans tes locaux, une petite entreprise peut avoir les mêmes droits qu'un particulier. Choisis la réponse qui correspond à la réalité : elle sera enregistrée dans le contrat, avec la date et l'heure, et elle engage ta responsabilité."}
                 </div>
-              )}
+                {(isParticulier ? [
+                  { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement.", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
+                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un salon, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander." },
+                  { key:"urgence", title:"Chez le client, pour une réparation urgente qu'il m'a demandée", sub:"Par exemple un dépannage urgent à son domicile, à sa demande.", rule:"La loi autorise alors le paiement tout de suite, mais seulement pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-10, 4°, du Code de la consommation). Si ta mission comprend autre chose, comme un contrat d'entretien, choisis plutôt « Chez le client ou ailleurs »." },
+                ] : [
+                  { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement.", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
+                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Dans les locaux du client, dans un café, sur un salon, sur un chantier…", rule:"Une question de plus juste en dessous : une petite entreprise peut avoir les mêmes droits qu'un particulier." },
+                ]).map(opt => (
+                  <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor:"pointer", background: signLocation === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${signLocation === opt.key ? "#6366F1" : C.border}` }}>
+                    <input type="radio" name="signLocation" checked={signLocation === opt.key} onChange={() => chooseSignLocation(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
+                    <span style={{ fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.55 }}>
+                      <strong>{opt.title}</strong><br />
+                      <span style={{ color:C.textM }}>{opt.sub}</span><br />
+                      <span style={{ color: opt.key === "hors_etablissement" ? "#92400E" : "#166534" }}>{opt.rule}</span>
+                    </span>
+                  </label>
+                ))}
+                {/* Client professionnel signé hors des locaux : petite entreprise ? (art. L221-3 C. conso, version 222) */}
+                {!isParticulier && signLocation === "hors_etablissement" && (
+                  <div data-testid="petit-pro" style={{ marginTop:6, padding:"12px 12px 4px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:10 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:6 }}>Ton client est-il une petite entreprise ?</div>
+                    <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:10 }}>
+                      Un professionnel a les mêmes droits qu'un particulier quand deux conditions sont réunies : il emploie cinq salariés ou moins, et ce que tu lui vends n'entre pas dans son activité principale. Par exemple, un site internet pour une boulangerie (article L221-3 du Code de la consommation).
+                    </div>
+                    {[
+                      { key:"oui", title:"Oui, ou je ne suis pas sûr", sub:"Il emploie cinq salariés ou moins, et ce contrat n'entre pas dans son activité principale.", rule:"Il aura 14 jours pour se rétracter, et tu ne pourras rien encaisser pendant 7 jours (article L221-10 du Code de la consommation). Freeley lui présente ses droits avant qu'il signe, comme à un particulier. Dans le doute, c'est le choix le plus sûr pour toi." },
+                      { key:"non", title:"Non", sub:"Il emploie plus de cinq salariés, ou ce contrat fait partie de son activité principale.", rule:"Les règles habituelles entre professionnels s'appliquent : pas de délai de rétractation, et le paiement est possible tout de suite." },
+                    ].map(opt => (
+                      <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor:"pointer", background: petitPro === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${petitPro === opt.key ? "#6366F1" : C.border}` }}>
+                        <input type="radio" name="petitPro" checked={petitPro === opt.key} onChange={() => choosePetitPro(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
+                        <span style={{ fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.55 }}>
+                          <strong>{opt.title}</strong><br />
+                          <span style={{ color:C.textM }}>{opt.sub}</span><br />
+                          <span style={{ color: opt.key === "oui" ? "#92400E" : "#166534" }}>{opt.rule}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {/* Dates de la mission incompatibles avec les 7 jours sans paiement */}
+                {startsBeforePayment && (
+                  <div style={{ marginTop:4, padding:"10px 12px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:10, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
+                    📅 <strong>Attention aux dates.</strong> La mission doit démarrer le {frDate(form.startDate)}. Avec une signature chez le client, {isComptant ? "le paiement" : "l'acompte"} ne pourra être demandé qu'à partir du {frDate(paymentNotBefore)}. Comme ce paiement conditionne le démarrage, la mission ne pourra pas commencer avant.{" "}
+                    {contractPostponesStart
+                      ? "Le contrat le prévoit : le démarrage est reporté au jour du paiement, et la date de fin est décalée d'autant. Préviens ton client."
+                      : "Préviens ton client, et adapte les dates si besoin."}
+                  </div>
+                )}
+              </div>
               <div style={{
                 fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy,
                 marginBottom:14, display:"flex", alignItems:"center", gap:8,
@@ -15277,7 +15430,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   background:C.navy, color:C.white,
                   display:"inline-flex", alignItems:"center", justifyContent:"center",
                   fontSize:12, fontWeight:700, flexShrink:0,
-                }}>{isParticulier ? 2 : 1}</span>
+                }}>2</span>
                 Appose ta signature
               </div>
 
@@ -15348,8 +15501,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow= canValidateFreelance ? "0 4px 14px #6366F140" : "none"; }}
                 >✅ Valider ma signature</button>
               </div>
-              {isParticulier && !signLocation && freelanceHasStrokes && (
+              {!signLocation && freelanceHasStrokes && (
                 <div style={{ fontFamily:T.body, fontSize:11.5, color:"#92400E", marginTop:8, textAlign:"center" }}>Choisis d'abord où tu signes ce contrat, juste au-dessus.</div>
+              )}
+              {!isParticulier && signLocation === "hors_etablissement" && !petitPro && freelanceHasStrokes && (
+                <div style={{ fontFamily:T.body, fontSize:11.5, color:"#92400E", marginTop:8, textAlign:"center" }}>Réponds d'abord à la question sur ton client, juste au-dessus.</div>
               )}
             </div>
           )}
@@ -15404,18 +15560,21 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   </div>
                 )}
 
-                {isParticulier && !tactileRetractationDone ? (
+                {consumerLike && !tactileRetractationDone ? (
                   <div>
                     <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
-                      {/* Version 221 : pour un contenu numérique, la conséquence de la case est dite dès cette phrase */}
-                      {form.contenuNumeriquePret
+                      {/* Version 221 : pour un contenu numérique, la conséquence de la case est dite dès cette phrase.
+                          Version 222 : petite entreprise protégée (art. L221-3 C. conso), ses droits expliqués. */}
+                      {petitProProtege
+                        ? "Le prestataire a indiqué que votre entreprise emploie cinq salariés au plus et que ce contrat, signé hors de ses locaux, n'entre pas dans votre activité principale. Vous disposez donc, comme un particulier, d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier (article L221-3 du Code de la consommation). Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si la prestation peut commencer avant la fin de ce délai."
+                        : form.contenuNumeriquePret
                         ? "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Signer le contrat ne vous fait pas perdre ce droit. En cochant la case ci-dessous, vous acceptez que le contenu numérique vous soit fourni avant la fin de ce délai : vous perdrez alors votre droit de rétractation dès le début de cette fourniture."
                         : "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si la prestation peut commencer avant la fin de ce délai."}
                     </div>
-                    <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(form, contractText))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(form, contractText))}</div>
+                    <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(noticeForm, contractText))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(noticeForm, contractText))}</div>
                     <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
                       <input type="checkbox" checked={tactileRetractationChecked} onChange={e => setTactileRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
-                      <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!form.contenuNumeriquePret)}</span>
+                      <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(isDigital)}</span>
                     </label>
                     <button
                       onClick={handleTactileRetractationContinue}
@@ -15423,7 +15582,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       style={{ width:"100%", marginTop:12, padding:"11px 16px", background: !tactileRetractationWaiving ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:8, cursor: !tactileRetractationWaiving ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
                     >{tactileRetractationWaiving ? "Enregistrement…" : (tactileRetractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
                     <div style={{ fontSize:10, color:"#6B7280", marginTop:10, lineHeight:1.5, textAlign:"center" }}>
-                      Que vous cochiez ou non, vous accédez ensuite à la signature. Si vous cochez, {form.contenuNumeriquePret ? "votre accord est daté et conservé" : "votre demande est datée et conservée"}.
+                      Que vous cochiez ou non, vous accédez ensuite à la signature. Si vous cochez, {isDigital ? "votre accord est daté et conservé" : "votre demande est datée et conservée"}.
                     </div>
                   </div>
                 ) : (
@@ -15689,7 +15848,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               {/* Quand la mission peut commencer : d'après le contrat, la case cochée et la règle des 7 jours.
                   Version 220 : si la date de démarrage prévue au contrat tombe trop tôt, on le rappelle ici aussi. */}
               {(() => {
-                const notWaived = isParticulier && !tactileRetractationChecked;
+                const notWaived = consumerLike && !tactileRetractationChecked;
                 const amber = notWaived || startsBeforePayment;
                 return (
                   <div style={{
@@ -16812,11 +16971,13 @@ function ClientSignaturePage({ contractId }) {
     const retractationExercised = !!content.retractationExercisedAt;
     // Contenu numérique (version 221) : fourni après l'accord du client et la confirmation envoyée, le droit de
     // rétractation a pris fin à ce moment-là (art. L221-28, 13° C. conso). Même règle que le serveur.
-    const isDigital = !!content.form?.contenuNumeriquePret;
+    const isDigital = isParticulier && !!content.form?.contenuNumeriquePret; // version 222 : jamais pour un pro
     const waivedAtC = content.retractationWaivedAtServer || content.retractationWaivedAt;
     const deliveredAtC = content.contentDeliveredAtServer || content.contentDeliveredAt;
-    const rightEndedByDelivery = isParticulier && isDigital && !!waivedAtC && !!content.retractationConfirmationSentAt && !!deliveredAtC && new Date(waivedAtC) <= new Date(deliveredAtC);
-    const canRetract = isParticulier && withinRetractDeadline && !retractationExercised && !rightEndedByDelivery;
+    // Version 222 : aussi pour une petite entreprise signée hors établissement (art. L221-3 C. conso)
+    const isConsumer = isConsumerLikeContract(content.form, content);
+    const rightEndedByDelivery = isParticulier && isDigital &&!!waivedAtC && !!content.retractationConfirmationSentAt && !!deliveredAtC && new Date(waivedAtC) <= new Date(deliveredAtC);
+    const canRetract = isConsumer && withinRetractDeadline && !retractationExercised && !rightEndedByDelivery;
     const fmtLong = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
 
     return (

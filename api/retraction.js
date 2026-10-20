@@ -39,6 +39,11 @@
 // en ligne est alors refusée (« right_lost »). Avant ce moment, elle reste possible. L'email envoyé au
 // freelance après une rétractation est adapté au contenu numérique, et l'email de confirmation parle de
 // « votre accord » (et non plus de « votre demande ») pour un contenu numérique.
+// Version 209 : petite entreprise cliente (art. L221-3 C. conso). Un contrat signé hors établissement avec un
+// professionnel qui emploie au plus cinq salariés, et dont l'objet n'entre pas dans son activité principale, lui
+// donne les droits d'un consommateur. Le freelance le déclare à la signature en présence (clientPetitPro) : la case
+// de démarrage, la rétractation en ligne, l'information et le formulaire de l'email de confirmation valent alors pour
+// ce client comme pour un particulier. Noms sans espace en trop dans les emails (« Bonjour Nom, »).
 //
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
@@ -211,13 +216,26 @@ function retractationDeadline(signedIso) {
 const WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la fourniture du contenu numérique commence avant l'expiration du délai de rétractation de quatorze (14) jours et je reconnais qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution.";
 const WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
 
+// Client protégé comme un consommateur (version 209) : un particulier, ou une petite entreprise signée hors
+// établissement (art. L221-3 C. conso), déclarée par le freelance. Même règle que isConsumerLikeContract() dans
+// contrat-freelance.jsx.
+function isConsumerLike(form = {}, content = {}) {
+  return form.typeClient === "particulier"
+    || (content.signatureLocation === "hors_etablissement" && content.clientPetitPro === true);
+}
+// Contenu numérique déjà existant : l'appli ne le propose que pour un particulier. Un contrat pro peut garder la case
+// d'un essai précédent : elle ne compte pas (le contrat pro est toujours écrit comme une prestation). Version 209.
+function isDigitalContent(form = {}) {
+  return form.typeClient === "particulier" && !!form.contenuNumeriquePret;
+}
+
 // Contenu numérique (version 208) : le droit de rétractation a pris fin quand le contenu a été fourni APRÈS
 // l'accord exprès du client (case cochée, avec reconnaissance de la perte du droit) et que la confirmation de
 // cet accord lui a été envoyée (art. L221-28, 13° et L221-13 C. conso). Même règle que dans contrat-freelance.jsx.
 function digitalRightEnded(content = {}, form = {}) {
   const waivedAt = content.retractationWaivedAtServer || content.retractationWaivedAt;
   const deliveredAt = content.contentDeliveredAtServer || content.contentDeliveredAt;
-  if (form.typeClient !== "particulier" || !form.contenuNumeriquePret) return null;
+  if (!isDigitalContent(form)) return null;
   if (!waivedAt || !content.retractationConfirmationSentAt || !deliveredAt) return null;
   if (!(new Date(waivedAt) <= new Date(deliveredAt))) return null;
   return { deliveredAt, waivedAt, confirmationSentAt: content.retractationConfirmationSentAt };
@@ -261,14 +279,14 @@ async function handleConfirm(contractId) {
   if (already) return { status: 200, body: { ok: true, alreadyConfirmed: true, exercisedAt: already } };
   const form = resolveStatus(content.form || {}, content.contract);
   if (row.status !== "signed") return { status: 400, body: { error: "not_signed" } };
-  if (form.typeClient !== "particulier") return { status: 400, body: { error: "not_particulier" } };
+  if (!isConsumerLike(form, content)) return { status: 400, body: { error: "not_particulier" } };
   const deadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt);
   if (deadline && Date.now() > deadline.getTime()) return { status: 400, body: { error: "deadline_passed" } };
   // Contenu numérique fourni après l'accord du client et la confirmation : le droit a pris fin (version 208)
   const ended = digitalRightEnded(content, form);
   if (ended) return { status: 400, body: { error: "right_lost", ...ended } };
-  const clientEmail = form.clientEmail || content.clientEmail || "";
-  const clientName = form.clientName || content.clientName || "";
+  const clientEmail = String(form.clientEmail || content.clientEmail || "").trim();
+  const clientName = String(form.clientName || content.clientName || "").trim();
   const freelanceName = legalFreelanceName(form) || "votre prestataire";
   const missionTitle = content.missionTitle || form.missionTitle || "votre mission";
   const exercisedAt = new Date().toISOString(); // horloge du serveur, au moment où la demande arrive
@@ -285,7 +303,7 @@ async function handleConfirm(contractId) {
       await sendMail({
         from: FROM, to: clientEmail,
         subject: `Accusé de réception de votre rétractation — ${missionTitle}`,
-        text: `Bonjour ${clientName},\n\nNous accusons réception de votre rétractation, soumise en ligne le ${dateStr}.\n\nContenu de votre demande : rétractation du contrat « ${missionTitle} » conclu avec ${freelanceName}.\n\nCet email constitue votre accusé de réception sur un support durable. Le contrat est annulé à compter de cette date.\n\nCordialement,\n${freelanceName}\n(message envoyé par Freeley pour le compte de ${freelanceName})`,
+        text: `Bonjour${clientName ? " " + clientName : ""},\n\nNous accusons réception de votre rétractation, soumise en ligne le ${dateStr}.\n\nContenu de votre demande : rétractation du contrat « ${missionTitle} » conclu avec ${freelanceName}.\n\nCet email constitue votre accusé de réception sur un support durable. Le contrat est annulé à compter de cette date.\n\nCordialement,\n${freelanceName}\n(message envoyé par Freeley pour le compte de ${freelanceName})`,
       });
       results.clientEmailSent = true;
     } catch (e) { console.error("retraction/confirm: échec email client", e); }
@@ -294,7 +312,7 @@ async function handleConfirm(contractId) {
   if (freelanceEmail) {
     // Conseils adaptés : prestation de services, ou contenu numérique (version 208)
     const waived = !!(content.retractationWaivedAtServer || content.retractationWaivedAt);
-    const advice = !form.contenuNumeriquePret
+    const advice = !isDigitalContent(form)
       ? "Si une partie de la prestation a déjà été réalisée à sa demande expresse, pense à établir la facturation proportionnelle correspondante. Tu dois rembourser les sommes reçues dans les 14 jours."
       : !waived
         ? "Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours. Il n'avait pas accepté de recevoir le contenu avant la fin du délai de rétractation : sa rétractation est valable, même si tu lui avais déjà fourni le contenu."
@@ -351,7 +369,7 @@ async function handleContentDelivered(contractId, token) {
   const content = parseContent(row.content);
   const form = content.form || {};
   if (row.status !== "signed") return { status: 400, body: { error: "not_signed" } };
-  if (form.typeClient !== "particulier" || !form.contenuNumeriquePret) return { status: 400, body: { error: "not_digital" } };
+  if (!isDigitalContent(form)) return { status: 400, body: { error: "not_digital" } };
   if (content.retractationExercisedAtServer || content.retractationExercisedAt) return { status: 409, body: { error: "retracted" } };
   const already = content.contentDeliveredAtServer || content.contentDeliveredAt;
   if (already) return { status: 200, body: { ok: true, alreadyDelivered: true, deliveredAt: already } };
@@ -368,7 +386,7 @@ async function handleClientWaive(contractId, waiverText) {
   const { data: row, error } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
   if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
   const content = parseContent(row.content);
-  if ((content.form || {}).typeClient !== "particulier") return { status: 400, body: { error: "not_particulier" } };
+  if (!isConsumerLike(content.form || {}, content)) return { status: 400, body: { error: "not_particulier" } };
   if (![WAIVER_TEXT_DIGITAL, WAIVER_TEXT_SERVICE].includes(waiverText)) return { status: 400, body: { error: "invalid_text" } };
   if (content.retractationWaivedAt) return { status: 200, body: { ok: true, alreadyWaived: true } };
   if (row.status === "signed") return { status: 400, body: { error: "already_signed" } };
@@ -430,7 +448,7 @@ async function handleFind(rawEmail) {
           ? "Vous avez demandé à retrouver vos contrats sur Freeley. Voici le lien vers chacun d'eux :"
           : "Vous avez demandé à retrouver votre contrat sur Freeley. Voici le lien pour y accéder :",
         items.join("\n\n"),
-        `Sur ${several ? "chaque" : "cette"} page, vous pouvez relire votre contrat et télécharger votre exemplaire signé (PDF). Si vous êtes un particulier, elle vous permet aussi d'exercer en ligne votre droit de rétractation, s'il s'applique et tant que le délai de 14 jours n'est pas écoulé.`,
+        `Sur ${several ? "chaque" : "cette"} page, vous pouvez relire votre contrat et télécharger votre exemplaire signé (PDF). Si vous bénéficiez du droit de rétractation (client particulier, ou dans certains cas petite entreprise), elle vous permet aussi de l'exercer en ligne tant que le délai de 14 jours n'est pas écoulé.`,
         "Si vous n'êtes pas à l'origine de cette demande, ignorez simplement ce message.",
         "Cordialement,\nFreeley",
       ].join("\n\n");
@@ -463,14 +481,16 @@ async function handleSendLink(contractId) {
 
   const form = { ...resolveStatus(content.form || {}, content.contract) };
   if (!form.freelanceEmail) form.freelanceEmail = (await getFreelanceAuthEmail(row.user_id)) || "";
-  const clientEmail = form.clientEmail || content.clientEmail || "";
+  const clientEmail = String(form.clientEmail || content.clientEmail || "").trim();
   if (!clientEmail) return { status: 200, body: { ok: true, sent: false, reason: "no_client_email" } };
 
-  const clientName = form.clientName || content.clientName || "";
+  const clientName = String(form.clientName || content.clientName || "").trim();
   const freelanceName = legalFreelanceName(form) || "votre prestataire";
   const missionTitle = content.missionTitle || form.missionTitle || "votre mission";
-  const isParticulier = form.typeClient === "particulier";
-  const isDigital = !!form.contenuNumeriquePret;
+  // Particulier, ou petite entreprise protégée (version 209) : information et formulaire de rétractation
+  const isParticulier = isConsumerLike(form, content);
+  const isPetitPro = isParticulier && form.typeClient !== "particulier";
+  const isDigital = isDigitalContent(form);
   const link = `${SITE_URL}/?sign=${contractId}`;
   const fmt = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
   const nowIso = new Date().toISOString(); // appelé juste après la signature : horloge serveur
@@ -479,7 +499,7 @@ async function handleSendLink(contractId) {
   const contractText = (content.contract || "").trim();
 
   const blocks = [
-    `Bonjour ${clientName},`,
+    `Bonjour${clientName ? " " + clientName : ""},`,
     `Ce courriel constitue la confirmation, sur un support durable, de votre contrat « ${missionTitle} » conclu avec ${freelanceName} et signé le ${signedStr}.`,
     `Vous pouvez consulter votre contrat et télécharger votre exemplaire signé (PDF) à tout moment sur cette page :\n${link}`,
   ];
@@ -496,7 +516,10 @@ async function handleSendLink(contractId) {
 
   if (isParticulier) {
     blocks.push("────────────────────────────");
-    blocks.push(buildNotice(form, link));
+    if (isPetitPro) {
+      blocks.push("Votre prestataire a indiqué que votre entreprise emploie cinq salariés au plus et que ce contrat, signé hors de ses locaux, n'entre pas dans votre activité principale. Vous bénéficiez donc, comme un particulier, du droit de rétractation (article L221-3 du Code de la consommation).");
+    }
+    blocks.push(buildNotice({ ...form, contenuNumeriquePret: isDigital }, link));
     blocks.push("────────────────────────────");
     blocks.push(buildForm(form));
   }
