@@ -293,7 +293,7 @@ const upgradePlan = async (plan) => {};
 // ─── Signature à distance ───
 
 // Le freelance signe et prépare l'envoi au client : sauvegarde le contrat + sa signature, retourne l'id public
-const createSignatureRequest = async (entry, form, freelanceSignature, existingContractId) => {
+const createSignatureRequest = async (entry, form, freelanceSignature, existingContractId, opts = {}) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
   // Contrat déjà existant (signature tardive depuis "Mes contrats") — on met à jour au lieu de dupliquer
@@ -301,7 +301,11 @@ const createSignatureRequest = async (entry, form, freelanceSignature, existingC
     try {
       const { data: existing, error: e1 } = await supabase.from("contracts").select("content").eq("id", existingContractId).single();
       if (e1) throw e1;
-      const newContent = { ...parseContent(existing.content), freelanceSignature, clientSignature: null, signedByFreelanceAt: new Date().toISOString() };
+      // Version 224 (écran « Contrat généré ») : le texte et les chiffres signés sont ceux que le freelance a sous les yeux
+      const sync = opts.syncContent && entry?.contract && form
+        ? { contract: entry.contract, form, clientName: form.clientName, clientCompany: form.clientCompany, price: form.price, startDate: form.startDate, endDate: form.endDate }
+        : {};
+      const newContent = { ...parseContent(existing.content), ...sync, freelanceSignature, clientSignature: null, signedByFreelanceAt: new Date().toISOString() };
       const { error: e2 } = await supabase.rpc("update_contract_content", {
         p_contract_id: existingContractId,
         p_new_content: JSON.stringify(newContent),
@@ -904,7 +908,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "223";
+const APP_VERSION = "224";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -977,6 +981,44 @@ const checkContractText = (text, form = {}, profile = {}) => {
   };
   if (!dateShown(form.startDate) || !dateShown(form.endDate)) add("Les dates de la mission n'apparaissent pas telles que tu les as saisies.");
 
+  // Version 224 : chiffres du contrat différents de ceux choisis par le freelance. Vu le 22/10/2026 : une
+  // révision avait écrit 1 500 € au lieu de 1 200 €, un acompte de 30 % et un paiement à 30 jours alors que
+  // le formulaire disait « comptant » ; et « un cycle de corrections » à l'article 2 contre 2 à l'article 5.
+  if (pr.total > 0) {
+    const reTotal = /(?:montant total|total des honoraires|prix total|prix global)[^.€\n]{0,40}?(?:fixés?|arrêtés?|s'élèvent|s'élève|portés?)\s+à\s+(\d+(?:,\d{1,2})?)\s*(?:€|euros)/gi;
+    for (const m of flat.matchAll(reTotal)) {
+      const v = Number(m[1].replace(",", "."));
+      if (Math.abs(v - pr.total) > 0.01) { add(`Le contrat indique un montant total de ${fmtEuro(v)} €, différent de ton prix (${fmtEuro(pr.total)} € ${pr.unit}).`); break; }
+    }
+  }
+  for (const m of t.matchAll(/acompte\s+(?:de|d'un montant de|égal à)\s+(\d{1,3})\s*%/gi)) {
+    if (Number(m[1]) !== pr.pct) {
+      add(pr.pct > 0 ? `Le contrat parle d'un acompte de ${m[1]} %, alors que tu as choisi ${pr.pct} %.` : `Le contrat parle d'un acompte de ${m[1]} %, alors que tu n'as pas choisi d'acompte.`);
+      break;
+    }
+  }
+  const JOURS_LETTRES = { quinze: 15, trente: 30, "quarante-cinq": 45, soixante: 60 };
+  const termsDays = /^\d+$/.test(String(form.paymentTerms || "").trim()) ? Number(form.paymentTerms) : 0;
+  for (const m of t.matchAll(/payables?\s+(?:à|sous)\s+(quinze|trente|quarante-cinq|soixante|\d{2})\s*(?:\(\d{2}\)\s*)?jours/gi)) {
+    const d = JOURS_LETTRES[m[1].toLowerCase()] ?? Number(m[1]);
+    if ([15, 30, 45, 60].includes(d) && d !== termsDays) {
+      add(termsDays ? `Le contrat parle d'un paiement à ${d} jours, alors que tu as choisi ${termsDays} jours.` : `Le contrat parle d'un paiement à ${d} jours, alors que tu as choisi le paiement comptant.`);
+      break;
+    }
+  }
+  const revExpected = /^\d+$/.test(String(form.revisions || "").trim()) ? Number(form.revisions) : null;
+  if (revExpected) {
+    const NOMBRES = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10 };
+    const N = "(un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|\\d{1,2})\\s*(?:\\(\\d{1,2}\\)\\s*)?";
+    const reRev = [
+      new RegExp(`\\b${N}(?:cycles?|tours?|séries?|allers?-retours?|rounds?)\\s+(?:de\\s+|d')?(?:révisions?|corrections?|modifications?|retouches?)`, "gi"),
+      new RegExp(`\\b${N}(?:révisions?|corrections?|retouches?)\\s+(?:est\\s+|sont\\s+)?(?:incluse?s?|comprise?s?|prévue?s?)`, "gi"),
+    ];
+    const found = [];
+    for (const re of reRev) for (const m of t.matchAll(re)) { const w = m[1].toLowerCase(); found.push(NOMBRES[w] ?? Number(w)); }
+    if (found.some(n => n !== revExpected)) add(`Le nombre de révisions n'est pas le même partout dans le contrat. Tu en as choisi ${revExpected} : vérifie les articles 2 et 5.`);
+  }
+
   if (b2c) {
     if (has(/plafonn|responsabilité totale et cumulée|à l'exclusion de tout préjudice/i)) add("Client particulier : le contrat limite ta responsabilité. C'est interdit avec un particulier : la clause serait sans effet, et tu risquerais une amende.");
     if (has(/sollicitation|solicitation|débauch/i)) add("Client particulier : le contrat contient une clause de non-sollicitation. Elle est réservée aux contrats entre professionnels.");
@@ -1001,12 +1043,29 @@ const checkContractText = (text, form = {}, profile = {}) => {
   return out;
 };
 
-// ── Consignes de rédaction du contrat (texte envoyé à l'IA) ──
-// Fonction à part, sans écran : les tests vérifient les consignes de chaque cas (particulier ou
-// professionnel, TVA ou franchise, métier, options) sans passer par le formulaire. « now » sert aux tests.
-const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
-      const d1 = form.startDate ? new Date(form.startDate).toLocaleDateString("fr-FR") : "Non défini";
-      const d2 = form.endDate   ? new Date(form.endDate).toLocaleDateString("fr-FR")   : "Non défini";
+// ── Dates en toutes lettres (« 1er novembre 2026 », « 22 octobre 2026 ») ──
+// Lecture directe de « AAAA-MM-JJ » : la date ne peut pas reculer d'un jour à cause du fuseau horaire.
+const MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+const longDateFr = (iso) => {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const day = Number(m[3]);
+  return `${day === 1 ? "1er" : day} ${MOIS_FR[Number(m[2]) - 1]} ${m[1]}`;
+};
+
+// ── Nombre de révisions (article 5), écrit par Freeley et non par l'IA (version 224) ──
+const REVISIONS_WORDS = { "1": "un (1) aller-retour", "2": "deux (2) allers-retours", "3": "trois (3) allers-retours" };
+const revisionsSentence = (rev) => {
+  const r = String(rev ?? "").trim() || "2";
+  if (/^illimit/i.test(r)) return "Le présent contrat inclut un nombre illimité d'allers-retours de révisions, dans la limite du périmètre défini à l'article 2.";
+  return `Le présent contrat inclut ${REVISIONS_WORDS[r] || `${r} allers-retours`} de révisions.`;
+};
+
+// ── Phrases du contrat qui dépendent des chiffres (prix, acompte, délai de paiement, dates, révisions) ──
+// Version 224 : une seule source pour la rédaction du contrat ET pour « Modifier le contrat ». Quand le
+// freelance change un chiffre, Freeley sait exactement quelles phrases changent et les donne à l'IA mot pour
+// mot : elle n'a plus aucun chiffre à choisir.
+const contractNumberClauses = (form, profile) => {
       const acomptePct = Number(form.acomptePourcentage) || 0;
       // Délai de paiement. « Comptant » sans acompte : tout est payé à la signature. Avec un acompte,
       // l'acompte est payé à la signature et le solde dès réception de sa facture : on ne donne JAMAIS
@@ -1030,7 +1089,6 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
       const pricing = contractPricing(form, profile);
       const U = pricing.unit;
       const isB2C = form.typeClient === "particulier";
-      const isCompany = !isEntrepreneurIndividuel(form.freelanceLegalStatus);
 
       // Article 3 — particulier : pas de preuve limitée ni de validation qui priverait le client de ses garanties
       const recetteEndB2C = acomptePct > 0
@@ -1058,6 +1116,37 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
       // consommateur (art. L221-3 C. conso). Phrase conditionnelle, comme celle du particulier : le contrat reste juste
       // quel que soit l'endroit où il est signé.
       const petitProSentence = `"Lorsque le présent contrat est conclu hors établissement, que son objet n'entre pas dans le champ de l'activité principale du Client et que celui-ci emploie au plus cinq salariés, le Client bénéficie des règles du Code de la consommation applicables aux contrats conclus hors établissement, notamment du droit de rétractation de quatorze jours et de l'interdiction de tout paiement avant l'expiration d'un délai de sept jours à compter de la conclusion du contrat (articles L221-3 et L221-10 du Code de la consommation).${dueAtSigning ? " Dans ce cas, la somme prévue à la signature n'est exigible qu'à l'expiration de ce délai. Si la date de démarrage prévue à l'article 3 tombe avant son versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée." : ""}"`;
+      // Article 9 — résiliation : phrases fixes, et rien qui retienne l'acompte d'un particulier
+      const resiliationClient = form.clauseDedit
+        ? `Ne mentionne PAS que l'acompte est automatiquement et intégralement conservé comme indemnité forfaitaire fixe en cas de résiliation par le Client : ce sujet est entièrement régi par la clause de dédommagement ci-dessous, qui prévoit une indemnité déterminée selon l'avancement réel de la mission, et ne doit pas être contredite ou dupliquée ici.`
+        : (isB2C || acomptePct === 0)
+          ? `Inclus aussi, mot pour mot : "En cas de résiliation par le Client${isB2C ? " en dehors de l'exercice de son droit de rétractation" : ""}, les prestations effectivement réalisées jusqu'à la date de résiliation restent dues. Toute somme déjà versée s'impute sur ces montants, et le surplus éventuel est restitué au Client."`
+          : `Inclus aussi, mot pour mot : "En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire."`;
+
+      // Article 9 — clause de dédommagement en cas d'annulation (texte fixe selon le client et l'acompte)
+      const deditClause = form.clauseDedit ? (form.typeClient === "particulier"
+  ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "Hors exercice, le cas échéant, d'un droit légal de rétractation, en cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Lorsque la résiliation n'est pas motivée par un manquement du Prestataire, une indemnité complémentaire peut être due au titre des frais effectivement engagés et du préjudice direct, proportionné et dûment justifié résultant de la résiliation. Son montant tient compte notamment de l'état d'avancement de la mission. Toute somme déjà versée s'impute sur les montants effectivement dus. Le surplus éventuel est restitué au Client. Lorsqu'un droit légal de rétractation est applicable, notamment pour certains contrats conclus à distance ou hors établissement, les conséquences financières de son exercice sont déterminées par les dispositions impératives applicables."`
+  : acomptePct > 0
+  ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Une indemnité complémentaire peut être due au Prestataire au titre des frais non récupérables effectivement engagés pour la mission et du temps spécifiquement réservé qui n'a raisonnablement pas pu être réaffecté. Le montant de cette indemnité complémentaire est déterminé d'un commun accord entre les Parties au regard du préjudice direct effectivement subi. À défaut d'accord amiable, le Prestataire peut réclamer la réparation du préjudice direct, certain et dûment justifié. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due, sous réserve des stipulations du contrat relatives à l'acompte. Les sommes déjà versées s'imputent sur les sommes effectivement dues au titre de la résiliation et ne peuvent conduire à indemniser deux fois un même préjudice."`
+  : `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Une indemnité complémentaire peut être due au Prestataire au titre des frais non récupérables effectivement engagés pour la mission et du temps spécifiquement réservé qui n'a raisonnablement pas pu être réaffecté. Le montant de cette indemnité complémentaire est déterminé d'un commun accord entre les Parties au regard du préjudice direct effectivement subi. À défaut d'accord amiable, le Prestataire peut réclamer la réparation du préjudice direct, certain et dûment justifié. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due."`)
+  : "";
+      // Version 224 : dates (article 3) et nombre de révisions (article 5), écrits ici mot pour mot. L'IA écrivait
+      // elle-même la phrase des dates (vu : un renvoi à l'article 6 pour la suspension des délais) et le nombre de
+      // révisions (vu : « un cycle de corrections » à l'article 2 contre deux allers-retours à l'article 5).
+      const datesSentence = form.startDate && form.endDate ? `La mission débute le ${longDateFr(form.startDate)} et s'achève le ${longDateFr(form.endDate)}.` : "";
+      const revisions = revisionsSentence(form.revisions);
+      return { acomptePct, paymentTermsLabel, soldeTermsLabel, recetteEnd, paymentConditionsData, pricing, U, isB2C, recetteClause, dueAtSigning, horsEtabRef, paymentSentences, horsEtabSentence, petitProSentence, resiliationClient, deditClause, datesSentence, revisions };
+};
+
+// ── Consignes de rédaction du contrat (texte envoyé à l'IA) ──
+// Fonction à part, sans écran : les tests vérifient les consignes de chaque cas (particulier ou
+// professionnel, TVA ou franchise, métier, options) sans passer par le formulaire. « now » sert aux tests.
+const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
+      const d1 = form.startDate ? new Date(form.startDate).toLocaleDateString("fr-FR") : "Non défini";
+      const d2 = form.endDate   ? new Date(form.endDate).toLocaleDateString("fr-FR")   : "Non défini";
+      const { acomptePct, paymentConditionsData, pricing, U, isB2C, recetteClause, paymentSentences, horsEtabSentence, petitProSentence, resiliationClient, deditClause, datesSentence, revisions } = contractNumberClauses(form, profile);
+      const isCompany = !isEntrepreneurIndividuel(form.freelanceLegalStatus);
+
       // Article 6 (création, digital, autre) : la clause dit que le contrat indique si le prix rémunère aussi la
       // cession des droits. On l'écrit vraiment, à l'article 4.
       const cessionInPrice = form.categorieMetier !== "artisanat" && form.categorieMetier !== "conseil";
@@ -1073,13 +1162,6 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
       const assuranceAfterClause = form.freelanceAssurance
         ? `\nJuste après cette clause, inclus mot pour mot : "Assurance déclarée par le Prestataire : ${form.freelanceAssurance}."`
         : "";
-
-      // Article 9 — résiliation : phrases fixes, et rien qui retienne l'acompte d'un particulier
-      const resiliationClient = form.clauseDedit
-        ? `Ne mentionne PAS que l'acompte est automatiquement et intégralement conservé comme indemnité forfaitaire fixe en cas de résiliation par le Client : ce sujet est entièrement régi par la clause de dédommagement ci-dessous, qui prévoit une indemnité déterminée selon l'avancement réel de la mission, et ne doit pas être contredite ou dupliquée ici.`
-        : (isB2C || acomptePct === 0)
-          ? `Inclus aussi, mot pour mot : "En cas de résiliation par le Client${isB2C ? " en dehors de l'exercice de son droit de rétractation" : ""}, les prestations effectivement réalisées jusqu'à la date de résiliation restent dues. Toute somme déjà versée s'impute sur ces montants, et le surplus éventuel est restitué au Client."`
-          : `Inclus aussi, mot pour mot : "En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire."`;
 
       // Article 11 — particulier : le médiateur du freelance, s'il est indiqué dans son profil
       const mediateurB2C = form.freelanceMediateur
@@ -1142,10 +1224,11 @@ Rédige une clause affirmant EXPLICITEMENT que :
 Cite l'article L1221-1 du Code du travail et la jurisprudence Soc. 13 nov. 1996 sur le faisceau d'indices.
 
 ARTICLE 2 — OBJET DU CONTRAT ET DESCRIPTION DE LA MISSION
-Objet général, puis la description de la mission et des livrables, reprise FIDÈLEMENT depuis la description fournie par le Prestataire. Tu peux la reformuler dans un style juridique et la présenter en énumération, mais n'ajoute AUCUN livrable, AUCUNE prestation, AUCUNE exclusion, AUCUNE quantité, AUCUNE fréquence et AUCUN délai qui n'y figure pas.
+Objet général, puis la description de la mission et des livrables, reprise FIDÈLEMENT depuis la description fournie par le Prestataire. Tu peux la reformuler dans un style juridique et la présenter en énumération, mais n'ajoute AUCUN livrable, AUCUNE prestation, AUCUNE exclusion, AUCUNE quantité, AUCUNE fréquence et AUCUN délai qui n'y figure pas. Si la description indique un nombre de révisions ou de corrections, un prix, un acompte, un délai de paiement, des dates de début ou de fin, ou une règle pour les demandes supplémentaires (devis, avenant, tarif), ne reprends pas ces passages dans l'article 2 : ces sujets sont réglés aux articles 3, 4 et 5 avec les données ci-dessus, et le contrat ne doit jamais se contredire.
 
 ARTICLE 3 — DÉLAIS, PLANNING ET PROCÉDURE DE VALIDATION (RECETTE)
-Rédige les dates de début/fin. Puis inclus OBLIGATOIREMENT, mot pour mot, cette clause de recette :
+${datesSentence ? `Commence par cette phrase, mot pour mot, sans y ajouter de renvoi à un autre article : "${datesSentence}"` : "Rédige les dates de début et de fin en une phrase simple, sans renvoi à un autre article."}
+Puis inclus OBLIGATOIREMENT, mot pour mot, cette clause de recette :
 ${recetteClause}${form.categorieMetier === "artisanat" ? `\nInclus aussi, mot pour mot : "Pour les travaux qui relèvent de l'article 1792-6 du Code civil, la réception est prononcée dans les conditions prévues à l'article 6."` : ""}
 ${form.clauseInterlocuteur ? (form.typeClient === "particulier"
   ? `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Le Client est l'interlocuteur de référence du Prestataire pour la validation des livrables et la transmission des instructions. S'il souhaite qu'un tiers intervienne pour son compte, il en informe préalablement le Prestataire par écrit en précisant l'identité et le rôle de cette personne. Les instructions d'un tiers non désigné ne sont opposables au Prestataire qu'après confirmation écrite du Client."`
@@ -1177,7 +1260,7 @@ ${pricing.b2c
 ${form.clauseSuspension ? `- Inclus OBLIGATOIREMENT la clause de suspension suivante : "En cas de retard de paiement de toute somme exigible au titre du présent contrat persistant plus de huit (8) jours après une mise en demeure adressée par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception, restée sans effet, le Prestataire peut suspendre l'exécution de la mission jusqu'au complet règlement des sommes dues. Cette suspension ne constitue pas une faute du Prestataire et n'ouvre pas droit à indemnité au profit du Client. Les délais d'exécution affectés par la suspension sont eux-mêmes suspendus et prorogés d'une durée correspondant à la période de suspension, sans que le retard qui en résulte puisse être imputé au Prestataire."` : ""}
 
 ARTICLE 5 — RÉVISIONS ET MODIFICATIONS DU PÉRIMÈTRE
-Nombre de révisions incluses : ${form.revisions}. Clause sur les demandes hors périmètre : toute demande hors périmètre fait l'objet d'un avenant écrit et facturé au tarif horaire du Prestataire${isB2C ? ", communiqué au Client avant l'établissement de l'avenant" : ""}.
+Inclus d'abord, mot pour mot : "${revisions}" C'est le seul endroit du contrat qui indique le nombre de révisions. Clause sur les demandes hors périmètre : toute demande hors périmètre fait l'objet d'un avenant écrit et facturé au tarif horaire du Prestataire${isB2C ? ", communiqué au Client avant l'établissement de l'avenant" : ""}.
 
 ARTICLE 6 — ${form.categorieMetier === "artisanat" ? "GARANTIE DE BONNE EXÉCUTION ET CONFORMITÉ AUX NORMES MÉTIER" : form.categorieMetier === "conseil" ? "PROPRIÉTÉ INTELLECTUELLE ET CONFIDENTIALITÉ" : "PROPRIÉTÉ INTELLECTUELLE ET CESSION DES DROITS SUSPENDUE AU PAIEMENT"}
 Inclus OBLIGATOIREMENT, mot pour mot et SANS reformuler ni raccourcir, la clause suivante :
@@ -1222,12 +1305,7 @@ Inclus OBLIGATOIREMENT, mot pour mot : "Chacune des Parties peut résilier le pr
 Inclus aussi, mot pour mot : "Le Client peut également mettre fin au contrat à tout moment, par notification écrite adressée au Prestataire, dans les conditions prévues au présent article."
 ${resiliationClient}
 Inclus aussi, mot pour mot : "En cas de résiliation par le Prestataire pour faute du Client, les sommes dues pour les prestations réalisées sont immédiatement exigibles."
-${form.clauseDedit ? (form.typeClient === "particulier"
-  ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "Hors exercice, le cas échéant, d'un droit légal de rétractation, en cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Lorsque la résiliation n'est pas motivée par un manquement du Prestataire, une indemnité complémentaire peut être due au titre des frais effectivement engagés et du préjudice direct, proportionné et dûment justifié résultant de la résiliation. Son montant tient compte notamment de l'état d'avancement de la mission. Toute somme déjà versée s'impute sur les montants effectivement dus. Le surplus éventuel est restitué au Client. Lorsqu'un droit légal de rétractation est applicable, notamment pour certains contrats conclus à distance ou hors établissement, les conséquences financières de son exercice sont déterminées par les dispositions impératives applicables."`
-  : acomptePct > 0
-  ? `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Une indemnité complémentaire peut être due au Prestataire au titre des frais non récupérables effectivement engagés pour la mission et du temps spécifiquement réservé qui n'a raisonnablement pas pu être réaffecté. Le montant de cette indemnité complémentaire est déterminé d'un commun accord entre les Parties au regard du préjudice direct effectivement subi. À défaut d'accord amiable, le Prestataire peut réclamer la réparation du préjudice direct, certain et dûment justifié. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due, sous réserve des stipulations du contrat relatives à l'acompte. Les sommes déjà versées s'imputent sur les sommes effectivement dues au titre de la résiliation et ne peuvent conduire à indemniser deux fois un même préjudice."`
-  : `Inclus OBLIGATOIREMENT, en complément, la clause de dédommagement suivante en cas d'annulation en cours de mission : "En cas de résiliation anticipée à l'initiative du Client intervenant après le commencement de la mission, le Client reste tenu au paiement des prestations effectivement réalisées jusqu'à la date de prise d'effet de la résiliation. Une indemnité complémentaire peut être due au Prestataire au titre des frais non récupérables effectivement engagés pour la mission et du temps spécifiquement réservé qui n'a raisonnablement pas pu être réaffecté. Le montant de cette indemnité complémentaire est déterminé d'un commun accord entre les Parties au regard du préjudice direct effectivement subi. À défaut d'accord amiable, le Prestataire peut réclamer la réparation du préjudice direct, certain et dûment justifié. Si la résiliation intervient avant tout commencement d'exécution, aucune indemnité de ce type n'est due."`)
-  : ""}
+${deditClause}
 ${form.clauseRespect ? `Inclus OBLIGATOIREMENT, en complément, la clause de bonne conduite suivante : "Le Client s'engage à faire preuve de respect et de courtoisie dans l'ensemble de ses échanges avec le Prestataire, quel qu'en soit le support (écrit, oral, téléphonique ou en personne). Tout comportement abusif, insultant, dégradant, menaçant ou constitutif de harcèlement à l'égard du Prestataire constitue un manquement grave aux obligations essentielles du présent contrat. Sauf urgence rendant manifestement impossible la poursuite de la relation contractuelle, le Prestataire met préalablement le Client en demeure, par écrit, de cesser le comportement reproché dans un délai raisonnable. Cette mise en demeure indique qu'à défaut de cessation du manquement, le Prestataire pourra mettre fin au contrat. Si le manquement persiste, le Prestataire notifie au Client la résolution du contrat et les raisons qui la motivent. Les sommes dues au titre des prestations déjà réalisées demeurent exigibles. En cas d'urgence, notamment en présence de menace grave, de violence ou de harcèlement caractérisé rendant impossible la poursuite de la relation, le Prestataire peut notifier immédiatement la résolution du contrat, par écrit et de manière motivée."` : ""}
 ${form.clausePreavis ? (form.typeClient === "particulier"
   ? `Inclus OBLIGATOIREMENT, en complément, la clause de préavis suivante : "Lorsque la mission conclue avec un Client consommateur est à durée indéterminée et présente un caractère récurrent, chacune des Parties peut y mettre fin sous réserve d'un préavis de trente (30) jours calendaires notifié par écrit, sans préjudice de toute disposition impérative plus favorable au Client. Lorsque les conditions de l'article L215-1-1 du Code de la consommation sont réunies, le Client peut notifier la résiliation au moyen de la fonctionnalité électronique prévue par ce texte. Lorsque le contrat est conclu pour une durée déterminée avec une clause de reconduction tacite, les obligations d'information et de non-reconduction prévues par l'article L215-1 du Code de la consommation sont applicables. Lorsque l'article L215-4 est applicable, le contrat reproduit les dispositions exigées par ce texte."`
@@ -1272,6 +1350,134 @@ RÈGLES ABSOLUES — À RESPECTER À LA LETTRE
 4. Ne commente pas ta réponse et n'ajoute aucune note, aucun conseil ni aucun avertissement en dehors du contrat.`;
       return prompt;
 };
+
+// ── « Modifier le contrat » avant signature (version 224) ──
+// Les chiffres (prix, acompte, délai de paiement, dates, révisions) sont choisis par le freelance dans des
+// cases, jamais par l'IA. Vu le 22/10/2026 : une révision demandée en texte (« ajouter une page Blog et payer
+// à 30 jours ») avait inventé un prix de 1 500 €, un acompte de 30 % et une nouvelle date de fin, et le
+// formulaire, le tableau du PDF et les paiements étaient restés sur les anciens chiffres.
+const paymentTermsText = (f) => f.paymentTerms === "Comptant" ? "comptant" : `${f.paymentTerms} jours`;
+const fmtDateShort = (iso) => { const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : "—"; };
+const revisionsText = (r) => /^illimit/i.test(String(r || "")) ? "illimitées" : String(r || "");
+const acompteText = (f, pr) => (Number(f.acomptePourcentage) || 0) > 0 ? `${Number(f.acomptePourcentage)} % (${fmtEuro(pr.acompte)} € ${pr.unit})` : "aucun";
+
+// Ce qui change entre les chiffres actuels du contrat et ceux choisis par le freelance
+const contractFigureChanges = (oldForm, newForm, profile) => {
+  const o = contractPricing(oldForm, profile), n = contractPricing(newForm, profile);
+  const out = [];
+  if (Math.abs(o.total - n.total) > 0.001) out.push({ key: "price", label: "Prix total", from: `${fmtEuro(o.total)} € ${o.unit}`, to: `${fmtEuro(n.total)} € ${n.unit}` });
+  if ((Number(oldForm.acomptePourcentage) || 0) !== (Number(newForm.acomptePourcentage) || 0)) out.push({ key: "acompte", label: "Acompte", from: acompteText(oldForm, o), to: acompteText(newForm, n) });
+  if (String(oldForm.paymentTerms) !== String(newForm.paymentTerms)) out.push({ key: "terms", label: "Délai de paiement", from: paymentTermsText(oldForm), to: paymentTermsText(newForm) });
+  if (oldForm.startDate !== newForm.startDate || oldForm.endDate !== newForm.endDate) out.push({ key: "dates", label: "Dates", from: `du ${fmtDateShort(oldForm.startDate)} au ${fmtDateShort(oldForm.endDate)}`, to: `du ${fmtDateShort(newForm.startDate)} au ${fmtDateShort(newForm.endDate)}` });
+  if (String(oldForm.revisions) !== String(newForm.revisions)) out.push({ key: "revisions", label: "Révisions incluses", from: revisionsText(oldForm.revisions), to: revisionsText(newForm.revisions) });
+  return out;
+};
+
+// La demande du client parle de chiffres alors qu'aucune case n'a changé : on prévient, sans bloquer
+const requestMentionsFigures = (txt) => /\d+\s*(€|euros?|%|jours?|semaines?|mois)\b|acompte|\bprix\b|tarif|paiement|payer|\bdélai|\bdate|révision|correction|gratuit|remise|réduction/i.test(String(txt || ""));
+
+// Consigne envoyée à l'IA. Les phrases qui contiennent des chiffres sont écrites par Freeley (les mêmes que pour
+// la rédaction du contrat) : l'IA les remplace mot pour mot et n'a aucun chiffre à choisir.
+const buildModifyPrompt = ({ contract, request, oldForm, newForm, profile }) => {
+  const changes = contractFigureChanges(oldForm, newForm, profile);
+  const oc = contractNumberClauses(oldForm, profile), nc = contractNumberClauses(newForm, profile);
+  const isB2C = nc.isB2C;
+  const repl = [];
+  if (nc.datesSentence && oc.datesSentence !== nc.datesSentence) repl.push(`- Article 3 : la phrase qui donne les dates de la mission devient, mot pour mot : "${nc.datesSentence}"`);
+  if (oc.recetteClause !== nc.recetteClause) repl.push(`- Article 3 : la clause de recette devient, mot pour mot : ${nc.recetteClause}`);
+  if (oc.paymentSentences !== nc.paymentSentences) repl.push(`- Article 4 : les phrases sur le montant des honoraires, l'acompte et le paiement sont remplacées par celles-ci, mot pour mot, chacune dans son propre sous-paragraphe :\n${nc.paymentSentences}`);
+  const oHE = isB2C ? oc.horsEtabSentence : oc.petitProSentence;
+  const nHE = isB2C ? nc.horsEtabSentence : nc.petitProSentence;
+  if (oHE !== nHE) repl.push(`- Article 4 : la phrase sur les contrats conclus hors établissement devient, mot pour mot : ${nHE}`);
+  if (oc.revisions !== nc.revisions) repl.push(`- Article 5 : la phrase qui donne le nombre de révisions devient, mot pour mot : "${nc.revisions}"`);
+  if (nc.deditClause && oc.deditClause !== nc.deditClause) repl.push(`- Article 9 (clause de dédommagement) : ${nc.deditClause}`);
+  if (oc.resiliationClient !== nc.resiliationClient) repl.push(`- Article 9 (résiliation par le Client) : ${nc.resiliationClient}`);
+  const p = nc.pricing;
+  const figures = [
+    `- Prix total : ${fmtEuro(p.total)} € ${p.unit}${p.taxNote ? ` (${p.taxNote})` : ""}`,
+    `- Acompte : ${nc.acomptePct > 0 ? `${nc.acomptePct} %, soit ${fmtEuro(p.acompte)} € ${p.unit}, à la signature` : "aucun"}`,
+    `- Paiement : ${nc.paymentConditionsData}`,
+    `- Dates de la mission : du ${fmtDateShort(newForm.startDate)} au ${fmtDateShort(newForm.endDate)}`,
+    `- Révisions incluses : ${revisionsText(newForm.revisions)}`,
+  ].join("\n");
+  const req = String(request || "").trim();
+  const what = req && changes.length ? "la demande du client et les chiffres changés" : req ? "la demande du client" : "les chiffres changés";
+  const concerned = req && changes.length ? "par la demande du client et par les chiffres changés" : req ? "par la demande du client" : "par les chiffres changés";
+  return `Tu es un avocat d'affaires français. Voici un contrat de prestation de services qui n'est PAS ENCORE SIGNÉ, donc modifiable librement.
+
+CONTRAT ACTUEL :
+${contract}
+${req ? `
+DEMANDE DU CLIENT (transmise par le prestataire) :
+"${req}"
+` : ""}${changes.length ? `
+CHIFFRES CHANGÉS PAR LE PRESTATAIRE (c'est lui qui les a choisis) :
+${changes.map(c => `- ${c.label} : ${c.from} → ${c.to}`).join("\n")}
+Pour appliquer ces chiffres, fais exactement ces remplacements :
+${repl.join("\n")}
+Mets aussi à jour toute autre mention de ces chiffres dans le contrat, pour qu'il ne se contredise jamais.
+` : ""}
+CHIFFRES DU CONTRAT (fixés par le prestataire ; ce sont les seuls autorisés) :
+${figures}
+
+Ta tâche : réécris le contrat COMPLET en appliquant ${what}, tout en gardant le prestataire protégé.
+
+RÈGLES ABSOLUES :
+1. N'écris aucun montant, aucun pourcentage, aucune date, aucun délai de paiement et aucun nombre de révisions qui ne figure pas dans les chiffres du contrat ci-dessus. Si la demande du client a un coût, un délai ou un chiffre différent, ne l'invente pas et ne l'applique pas : garde ces chiffres, c'est au prestataire de les changer.
+2. N'ajoute aucun acompte, aucun échéancier, aucune pénalité et aucune date de livraison qui ne figure pas ci-dessus.
+3. Modifie uniquement ce qui est concerné ${concerned}. Toutes les autres clauses sont reprises MOT POUR MOT, sans les reformuler. Garde la même structure : les 13 articles, avec les mêmes titres, la même numérotation et la même mise en forme.
+4. Si une demande du client est déraisonnable ou dangereuse pour le prestataire, adapte-la de façon équilibrée, sans inventer de chiffre.
+5. Le nombre de révisions ne figure qu'à l'article 5. Si un autre article indique un nombre de révisions ou de corrections différent, supprime cette mention.
+6. Garde toutes les mentions légales du contrat (mention « EI », TVA, délais légaux, médiateur, rétractation).${isB2C ? `
+7. Le client est un particulier : les prix restent exprimés toutes taxes comprises (TTC). N'ajoute jamais de plafond ni d'exclusion de responsabilité, de pénalités de retard, d'indemnité forfaitaire de 40 €, de clause de non-sollicitation ni de clause qui impose un tribunal : avec un particulier, ces clauses sont interdites ou sans effet.` : ""}
+
+Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire avant ou après, sans backticks.`;
+};
+
+// Enregistre un contrat modifié avant signature : le texte ET les chiffres (formulaire, prix, dates), pour que
+// le tableau du PDF, la facture et les paiements suivent. Si le freelance avait déjà signé, sa signature est
+// retirée : il signe la nouvelle version, puis renvoie le même lien au client.
+const saveContractModification = async ({ contractId, newContract, newForm, removeFreelanceSignature }) => {
+  const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+  if (e1 || !existing) throw e1 || new Error("Contrat introuvable");
+  const cur = parseContent(existing.content);
+  if (existing.status === "signed" || cur.clientSignature) throw new Error("Contrat déjà signé par le client");
+  const newContent = {
+    ...cur,
+    contract: newContract,
+    form: newForm,
+    clientName: newForm.clientName, clientCompany: newForm.clientCompany,
+    price: newForm.price, startDate: newForm.startDate, endDate: newForm.endDate,
+    ...(removeFreelanceSignature ? { freelanceSignature: null, signedByFreelanceAt: null } : {}),
+  };
+  const { error: e2 } = await supabase.rpc("update_contract_content", {
+    p_contract_id: contractId,
+    p_new_content: JSON.stringify(newContent),
+    p_new_status: removeFreelanceSignature ? "none" : existing.status,
+  });
+  if (e2) throw e2;
+};
+
+// ── « Améliorer avec l'IA » (description de la mission) — version 224 ──
+// La description devient l'article 2 du contrat. Avant, la consigne demandait d'ajouter des livrables, des
+// étapes et des délais : l'IA inventait des engagements (fichiers sources, mise en ligne, « un cycle de
+// corrections » qui contredisait l'article 5). Désormais elle améliore l'écriture sans rien ajouter à faire.
+const buildImprovePrompt = (missionTitle, description) => `Tu aides un freelance français à écrire la description de sa mission. Ce texte deviendra l'article 2 de son contrat.
+Voici ce qu'il a écrit :
+---
+${missionTitle ? `Titre : ${missionTitle}\n` : ""}Description : ${description}
+---
+Réécris cette description pour qu'elle soit claire, précise et professionnelle.
+
+Règles impératives :
+- Garde exactement le sens et le contenu d'origine. Tu peux préciser ou mieux formuler ce qui est déjà écrit, mais n'ajoute rien de nouveau à faire pour le freelance : aucun livrable, aucune fonctionnalité, aucune technologie, aucune étape ni méthode de travail, aucune remise de fichiers sources, aucune mise en ligne et aucun engagement du client qui ne figurent pas dans son texte.
+- N'écris aucun prix, aucun délai, aucune date, aucun nombre de corrections ou de révisions et aucune règle pour les demandes supplémentaires : ces points sont fixés ailleurs dans le contrat.
+- Termine par une phrase qui commence par « Non inclus : » et qui liste en quelques mots ce que la mission ne comprend évidemment pas (par exemple, pour un site internet : la rédaction des textes, l'achat du nom de domaine et de l'hébergement). Si le texte d'origine contient déjà une partie « Non inclus », garde-la telle quelle. Ne cite rien qui contredise la description.
+- Reste concis : 60 à 150 mots.
+- Écris en prose, sans tirets ni puces, sans introduction ni conclusion.
+- Ne commence pas par « Cette mission » ni par « Le prestataire ».
+
+Réponds uniquement avec la description réécrite, sans guillemets ni mise en forme.`;
 
 // Ce qu'écrit une facture liée à un contrat : le même texte partout (fenêtre de facture, Mes contrats,
 // archives, facture électronique), pour qu'un même acompte n'ait jamais deux versions différentes.
@@ -2688,6 +2894,9 @@ function AppInner() {
     return initialForm;
   });
   const [errors, setErrors]       = useState({});
+  // Dernière valeur du formulaire, relue après un appel à l'IA (pré-remplissage par photo, version 224)
+  const formRef = useRef(form);
+  formRef.current = form;
 
   // Nettoie l'URL une fois le brouillon récupéré, pour ne pas la laisser traîner (partage de lien,
   // rafraîchissement manuel, etc.) — et la ré-écrit aussi dans le localStorage pour la suite.
@@ -2721,6 +2930,8 @@ function AppInner() {
   const [scanStep0Success, setScanStep0Success] = useState(false);
   const [scanStep1Loading, setScanStep1Loading] = useState(false);
   const [scanStep1Success, setScanStep1Success] = useState(false);
+  const [scanStep0Msg, setScanStep0Msg] = useState("");
+  const [scanStep1Msg, setScanStep1Msg] = useState("");
   const [profileScanTarget, setProfileScanTarget] = useState(false); // true = caméra ouverte pour scan RIB/justificatif
   const [profileScanLoading, setProfileScanLoading] = useState(false);
   const [profileScanSuccess, setProfileScanSuccess] = useState(false);
@@ -2774,6 +2985,7 @@ function AppInner() {
         setContract(found.contract);
         setForm(f => ({ ...f, ...found.form }));
         setStep(3);
+        rememberResultContract(found.id);
       } else {
         localStorage.removeItem("freeley_result_contract_id");
       }
@@ -2851,11 +3063,12 @@ function AppInner() {
   const [draftSavedToast, setDraftSavedToast] = useState(false);
   const [profileInitialTab, setProfileInitialTab] = useState(null);
   const [recouvrementInitialCase, setRecouvrementInitialCase] = useState(null);
-  const [reviseOpen, setReviseOpen] = useState(false);
-  const [reviseMessage, setReviseMessage] = useState("");
-  const [reviseLoading, setReviseLoading] = useState(false);
-  const [reviseError, setReviseError] = useState("");
-  const [reviseSuccess, setReviseSuccess] = useState(false);
+  // Contrat affiché sur l'écran « Contrat généré » (version 224). Avant, l'écran prenait toujours le plus récent de
+  // la liste, et la signature à distance depuis cet écran créait une deuxième copie du contrat dans « Mes contrats ».
+  const [resultContractId, setResultContractId] = useState(null);
+  const resultContractIdRef = useRef(null);
+  const rememberResultContract = (id) => { resultContractIdRef.current = id || null; setResultContractId(id || null); };
+  const resultEntry = (resultContractId && history.find(h => String(h.id) === String(resultContractId))) || history[0];
 
   // Tactile signature modal state
   const [showTactileSign, setShowTactileSign] = useState(false);
@@ -3216,12 +3429,15 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   const magicFillStep0 = () => setMagicFillTarget("step0");
   const magicFillStep1 = () => setMagicFillTarget("step1");
 
-  // Extraction réelle via Claude Vision après capture photo
+  // Pré-remplissage par photo (version 224) : seules les cases encore vides sont remplies. Avant, la photo
+  // remplaçait aussi ce qui était déjà écrit, y compris ton nom et ton SIRET venus du profil.
   const handleMagicFillCapture = async ({ base64, type }) => {
     const target = magicFillTarget;
     setMagicFillTarget(null);
-    if (target === "step0") { setScanStep0Loading(true); setScanStep0Success(false); }
-    else { setScanStep1Loading(true); setScanStep1Success(false); }
+    const setLoadingT = target === "step0" ? setScanStep0Loading : setScanStep1Loading;
+    const setSuccessT = target === "step0" ? setScanStep0Success : setScanStep1Success;
+    const setMsgT = target === "step0" ? setScanStep0Msg : setScanStep1Msg;
+    setLoadingT(true); setSuccessT(false);
 
     const champsDemandes = target === "step0"
       ? `- freelanceName (nom complet du prestataire/freelance)
@@ -3239,7 +3455,11 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 - startDate (date de début au format AAAA-MM-JJ)
 - endDate (date de fin au format AAAA-MM-JJ)`;
 
-    const prompt = `Tu analyses la photo d'un document professionnel (devis, facture, carte de visite, email, brief...). Extrais les informations pour remplir un formulaire de contrat freelance. Réponds UNIQUEMENT avec un objet JSON valide (aucun texte avant/après, pas de balises markdown) contenant EXACTEMENT ces clés :
+    const knownName = String(formRef.current?.freelanceName || [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "").trim();
+    const intro = target === "step0"
+      ? `Tu analyses la photo d'un document professionnel (carte de visite, signature d'email, devis, courrier…). Extrais les informations pour remplir un formulaire de contrat freelance. ${knownName ? `Le prestataire, c'est-à-dire le freelance qui remplit le formulaire, s'appelle « ${knownName} » : toute autre personne ou entreprise du document est le client.` : "Sauf si le document indique clairement qu'il s'agit du prestataire (le freelance), la personne ou l'entreprise du document est le client."}`
+      : "Tu analyses la photo d'un document professionnel (devis, email, brief, cahier des charges…). Extrais les informations pour remplir un formulaire de contrat freelance.";
+    const prompt = `${intro} Réponds UNIQUEMENT avec un objet JSON valide (aucun texte avant/après, pas de balises markdown) contenant EXACTEMENT ces clés :
 ${champsDemandes}
 
 Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'invente jamais d'information.`;
@@ -3262,29 +3482,34 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
-      let txt = (data.content || []).map(b => b.text || "").join("").trim();
-      txt = txt.replace(/```json|```/g, "").trim();
-      const extracted = JSON.parse(txt);
-      // Remplir uniquement les champs non vides
-      setForm(prev => {
-        const next = { ...prev };
-        Object.keys(extracted).forEach(k => {
-          if (extracted[k] && String(extracted[k]).trim() && k in next) {
-            next[k] = String(extracted[k]).trim();
-          }
-        });
-        return next;
+      const txt = (data.content || []).map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
+      const m = txt.match(/\{[\s\S]*\}/);
+      const extracted = JSON.parse(m ? m[0] : txt) || {};
+      const cur = formRef.current || {};
+      const tjm = String(profile.tjm || "").trim();
+      const updates = {};
+      let kept = 0;
+      Object.keys(extracted).forEach(k => {
+        let v = String(extracted[k] ?? "").trim();
+        if (!v || !(k in cur)) return;
+        if (k === "startDate" || k === "endDate") { if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return; }
+        if (k === "price") { v = v.replace(/[^\d.,]/g, "").replace(",", "."); if (!(Number(v) > 0)) return; }
+        const now = String(cur[k] ?? "").trim();
+        const autoPrice = k === "price" && tjm && now === tjm; // prix pré-rempli avec ton TJM : celui du document le remplace
+        if (!now || autoPrice) updates[k] = v;
+        else if (now !== v) kept++;
       });
-      if (target === "step0") {
-        setScanStep0Loading(false); setScanStep0Success(true);
-        setTimeout(() => setScanStep0Success(false), 3500);
-      } else {
-        setScanStep1Loading(false); setScanStep1Success(true);
-        setTimeout(() => setScanStep1Success(false), 3500);
-      }
+      const n = Object.keys(updates).length;
+      if (n) setForm(prev => ({ ...prev, ...updates }));
+      setLoadingT(false);
+      setMsgT(n
+        ? `${n === 1 ? "1 case remplie" : `${n} cases remplies`} à partir de la photo. Vérifie-les.${kept ? " Les cases déjà remplies n'ont pas été modifiées." : ""}`
+        : kept ? "Rien de nouveau : les cases étaient déjà remplies. Freeley ne remplace jamais ce que tu as écrit."
+        : "Aucune information trouvée sur cette photo. Réessaie avec une photo plus nette.");
+      setSuccessT(true);
+      setTimeout(() => setSuccessT(false), 7000);
     } catch(e) {
-      if (target === "step0") setScanStep0Loading(false);
-      else setScanStep1Loading(false);
+      setLoadingT(false);
       alert("Impossible de lire le document. Réessaie avec une photo plus nette ou remplis les champs manuellement.");
     }
   };
@@ -3325,7 +3550,8 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     try {
       localStorage.removeItem("freeley_current_draft");
       // Retient quel contrat vient d'être généré, pour survivre à un rafraîchissement de la page
-      if (history[0]?.id) localStorage.setItem("freeley_result_contract_id", history[0].id);
+      const rid = resultContractIdRef.current || history[0]?.id;
+      if (rid) localStorage.setItem("freeley_result_contract_id", rid);
     } catch(e) {}
   };
 
@@ -3356,6 +3582,10 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   const generateContractWith = async (form) => {
     setLoading(true);
     setApiError("");
+    // Version 224 : un nouveau contrat repart sans le lien de signature du précédent (vu : le lien d'un autre contrat
+    // restait affiché après « ↩ » et une nouvelle génération)
+    setRemoteSignLink(""); setShowRemoteSignPad(false); setRemoteSigHasStrokes(false);
+    rememberResultContract(null);
     setLoadingPhase(1);
     setAnimDone(false);
     animDoneRef.current = false;
@@ -3391,8 +3621,9 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         setApiError("Le contrat généré semble incomplet malgré plusieurs tentatives (mission très détaillée). Réessaie, ou réduis la description de la mission.");
       }
 
-      // Sauvegarder dans l'historique
-      await saveToHistory({ contract: text }, form);
+      // Sauvegarder dans l'historique (et retenir CE contrat pour l'écran « Contrat généré »)
+      const savedRow = await saveToHistory({ contract: text }, form);
+      rememberResultContract(savedRow?.id);
       setContractsUsed(c => c + 1);
       setHistory(await getHistory());
 
@@ -3443,7 +3674,9 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         startDate: form.startDate,
         endDate: form.endDate,
       };
-      const saved = await createSignatureRequest(entry, form, freelanceSig, signingContractId);
+      // Version 224 : depuis l'écran « Contrat généré », on met à jour le contrat déjà enregistré au lieu d'en créer une copie
+      const targetId = signingContractId || resultContractIdRef.current || null;
+      const saved = await createSignatureRequest(entry, form, freelanceSig, targetId, { syncContent: !signingContractId && !!targetId });
       if (!saved || !saved.id) {
         alert("Impossible de créer le lien de signature. Vérifie ta connexion.");
         setRemoteSignLoading(false);
@@ -3457,63 +3690,6 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       alert("Erreur : " + (e.message || "inconnue"));
     } finally {
       setRemoteSignLoading(false);
-    }
-  };
-
-  const reviseContract = async () => {
-    if (!reviseMessage.trim()) { setReviseError("Colle d'abord le retour du client."); return; }
-    setReviseLoading(true);
-    setReviseError("");
-    setReviseSuccess(false);
-    try {
-      const prompt = `Tu es un avocat d'affaires français. Voici un contrat de prestation de services qui n'est PAS ENCORE SIGNÉ, donc modifiable librement.
-
-CONTRAT ACTUEL :
-${contract}
-
-RETOUR DU CLIENT (ses demandes de modification avant signature) :
-"${reviseMessage.trim()}"
-
-Ta tâche : réécris le contrat COMPLET en intégrant les demandes légitimes du client, tout en gardant le prestataire protégé. Garde exactement la même structure, la même mise en forme et le même style que le contrat original (mêmes articles numérotés, mêmes titres). Modifie uniquement ce qui est concerné par le retour du client : toutes les autres clauses doivent être reprises MOT POUR MOT, sans les reformuler. Si une demande est déraisonnable ou dangereuse pour le prestataire, adapte-la de façon équilibrée plutôt que de la refuser. Garde toutes les mentions légales du contrat (mention « EI », TVA, délais légaux, médiateur, rétractation).${form.typeClient === "particulier" ? " Le client est un particulier : les prix restent exprimés toutes taxes comprises (TTC). N'ajoute jamais de plafond ni d'exclusion de responsabilité, de pénalités de retard, d'indemnité forfaitaire de 40 €, de clause de non-sollicitation ni de clause qui impose un tribunal : avec un particulier, ces clauses sont interdites ou sans effet." : ""}
-
-Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire avant ou après, sans backticks.`;
-
-      // Le contrat complet est long : même reprise automatique que pour la première rédaction,
-      // et on refuse d'enregistrer une version coupée (elle remplacerait le contrat entier).
-      const looksComplete = (t) => /ARTICLE 1[23]|voie électronique/i.test(t);
-      const { text: revised, stopReason } = await generateLongText(prompt, { maxTokens: 8000, maxAttempts: 3, looksComplete });
-      const newContract = normalizeContractText(revised.trim());
-      if (!newContract) throw new Error("Réponse vide");
-      if (stopReason === "max_tokens" || !looksComplete(newContract)) throw new Error("Révision incomplète");
-      setContract(newContract);
-      setReviseSuccess(true);
-      setReviseMessage("");
-      setTimeout(() => { setReviseSuccess(false); setReviseOpen(false); }, 2600);
-      // Sauvegarde réelle du texte révisé — sinon la version corrigée n'existe que le temps de la session
-      const contractId = history[0]?.id;
-      if (contractId) {
-        try {
-          const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
-          if (e1) throw e1;
-          const currentContent = parseContent(existing.content);
-          const newContent = { ...currentContent, contract: newContract };
-          const { error: e2 } = await supabase.rpc("update_contract_content", {
-            p_contract_id: contractId,
-            p_new_content: JSON.stringify(newContent),
-            p_new_status: existing.status,
-          });
-          if (e2) throw e2;
-          setHistory(await getHistory());
-        } catch(e) {
-          console.error("Erreur sauvegarde révision:", e);
-        }
-      }
-    } catch(e) {
-      setReviseError(e?.message === "Révision incomplète"
-        ? "La révision n'a pas pu être terminée. Ton contrat n'a pas été modifié. Réessaie."
-        : "Erreur lors de la révision. Vérifie ta connexion et réessaie.");
-    } finally {
-      setReviseLoading(false);
     }
   };
 
@@ -3540,43 +3716,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     if (!overrideForm) setPdfLoad(false);
   };
 
-  const downloadScanReportPDF = (findings, label) => {
-    if (!findings || !findings.length) { alert("Aucun résultat à télécharger."); return; }
-    if (!jsPDFReady || !window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-    const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80];
-    const DANGER = [200, 60, 60], WARN = [200, 150, 40], OK = [39, 119, 63];
-    const today = new Date().toLocaleDateString("fr-FR");
-    let y = 20;
-
-    doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 32, "F");
-    doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 32, PW, 32);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(255,255,255);
-    doc.text("Rapport d'analyse de contrat", ML, 16);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-    doc.text(`${label || "Analyse"} — généré le ${today} via Freeley`, ML, 24);
-
-    y = 46;
-    findings.forEach((f, i) => {
-      if (y > 260) { doc.addPage(); y = 20; }
-      const color = f.level === "danger" ? DANGER : f.level === "warning" ? WARN : OK;
-      const lbl = f.level === "danger" ? "RISQUE" : f.level === "warning" ? "À NÉGOCIER" : "POSITIF";
-      doc.setFillColor(...color); doc.roundedRect(ML, y, 28, 6, 1, 1, "F");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(255,255,255);
-      doc.text(lbl, ML + 14, y + 4, { align: "center" });
-      doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...DARK);
-      doc.text(f.article || `Point ${i+1}`, ML + 32, y + 4.5);
-      y += 10;
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(80,80,80);
-      const lines = doc.splitTextToSize(f.text || "", cw);
-      doc.text(lines, ML, y);
-      y += lines.length * 4.6 + 8;
-    });
-
-    doc.save(`Analyse_Contrat_Freeley_${Date.now()}.pdf`);
-  };
+  // Version 224 : même rapport que dans la fenêtre du scanner (note, résumé, clause à proposer, message)
+  const downloadScanReportPDF = (findings, label) => downloadScanReport(findings, { label });
 
   const contractsLeft = Math.max(0, FREE_LIMIT - contractsUsed);
 
@@ -3735,6 +3876,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
     } catch(e) {}
     const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ");
     setStep(0); setContract("");
+    setRemoteSignLink(""); setShowRemoteSignPad(false); setRemoteSigHasStrokes(false);
+    rememberResultContract(null);
     setForm({
       ...initialForm,
       freelanceName: fullName || "",
@@ -3859,9 +4002,10 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             <div style={{padding:"14px 16px"}}>
               {ext.client && <p style={{fontSize:12,color:"#8A8780",marginBottom:12}}>Client : {ext.client}</p>}
               {findings.map((f,i)=>(<div key={i} style={{background:f.level==="danger"?"#FEF2F2":f.level==="warning"?"#FFFBEB":"#F0FDF4",border:"1.5px solid "+(f.level==="danger"?"#FECACA":f.level==="warning"?"#FDE68A":"#BBF7D0"),borderRadius:10,padding:"12px 14px",marginBottom:10}}>
-                <div style={{fontWeight:700,color:f.level==="danger"?"#DC2626":f.level==="warning"?"#D97706":"#16A34A",fontSize:11,marginBottom:3}}>{f.level==="danger"?"DANGER":f.level==="warning"?"A NEGOCIER":"CONFORME"}</div>
+                <div style={{fontWeight:700,color:f.level==="danger"?"#DC2626":f.level==="warning"?"#D97706":"#16A34A",fontSize:11,marginBottom:3}}>{f.level==="danger"?"DANGER":f.level==="warning"?"À NÉGOCIER":"CONFORME"}</div>
                 <div style={{fontWeight:600,fontSize:13,color:"#1B2E4B",marginBottom:3}}>{f.article}</div>
                 <div style={{fontSize:12,color:"#4A4A4A",lineHeight:1.6}}>{f.text}</div>
+                {f.fix && (f.level==="danger" || f.level==="warning") && <div style={{fontSize:12,color:"#4A4A4A",lineHeight:1.6,marginTop:8,padding:"8px 10px",background:"#FFFFFFB3",borderRadius:8,whiteSpace:"pre-wrap"}}><strong>{f.level==="danger" ? "Clause à proposer : " : "Message pour le client : "}</strong><em>{f.fix}</em></div>}
               </div>))}
               <div style={{display:"flex", gap:8, marginTop:8}}>
               <button onClick={()=>downloadScanReportPDF(findings, ext.mission || "Analyse de contrat")} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer"}}>
@@ -4244,7 +4388,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           profile={profile}
           setProfile={setProfile}
           depositPct={invoiceDepositPct}
-          contractId={signingContractId || history[0]?.id}
+          contractId={signingContractId || resultContractId || history[0]?.id}
           contractText={(signingContractId ? history.find(h => h.id === signingContractId)?.contract : contract) || history[0]?.contract || ""}
           onClose={async () => {
             setShowTactileSign(false); setSigningContractId(null);
@@ -4255,7 +4399,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
           onGoToProfileTva={goToProfileFacturation}
           authUser={authUser}
           onGoToHistory={() => {
-            const targetId = signingContractId || history[0]?.id;
+            const targetId = signingContractId || resultContractId || history[0]?.id;
             const target = history.find(h => h.id === targetId) || history[0];
             if (target) setHistoryView(target);
             setSigningContractId(null);
@@ -4509,8 +4653,8 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 onMagicFill={() => requestCameraPermission(magicFillStep0)}
                 loading={scanStep0Loading}
                 success={scanStep0Success}
-                successMsg="Vos informations ont été extraites et injectées avec succès !"
-                tooltipText="Gagnez du temps : prenez une photo de votre carte de visite ou de vos notes pour pré-remplir automatiquement les champs."
+                successMsg={scanStep0Msg}
+                tooltipText="Gagne du temps : prends en photo la carte de visite de ton client, la signature de son email ou un devis. Freeley remplit seulement les cases encore vides."
               />
               <Field label="Nom complet *" value={form.freelanceName} onChange={v=>update("freelanceName",v)} placeholder="Jean Dupont" error={errors.freelanceName} delay={2} />
               <Field label="Activité / Métier *" value={form.freelanceActivity} onChange={v=>update("freelanceActivity",v)} placeholder="Développeur web, Designer graphique…" error={errors.freelanceActivity} delay={3} />
@@ -4583,9 +4727,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 onMagicFill={() => requestCameraPermission(magicFillStep1)}
                 loading={scanStep1Loading}
                 success={scanStep1Success}
-                successMsg="Les détails de la mission ont été extraits et configurés !"
+                successMsg={scanStep1Msg}
                 successStyle="gold"
-                tooltipText="Gagnez du temps : prenez une photo de votre carte de visite ou de vos notes pour pré-remplir automatiquement les champs."
+                tooltipText="Gagne du temps : prends en photo un devis, un email ou le brief de ton client. Freeley remplit seulement les cases encore vides."
               />
 
               {/* Tip banner */}
@@ -5200,61 +5344,27 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
                 </div>
               )}
 
-              {/* ── Réviser le contrat avant signature ── */}
-              <div style={{ width:"100%", background:"#122238", border:"1.5px solid #2A4167", borderRadius:12, padding:"16px 18px" }}>
-                {!reviseOpen ? (
-                  <button
-                    onClick={() => setReviseOpen(true)}
-                    style={{
-                      width:"100%", padding:"12px 18px", background:"transparent",
-                      color:"#C9A961", border:"1.5px solid #C9A961", borderRadius:8,
-                      cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600,
-                      display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                    }}
-                  >🪄 Le client veut des modifications ? Réviser le contrat</button>
-                ) : (
-                  <div>
-                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#E8EEF5", marginBottom:4 }}>Révision avant signature</div>
-                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#8BA3C0", lineHeight:1.5, marginBottom:12 }}>
-                      Colle ici le retour du client. Freeley modifiera directement le contrat (pas d'avenant, puisqu'il n'est pas encore signé).
-                    </div>
-                    <textarea
-                      value={reviseMessage}
-                      onChange={e => setReviseMessage(e.target.value)}
-                      placeholder="Ex : Le client souhaite passer le délai de paiement à 45 jours et ajouter une révision supplémentaire."
-                      rows={4}
-                      style={{
-                        width:"100%", padding:"12px 14px", borderRadius:8,
-                        border:"1.5px solid #2A4167", background:"#0D1B2E", color:"#E8EEF5",
-                        fontFamily:T.body, fontSize:13, lineHeight:1.6, resize:"vertical",
-                        boxSizing:"border-box", outline:"none", marginBottom:12,
-                      }}
-                    />
-                    {reviseError && <div style={{ fontFamily:T.body, fontSize:12, color:"#FCA5A5", marginBottom:10 }}>{reviseError}</div>}
-                    {reviseSuccess && <div style={{ fontFamily:T.body, fontSize:12, color:"#6EE7B7", marginBottom:10, fontWeight:600 }}>✓ Contrat mis à jour ! Vérifie la nouvelle version ci-dessus.</div>}
-                    <div style={{ display:"flex", gap:10 }}>
-                      <button
-                        onClick={() => { setReviseOpen(false); setReviseMessage(""); setReviseError(""); }}
-                        disabled={reviseLoading}
-                        style={{ flex:"0 0 auto", padding:"11px 16px", background:"transparent", color:"#8BA3C0", border:"1.5px solid #2A4167", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13 }}
-                      >Annuler</button>
-                      <button
-                        onClick={reviseContract}
-                        disabled={reviseLoading}
-                        style={{
-                          flex:1, padding:"11px 18px",
-                          background: reviseLoading ? "#2A4167" : "linear-gradient(135deg, #B8965A 0%, #C9A961 100%)",
-                          color: reviseLoading ? "#8BA3C0" : "#0D1B2E", border:"none", borderRadius:8,
-                          cursor: reviseLoading ? "wait" : "pointer",
-                          fontFamily:T.body, fontSize:13, fontWeight:700,
-                        }}
-                      >{reviseLoading ? "Révision du contrat en cours…" : "✨ Appliquer les modifications"}</button>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* ── Modifier le contrat avant signature (version 224) ── */}
+              {resultEntry?.signatureStatus !== "signed" && (
+                <ContractModifyBox
+                  key={resultContractId || "resultat"}
+                  dark
+                  contractText={contract}
+                  form={form}
+                  profile={profile}
+                  freelanceSigned={!!(resultEntry?.freelanceSignature || remoteSignLink)}
+                  onSave={async ({ newContract, newForm, removeFreelanceSignature }) => {
+                    const id = resultContractIdRef.current || resultEntry?.id;
+                    if (id) await saveContractModification({ contractId: id, newContract, newForm, removeFreelanceSignature });
+                    setContract(newContract);
+                    setForm(newForm);
+                    if (removeFreelanceSignature) { setRemoteSignLink(""); setShowRemoteSignPad(false); setRemoteSigHasStrokes(false); }
+                    try { setHistory(await getHistory()); } catch (e) { console.error("[Freeley] Rechargement des contrats :", e); }
+                  }}
+                />
+              )}
 
-              <button onClick={() => downloadPDF(undefined, undefined, undefined, undefined, undefined, history[0]?.retractationWaivedAt)} disabled={pdfLoading || !jsPDFReady} style={{
+              <button onClick={() => downloadPDF(undefined, undefined, undefined, undefined, undefined, resultEntry?.retractationWaivedAt)} disabled={pdfLoading || !jsPDFReady} style={{
                 padding:"10px 16px", background: (pdfLoading||!jsPDFReady) ? "#2A4167" : C.gold,
                 color: (pdfLoading||!jsPDFReady) ? "#5A7A9A" : C.navyD,
                 border:"none", borderRadius:7, cursor:(pdfLoading||!jsPDFReady)?"not-allowed":"pointer",
@@ -5285,12 +5395,12 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
             <MarkdownContract
               text={contract}
               form={form}
-              signatureStatus={history[0]?.signatureStatus}
-              freelanceSignature={history[0]?.freelanceSignature}
-              clientSignature={history[0]?.clientSignature}
-              signedByClientAt={history[0]?.signedByClientAt}
-              signedByFreelanceAt={history[0]?.signedByFreelanceAt}
-              retractationWaivedAt={history[0]?.retractationWaivedAt}
+              signatureStatus={resultEntry?.signatureStatus}
+              freelanceSignature={resultEntry?.freelanceSignature}
+              clientSignature={resultEntry?.clientSignature}
+              signedByClientAt={resultEntry?.signedByClientAt}
+              signedByFreelanceAt={resultEntry?.signedByFreelanceAt}
+              retractationWaivedAt={resultEntry?.retractationWaivedAt}
             />
           </div>
 
@@ -6434,6 +6544,204 @@ CONSIGNES :
 }
 
 /* ══════════════════════════════════════════ MARKDOWN CONTRACT RENDERER ══ */
+// ── Modifier le contrat avant signature (version 224) ──
+// Remplace « Réviser le contrat » : le mot « révision » servait aussi pour les corrections de l'article 5.
+// Les chiffres se changent dans des cases (jamais par l'IA), le reste se décrit en texte. Utilisé sur l'écran
+// « Contrat généré » (fond sombre) et dans « Mes contrats » (fond clair).
+function ContractModifyBox({ dark = false, contractText, form, profile, freelanceSigned = false, onSave }) {
+  const figuresOf = (f) => ({
+    price: String(f?.price ?? ""),
+    acomptePourcentage: String(f?.acomptePourcentage ?? "") || "0",
+    paymentTerms: String(f?.paymentTerms || "Comptant"),
+    startDate: f?.startDate || "",
+    endDate: f?.endDate || "",
+    revisions: String(f?.revisions || "2"),
+  });
+  const [open, setOpen] = useState(false);
+  const [fig, setFig] = useState(() => figuresOf(form));
+  const [request, setRequest] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(null);           // { changes, signatureRemoved }
+  const [pendingSave, setPendingSave] = useState(null); // texte modifié pas encore enregistré (connexion coupée)
+
+  const oldForm = { ...(form || {}), ...figuresOf(form) };
+  const priceNum = Number(String(fig.price).replace(",", "."));
+  const priceError = !(priceNum > 0) ? "Entre un prix valide (ex : 800)." : "";
+  const datesError = (!fig.startDate || !fig.endDate) ? "Indique les deux dates." : fig.endDate < fig.startDate ? "La date de fin doit être après le début." : "";
+  const newForm = { ...oldForm, ...fig, price: priceError ? fig.price : String(priceNum) };
+  const changes = (priceError || datesError) ? [] : contractFigureChanges(oldForm, newForm, profile);
+  const hasRequest = request.trim().length > 0;
+  const canApply = !loading && !pendingSave && !priceError && !datesError && (hasRequest || changes.length > 0);
+  const figuresHint = hasRequest && !changes.length && requestMentionsFigures(request);
+  const set = (k) => (e) => setFig(f => ({ ...f, [k]: e.target.value }));
+
+  const P = dark
+    ? { box: { background:"#122238", border:"1.5px solid #2A4167" }, title:"#E8EEF5", text:"#8BA3C0", label:"#8BA3C0",
+        input: { background:"#0D1B2E", color:"#E8EEF5", border:"1.5px solid #2A4167" }, toggle: { color:"#C9A961", border:"1.5px solid #C9A961" },
+        ok:"#6EE7B7", okBg:"#0D2818", okBorder:"#15803D", err:"#FCA5A5", warnBg:"#2A2110", warnBorder:"#B45309", warnText:"#FCD34D", ghost:{ color:"#8BA3C0", border:"1.5px solid #2A4167" } }
+    : { box: { background:C.white, border:`1.5px solid ${C.border}` }, title:C.navy, text:C.textM, label:C.textL,
+        input: { background:C.white, color:C.text, border:`1.5px solid ${C.border}` }, toggle: { color:C.navy, border:`1.5px solid ${C.navy}` },
+        ok:"#15803D", okBg:"#F0FDF4", okBorder:"#86EFAC", err:C.error, warnBg:"#FFFBEB", warnBorder:"#FCD34D", warnText:"#92400E", ghost:{ color:C.textM, border:`1.5px solid ${C.border}` } };
+  const inputSt = { width:"100%", minWidth:0, padding:"9px 10px", borderRadius:8, fontFamily:T.body, fontSize:13, boxSizing:"border-box", outline:"none", ...P.input };
+  const labelSt = { display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.1em", fontWeight:700, color:P.label, marginBottom:5 };
+
+  const openBox = () => { setFig(figuresOf(form)); setRequest(""); setError(""); setDone(null); setPendingSave(null); setOpen(true); };
+  const closeBox = () => { setOpen(false); setRequest(""); setError(""); setDone(null); setPendingSave(null); };
+
+  const save = async (payload) => {
+    try {
+      await onSave(payload);
+      setPendingSave(null); setError(""); setRequest("");
+      setDone({ changes: payload.changes, signatureRemoved: payload.removeFreelanceSignature });
+    } catch (e) {
+      console.error("[Freeley] Enregistrement de la modification du contrat :", e);
+      setPendingSave(payload);
+      setError("La nouvelle version n'a pas pu être enregistrée. Vérifie ta connexion, puis appuie sur « Réessayer l'enregistrement ». Ton contrat n'a pas encore changé.");
+    }
+  };
+
+  const apply = async () => {
+    if (!canApply) return;
+    setLoading(true); setError(""); setDone(null);
+    try {
+      const prompt = buildModifyPrompt({ contract: contractText, request, oldForm, newForm, profile });
+      const looksComplete = (t) => /ARTICLE 1[23]|voie électronique/i.test(t);
+      const { text, stopReason } = await generateLongText(prompt, { maxTokens: 8000, maxAttempts: 3, looksComplete });
+      const newContract = normalizeContractText(String(text || "").trim());
+      if (!newContract) throw new Error("vide");
+      if (stopReason === "max_tokens" || !looksComplete(newContract)) throw new Error("incomplet");
+      await save({ newContract, newForm, changes, removeFreelanceSignature: !!freelanceSigned });
+    } catch (e) {
+      setError(e?.message === "incomplet"
+        ? "La modification n'a pas pu être terminée. Ton contrat n'a pas été changé. Réessaie."
+        : "La modification n'a pas marché. Vérifie ta connexion et réessaie. Ton contrat n'a pas été changé.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!open) return (
+    <div data-testid="contract-modify" style={{ width:"100%", borderRadius:12, padding:"16px 18px", boxSizing:"border-box", marginBottom: dark ? 0 : 16, ...P.box }}>
+      <button onClick={openBox} style={{
+        width:"100%", padding:"12px 18px", background:"transparent", borderRadius:8,
+        cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600,
+        display:"flex", alignItems:"center", justifyContent:"center", gap:8, ...P.toggle,
+      }}>🪄 Le client veut des changements ? Modifier le contrat</button>
+    </div>
+  );
+
+  return (
+    <div data-testid="contract-modify" style={{ width:"100%", borderRadius:12, padding:"16px 18px", boxSizing:"border-box", marginBottom: dark ? 0 : 16, ...P.box }}>
+      <div style={{ fontFamily:T.body, fontSize:13.5, fontWeight:700, color:P.title, marginBottom:4 }}>Modifications avant signature</div>
+      <div style={{ fontFamily:T.body, fontSize:11.5, color:P.text, lineHeight:1.55, marginBottom:12 }}>
+        Pas besoin d'avenant : le contrat n'est pas encore signé. Freeley le réécrit avec tes changements.
+      </div>
+
+      {done ? (
+        <div style={{ background:P.okBg, border:`1.5px solid ${P.okBorder}`, borderRadius:10, padding:"12px 14px" }}>
+          <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:P.ok, marginBottom:6 }}>✓ Contrat modifié. Relis la nouvelle version ci-dessous.</div>
+          {done.changes.length > 0 && (
+            <div style={{ fontFamily:T.body, fontSize:12, color:P.text, lineHeight:1.6, marginBottom:6 }}>
+              {done.changes.map(c => <div key={c.key}>{c.label} : {c.from} → {c.to}</div>)}
+            </div>
+          )}
+          {done.signatureRemoved && (
+            <div style={{ fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55, marginBottom:6, fontWeight:600 }}>
+              Ta signature a été retirée, puisque le texte a changé. Signe la nouvelle version, puis renvoie le lien à ton client : c'est le même lien.
+            </div>
+          )}
+          <button onClick={closeBox} style={{ marginTop:4, padding:"9px 16px", background:"transparent", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, ...P.ghost }}>Fermer</button>
+        </div>
+      ) : (
+        <>
+          {freelanceSigned && (
+            <div style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
+              Tu as déjà signé ce contrat. Après la modification, ta signature sera retirée : tu signeras la nouvelle version, puis tu renverras le lien à ton client. C'est le même lien.
+            </div>
+          )}
+
+          <div style={labelSt}>LES CHIFFRES DU CONTRAT</div>
+          <div style={{ fontFamily:T.body, fontSize:11.5, color:P.text, lineHeight:1.5, marginBottom:10 }}>
+            Si ton client demande un autre prix, un autre paiement ou d'autres dates, change-les ici. L'IA ne change jamais les chiffres elle-même.
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"minmax(0, 1fr) minmax(0, 1fr)", gap:10, marginBottom:10 }}>
+            <div>
+              <label style={labelSt}>PRIX TOTAL HT (€)</label>
+              <input type="number" inputMode="decimal" value={fig.price} onChange={set("price")} style={inputSt} />
+            </div>
+            <div>
+              <label style={labelSt}>ACOMPTE</label>
+              <select value={fig.acomptePourcentage} onChange={set("acomptePourcentage")} style={inputSt}>
+                {[...new Set(["0", "10", "20", "30", "40", "50", fig.acomptePourcentage])].map(v => <option key={v} value={v}>{v === "0" ? "Aucun" : `${v} %`}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelSt}>DÉLAI DE PAIEMENT</label>
+              <select value={fig.paymentTerms} onChange={set("paymentTerms")} style={inputSt}>
+                {[...new Set(["Comptant", "15", "30", "45", "60", fig.paymentTerms])].map(v => <option key={v} value={v}>{v === "Comptant" ? "Comptant" : `${v} jours`}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelSt}>RÉVISIONS INCLUSES</label>
+              <select value={fig.revisions} onChange={set("revisions")} style={inputSt}>
+                {[...new Set(["1", "2", "3", "Illimitées", fig.revisions])].map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelSt}>DATE DE DÉBUT</label>
+              <input type="date" value={fig.startDate} onChange={set("startDate")} style={inputSt} />
+            </div>
+            <div>
+              <label style={labelSt}>DATE DE FIN</label>
+              <input type="date" value={fig.endDate} onChange={set("endDate")} style={inputSt} />
+            </div>
+          </div>
+          {(priceError || datesError) && <div style={{ fontFamily:T.body, fontSize:12, color:P.err, marginBottom:10 }}>{priceError || datesError}</div>}
+          {changes.length > 0 && (
+            <div style={{ fontFamily:T.body, fontSize:12, color:P.text, lineHeight:1.6, marginBottom:12 }}>
+              <strong style={{ color:P.title }}>Chiffres changés :</strong>
+              {changes.map(c => <div key={c.key}>{c.label} : {c.from} → {c.to}</div>)}
+            </div>
+          )}
+
+          <label style={{ ...labelSt, marginTop:4 }}>CE QUE TON CLIENT DEMANDE D'AUTRE</label>
+          <textarea
+            value={request}
+            onChange={e => setRequest(e.target.value)}
+            placeholder="Ex : Le client veut ajouter une page Blog et une version en anglais du site."
+            rows={4}
+            style={{ ...inputSt, padding:"12px 14px", lineHeight:1.6, resize:"vertical", marginBottom:10 }}
+          />
+          {figuresHint && (
+            <div style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:8, padding:"9px 12px", marginBottom:10, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
+              Ta demande parle de prix, de paiement, de dates ou de révisions. Change aussi les chiffres au-dessus : sinon le contrat garde les chiffres actuels.
+            </div>
+          )}
+          {error && <div style={{ fontFamily:T.body, fontSize:12, color:P.err, marginBottom:10, lineHeight:1.5 }}>{error}</div>}
+          <div style={{ display:"flex", gap:10 }}>
+            <button onClick={closeBox} disabled={loading} style={{ flex:"0 0 auto", padding:"11px 16px", background:"transparent", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13, ...P.ghost }}>Annuler</button>
+            {pendingSave ? (
+              <button onClick={() => save(pendingSave)} style={{
+                flex:1, padding:"11px 18px", background:"linear-gradient(135deg, #B8965A 0%, #C9A961 100%)", color:"#0D1B2E",
+                border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700,
+              }}>Réessayer l'enregistrement</button>
+            ) : (
+              <button onClick={apply} disabled={!canApply} style={{
+                flex:1, padding:"11px 18px",
+                background: canApply ? "linear-gradient(135deg, #B8965A 0%, #C9A961 100%)" : (dark ? "#2A4167" : C.creamDD),
+                color: canApply ? "#0D1B2E" : (dark ? "#8BA3C0" : C.textL), border:"none", borderRadius:8,
+                cursor: loading ? "wait" : canApply ? "pointer" : "not-allowed",
+                fontFamily:T.body, fontSize:13, fontWeight:700,
+              }}>{loading ? "Modification du contrat en cours…" : "✨ Appliquer les modifications"}</button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Résultat du contrôle automatique (checkContractText), affiché au-dessus du contrat
 function ContractCheckBox({ text, form, profile, onGoToProfile }) {
   if (!String(text || "").trim()) return null;
@@ -6449,7 +6757,7 @@ function ContractCheckBox({ text, form, profile, onGoToProfile }) {
     <div data-testid="contract-check" style={{ padding:"14px 16px", marginBottom:16, background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, fontFamily:T.body, color:"#92400E", lineHeight:1.55 }}>
       <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>⚠️ Contrôle automatique : {issues.length === 1 ? "1 point à vérifier" : `${issues.length} points à vérifier`} avant de faire signer</div>
       {issues.map((m, i) => <div key={i} style={{ fontSize:12.5, marginBottom:6 }}>• {m}</div>)}
-      <div style={{ fontSize:11.5, color:"#A16207", marginTop:4 }}>Pour corriger, utilise « Réviser le contrat » en décrivant le problème, ou refais le contrat. Freeley ne bloque pas la signature.</div>
+      <div style={{ fontSize:11.5, color:"#A16207", marginTop:4 }}>Pour corriger, utilise « Modifier le contrat » en décrivant le problème, ou refais le contrat. Freeley ne bloque pas la signature.</div>
       {needsProfile && onGoToProfile && <span onClick={onGoToProfile} style={{ display:"inline-block", marginTop:8, fontSize:12.5, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Compléter mon profil →</span>}
     </div>
   );
@@ -9259,7 +9567,7 @@ Mission concernée : ${mission}
 Le message doit :
 1. Rappeler gentiment que le paiement arrive bientôt à échéance
 2. Mentionner le montant et la mission concernée
-3. Indiquer qu'un lien de paiement sécurisé est joint pour faciliter le règlement
+3. Ne parler d'aucun lien de paiement, RIB ou moyen de paiement : si un lien de paiement existe, Freeley l'ajoutera lui-même à la fin du message
 4. Rester bref (4-6 phrases), chaleureux et professionnel, sans jargon juridique
 5. Ne JAMAIS mentionner de pénalités, de mise en demeure, ou de conséquences — rien n'est en retard
 
@@ -9299,8 +9607,13 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:2500, messages:[{role:"user",content:prompt}] }),
     });
+    // Version 224 : une erreur du service n'affiche plus un message vide
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return (data.content||[]).map(i=>i.text||"").join("\n").trim();
+    if (data.error) throw new Error(data.error.message || "Erreur");
+    const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
+    if (!text) throw new Error("Réponse vide");
+    return text;
   };
 
   const generateAuto = async () => {
@@ -9666,7 +9979,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   const msg = sendModal.type === "silence"
                     ? `Bonjour ${sendModal.clientName}, je n'ai plus de nouvelles de votre part depuis un moment concernant notre mission en cours. Pourriez-vous me faire un retour quand vous pourrez ? Merci !`
                     : sendModal.type === "preventive"
-                    ? `Bonjour ${sendModal.clientName}, petit rappel amical : ton paiement arrive bientôt à échéance.${stripeLinkUrl ? ` Tu peux régler ici : ${stripeLinkUrl}` : ""} Merci !`
+                    ? `Bonjour ${sendModal.clientName}, petit rappel amical : votre paiement arrive bientôt à échéance.${stripeLinkUrl ? ` Vous pouvez régler ici : ${stripeLinkUrl}` : ""} Merci !`
                     : `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement.${stripeLinkUrl ? ` Réglez ici : ${stripeLinkUrl}` : ""} Cordialement.`;
                   window.location.href = `sms:${sendModal.clientPhone || ""}?body=${encodeURIComponent(msg)}`;
                   setSendSuccess(sendModal.clientName);
@@ -10555,6 +10868,8 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
   const [improveError, setImproveError] = useState("");
   const [improved, setImproved] = useState(false);
   const [previousValue, setPreviousValue] = useState("");
+  // Version 224 : « Revenir à mon texte » reste affiché jusqu'à ce que tu modifies le texte (avant : 4 secondes)
+  const [canUndo, setCanUndo] = useState(false);
 
   const len = value.trim().length;
   const quality = len === 0 ? null : len < 60 ? "faible" : len < 150 ? "moyenne" : "bonne";
@@ -10570,33 +10885,15 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
     setImproving(true);
     setImproveError("");
     setImproved(false);
-    setPreviousValue(value);
+    const before = value;
     try {
-      const prompt = `Tu es un expert en rédaction de contrats freelance français.
-Un freelance a décrit sa mission ainsi :
----
-${missionTitle ? `Titre : ${missionTitle}\n` : ""}Description : ${value}
----
-Réécris et enrichis cette description pour qu'elle soit parfaitement adaptée à un contrat de prestation de services professionnel.
-
-Règles impératives :
-- Garde fidèlement le sens et le contexte d'origine, n'invente rien
-- Détaille les livrables précis (nombre, format, technologie si mentionnée)
-- Ajoute une section "Non inclus :" si elle n'existe pas déjà, avec les exclusions logiques
-- Mentionne les jalons ou délais intermédiaires si pertinent
-- Reste concis : 80 à 180 mots maximum
-- Écris en prose directe, sans tirets ni bullet points, sans introduction ni conclusion
-- Ne commence pas par "Cette mission" ou "Le prestataire"
-
-Réponds uniquement avec la description réécrite, sans guillemets ni formatage.`;
-
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
-          max_tokens: 600,
-          messages: [{ role: "user", content: prompt }],
+          max_tokens: 800,
+          messages: [{ role: "user", content: buildImprovePrompt(missionTitle, value) }],
         }),
       });
       if (!res.ok) throw new Error(`Erreur ${res.status}`);
@@ -10604,8 +10901,10 @@ Réponds uniquement avec la description réécrite, sans guillemets ni formatage
       if (data.error) throw new Error(data.error.message);
       const text = data.content?.map(i => i.text || "").join("").trim();
       if (!text) throw new Error("Réponse vide");
+      setPreviousValue(before);
       onChange(text);
       setImproved(true);
+      setCanUndo(true);
       setTimeout(() => setImproved(false), 4000);
     } catch {
       setImproveError("Erreur lors de l'amélioration. Réessaie.");
@@ -10617,6 +10916,7 @@ Réponds uniquement avec la description réécrite, sans guillemets ni formatage
     onChange(previousValue);
     setPreviousValue("");
     setImproved(false);
+    setCanUndo(false);
   };
 
   return (
@@ -10628,7 +10928,7 @@ Réponds uniquement avec la description réécrite, sans guillemets ni formatage
       </div>
 
       {/* Textarea */}
-      <textarea value={value} onChange={e=>{ onChange(e.target.value); setImproved(false); }} rows={5}
+      <textarea value={value} onChange={e=>{ onChange(e.target.value); setImproved(false); setCanUndo(false); }} rows={5}
         placeholder={"Ex : Conception et développement WordPress, 5 pages (Accueil, À propos, Services, Blog, Contact), responsive mobile, intégration SEO de base, formulaire de contact, livraison des maquettes sous 1 semaine puis développement sur 3 semaines. Non inclus : rédaction des textes, hébergement, nom de domaine."}
         style={{
           width:"100%", padding:"12px 14px",
@@ -10679,7 +10979,7 @@ Réponds uniquement avec la description réécrite, sans guillemets ni formatage
         </button>
 
         {/* Undo button — only shown after improvement */}
-        {improved && previousValue && (
+        {canUndo && previousValue && (
           <button onClick={handleUndo} style={{
             padding:"7px 12px", background:"transparent",
             border:`1.5px solid ${C.border}`, borderRadius:7,
@@ -10688,7 +10988,7 @@ Réponds uniquement avec la description réécrite, sans guillemets ni formatage
           }}
             onMouseOver={e=>{ e.currentTarget.style.borderColor=C.navy; e.currentTarget.style.color=C.navy; }}
             onMouseOut={e=>{ e.currentTarget.style.borderColor=C.border; e.currentTarget.style.color=C.textM; }}
-          >↩ Annuler</button>
+          >↩ Revenir à mon texte</button>
         )}
 
         {/* Success badge */}
@@ -10710,6 +11010,13 @@ Réponds uniquement avec la description réécrite, sans guillemets ni formatage
           </span>
         )}
       </div>
+
+      {/* Version 224 : le texte amélioré deviendra l'article 2 du contrat, à relire */}
+      {canUndo && (
+        <div style={{ marginTop:8, padding:"9px 12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:6, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
+          Relis ce texte avant de continuer : il deviendra l'article 2 de ton contrat. Garde seulement ce que tu vas vraiment faire, et vérifie la liste « Non inclus ».
+        </div>
+      )}
 
       {/* Improve error */}
       {improveError && (
@@ -12272,9 +12579,9 @@ ${historyView.contract || "Non disponible"}
 
 INFORMATIONS COMPLÉMENTAIRES SUR CE CONTRAT (à utiliser si pertinent, ne pas recalculer) :
 - Acompte prévu : ${acomptePct}%
-- Statut du paiement : ${historyView.paymentStatus || "en attente"}
+- Statut du paiement : ${({ pending: "en attente", paid: "payé" })[historyView.paymentStatus] || historyView.paymentStatus || "en attente"}
 - Clause de dédommagement en cas d'annulation : ${clauseDeditActive}
-- Pénalités de retard : ${historyView.form?.latePaymentPenalty ? "activées" : "non activées"}
+- ${historyView.form?.typeClient === "particulier" ? "Intérêts de retard" : "Pénalités de retard"} : ${historyView.form?.latePaymentPenalty || historyView.form?.typeClient !== "particulier" ? "oui" : "non"}
 
 QUESTION DU FREELANCE : "${assistantQuestion}"
 
@@ -12291,8 +12598,10 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:1200, messages:[{role:"user",content:prompt}] }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
+      if (!text) throw new Error("Réponse vide"); // version 224 : plus de réponse vide en cas d'erreur du service
       setAssistantAnswer(text);
     } catch {
       setAssistantAnswer("Erreur de génération. Vérifie ta connexion et réessaie.");
@@ -12558,6 +12867,22 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
         </div>
       )}
 
+      {/* Modifier le contrat tant que le client ne l'a pas signé (version 224) */}
+      {historyView.signatureStatus !== "signed" && !historyView.isStandaloneInvoice && !historyView.deleted && !historyView.clientSignature && String(historyView.contract || "").trim() && (
+        <ContractModifyBox
+          key={historyView.id}
+          contractText={historyView.contract}
+          form={{ ...(historyView.form || {}), price: historyView.form?.price || historyView.price || "", startDate: historyView.form?.startDate || historyView.startDate || "", endDate: historyView.form?.endDate || historyView.endDate || "" }}
+          profile={profile}
+          freelanceSigned={!!historyView.freelanceSignature}
+          onSave={async ({ newContract, newForm, removeFreelanceSignature }) => {
+            await saveContractModification({ contractId: historyView.id, newContract, newForm, removeFreelanceSignature });
+            if (removeFreelanceSignature && signingContractId === historyView.id) { setRemoteSignLink(""); setShowRemoteSignPad(false); }
+            if (onRefreshHistory) await onRefreshHistory();
+          }}
+        />
+      )}
+
       {/* Contrôle automatique : seulement tant que le contrat n'est pas signé (on peut encore le corriger) */}
       {historyView.signatureStatus !== "signed" && !historyView.isStandaloneInvoice && (
         <ContractCheckBox text={historyView.contract} form={historyView.form} profile={profile} onGoToProfile={onGoToProfileTva} />
@@ -12680,7 +13005,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
             <span style={{ fontSize:22, opacity:0.5 }}>⚡</span>
             <div>
               <div style={{ fontFamily:T.display, fontSize:14, color:C.textM, fontWeight:700 }}>Créer un avenant</div>
-              <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>Disponible une fois ce contrat signé par les deux parties — avant ça, utilise plutôt "Réviser le contrat".</div>
+              <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>Disponible une fois ce contrat signé par les deux parties. Avant, utilise « Modifier le contrat », plus haut sur cette page.</div>
             </div>
           </div>
         )}
@@ -14134,6 +14459,249 @@ ${freelanceName}`;
   );
 }
 
+/* ══════════════════════════════════════════════════════════ PHOTOS ET FICHIERS (version 224) ══ */
+// Photo réduite avant l'envoi : 1 568 px au plus sur le grand côté (au-delà, l'IA la réduit elle-même),
+// JPEG qualité 0,85. Une photo en pleine définition d'un téléphone récent pouvait dépasser la limite d'envoi
+// du serveur (4,5 Mo) : la lecture du document échouait alors.
+const IMAGE_MAX_EDGE = 1568;
+const drawToJpegBase64 = (source, srcW, srcH, { maxEdge = IMAGE_MAX_EDGE, quality = 0.85 } = {}) => new Promise((resolve, reject) => {
+  try {
+    const scale = Math.min(1, maxEdge / Math.max(srcW || 1, srcH || 1));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round((srcW || 1) * scale));
+    canvas.height = Math.max(1, Math.round((srcH || 1) * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height); // fond blanc pour les images transparentes
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) { reject(new Error("image")); return; }
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve(String(ev.target.result).split(",")[1] || "");
+      reader.onerror = () => reject(new Error("image"));
+      reader.readAsDataURL(blob);
+    }, "image/jpeg", quality);
+  } catch (e) { reject(e); }
+});
+const imageFileToJpegBase64 = (file) => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    drawToJpegBase64(img, img.naturalWidth, img.naturalHeight)
+      .then(resolve, reject)
+      .finally(() => URL.revokeObjectURL(url));
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image")); };
+  img.src = url;
+});
+const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = (ev) => resolve(String(ev.target.result).split(",")[1] || "");
+  reader.onerror = () => reject(new Error("lecture"));
+  reader.readAsDataURL(file);
+});
+
+// Texte d'un fichier Word (.docx), lu dans le navigateur sans bibliothèque. Un .docx est une archive ZIP qui
+// contient « word/document.xml » : le texte est dans les balises <w:t>, un paragraphe par <w:p>.
+const docxXmlToText = (xml) => String(xml || "")
+  .replace(/<w:(?:delText|instrText)\b[^>]*>[\s\S]*?<\/w:(?:delText|instrText)>/g, "")
+  .replace(/<w:tab\/>/g, "\t")
+  .replace(/<w:(?:br|cr)\b[^>]*\/>/g, "\n")
+  .replace(/<\/w:p>/g, "\n")
+  .replace(/<[^>]+>/g, "")
+  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+  .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+  .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+  .replace(/&amp;/g, "&")
+  .replace(/[ \t]+\n/g, "\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+const readDocxText = async (arrayBuffer) => {
+  const bytes = new Uint8Array(arrayBuffer);
+  const dv = new DataView(arrayBuffer);
+  let eocd = -1; // fin du répertoire de l'archive, cherchée depuis la fin
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("docx-zip");
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder("utf-8");
+  for (let n = 0; n < count && p + 46 <= bytes.length; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), commentLen = dv.getUint16(p + 32, true);
+    const localOff = dv.getUint32(p + 42, true);
+    const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    if (name === "word/document.xml") {
+      const start = localOff + 30 + dv.getUint16(localOff + 26, true) + dv.getUint16(localOff + 28, true);
+      const data = bytes.subarray(start, start + compSize);
+      if (method === 0) return docxXmlToText(dec.decode(data));
+      if (method !== 8 || typeof DecompressionStream === "undefined") throw new Error("docx-format");
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      return docxXmlToText(await new Response(stream).text());
+    }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  throw new Error("docx-document");
+};
+
+/* ══════════════════════════════════════════════════════════ ANALYSE DE CONTRAT (version 224) ══ */
+// Plus jamais de résultat d'exemple : soit l'analyse a vraiment marché et tout ce qui s'affiche vient du contrat
+// analysé, soit Freeley dit qu'elle a échoué. Avant, un échec (fichier Word ou texte envoyé comme un PDF, fichier
+// trop lourd, réponse illisible) affichait de faux résultats (article 6, article 4 à 60 jours, article 9) avec une
+// note « 6/10 », un résumé, une clause corrective et un message de négociation écrits en dur.
+const SCAN_MAX_PAGES = 6;                     // photos par analyse
+const SCAN_MAX_FILE_BYTES = 3 * 1024 * 1024;  // PDF : le serveur refuse les envois de plus de 4,5 Mo (+33 % une fois encodé)
+const SCAN_MAX_TEXT_CHARS = 150000;           // texte d'un fichier Word ou .txt
+const SCAN_MAX_BODY_CHARS = 4200000;          // garde-fou sur la taille totale de l'envoi
+
+const scanFileKind = (file) => {
+  const name = String(file?.name || "").toLowerCase(), type = String(file?.type || "").toLowerCase();
+  if (type === "application/pdf" || name.endsWith(".pdf")) return "pdf";
+  if (name.endsWith(".docx") || type.includes("wordprocessingml")) return "docx";
+  if (name.endsWith(".doc") || type === "application/msword") return "doc";
+  if (type.startsWith("text/") || name.endsWith(".txt")) return "txt";
+  if (type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif)$/.test(name)) return "image";
+  return "other";
+};
+
+const buildScanPrompt = (kind) => `Tu analyses un contrat reçu par un freelance français, de son point de vue à lui (le prestataire), avant qu'il ne le signe. Le contrat est fourni ${kind === "images" ? "en photos, une photo par page, dans l'ordre" : kind === "pdf" ? "en PDF" : "en texte, à la fin de ce message"}.
+
+Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après et sans balises markdown, de cette forme :
+{"lisible": true, "client": "", "mission": "", "montant": "", "acompte": "", "dates": "", "points": [{"niveau": "danger", "article": "", "explication": "", "clause_proposee": "", "message_client": ""}]}
+
+Contenu attendu :
+- "lisible" : false si le document n'est pas un contrat ou s'il est illisible ; "points" est alors une liste vide.
+- "client", "mission", "montant", "acompte", "dates" : tels qu'écrits dans le contrat (le client du freelance, l'objet de la mission en quelques mots, le montant total, l'acompte, les dates ou la durée). Chaîne vide si l'information n'y figure pas.
+- "points" : de 3 à 8 points, les plus importants d'abord (dangers, puis points à négocier, puis points conformes). Pour chaque point :
+  - "niveau" : "danger" pour une clause qui expose gravement le freelance (paiement très tardif ou sans date, cession des droits avant paiement, responsabilité illimitée, pénalités excessives contre lui, résiliation sans aucune indemnité, exclusivité ou non-concurrence abusive…), "a_negocier" pour une clause défavorable mais courante, à renégocier, ou "conforme" pour une clause équilibrée ou protectrice pour le freelance ;
+  - "article" : le numéro et le titre de la clause tels qu'écrits dans le contrat (par exemple « Article 4 — Paiement »). Pour une protection absente du contrat (pas de pénalités de retard, pas d'acompte, nombre de modifications illimité…), écris « Clause absente : » suivi de son sujet ;
+  - "explication" : 2 ou 3 phrases simples, qui disent ce que prévoit le contrat et pourquoi c'est un risque, un point à négocier ou un bon point pour le freelance ;
+  - "clause_proposee" : pour un danger seulement, la clause à proposer au client à la place, rédigée en français juridique et prête à copier ; sinon une chaîne vide ;
+  - "message_client" : pour un point à négocier seulement, un court message poli au client (3 à 5 phrases, au vouvoiement) pour demander ce changement ; sinon une chaîne vide.
+
+Règles :
+- Appuie-toi uniquement sur le contrat fourni : ne cite aucune clause, aucun chiffre et aucun numéro d'article qui n'y figure pas.
+- Ne cite un article de loi que si tu es certain de son numéro.
+- Écris en français, sans jargon inutile.`;
+
+const scanLevel = (v) => {
+  const s = String(v || "").toLowerCase();
+  if (/danger|risqu/.test(s)) return "danger";
+  if (/n[ée]goci|warning|attention/.test(s)) return "warning";
+  if (/conforme|^ok$|positi|favorable/.test(s)) return "ok";
+  return null;
+};
+// Lit la réponse de l'IA. Lève une erreur si elle n'est pas un objet JSON exploitable.
+const parseScanResponse = (txt) => {
+  const clean = String(txt || "").replace(/```json|```/g, "").trim();
+  const m = clean.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("scan-json");
+  const raw = JSON.parse(m[0]);
+  const s = (v) => String(v ?? "").trim();
+  const list = Array.isArray(raw.points) ? raw.points : Array.isArray(raw.findings) ? raw.findings : [];
+  const order = { danger: 0, warning: 1, ok: 2 };
+  const findings = list.map(p => {
+    const level = scanLevel(p?.niveau ?? p?.level);
+    const fix = level === "danger" ? s(p?.clause_proposee ?? p?.fix) : level === "warning" ? s(p?.message_client ?? p?.fix) : "";
+    return { level, article: s(p?.article), text: s(p?.explication ?? p?.text), fix };
+  }).filter(f => f.level && f.text).slice(0, 8).sort((a, b) => order[a.level] - order[b.level]);
+  return {
+    readable: raw.lisible !== false && findings.length > 0,
+    findings,
+    extracted: { client: s(raw.client), mission: s(raw.mission), montant: s(raw.montant), acompte: s(raw.acompte), dates: s(raw.dates) },
+  };
+};
+
+const scanCounts = (findings) => ({
+  danger: (findings || []).filter(f => f.level === "danger").length,
+  warning: (findings || []).filter(f => f.level === "warning").length,
+  ok: (findings || []).filter(f => f.level === "ok").length,
+});
+// Note indicative, calculée à partir des points trouvés (jamais écrite en dur) : un danger la limite à 5 sur 10.
+const scanScore = (findings) => {
+  const c = scanCounts(findings);
+  if (c.danger > 0) return Math.max(1, Math.min(5, 8 - 2 * c.danger - c.warning));
+  if (c.warning > 0) return Math.max(5, 9 - c.warning);
+  return 9;
+};
+const scanVerdict = (findings) => {
+  const c = scanCounts(findings);
+  if (c.danger > 0) return { tone: "danger", title: "Contrat risqué — à renégocier avant de signer" };
+  if (c.warning > 0) return { tone: "warning", title: "Quelques points à négocier avant de signer" };
+  return { tone: "ok", title: "Rien d'alarmant dans les points analysés" };
+};
+const scanPlural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+const scanSummaryText = (findings) => {
+  const c = scanCounts(findings);
+  return [
+    c.danger && scanPlural(c.danger, "clause dangereuse", "clauses dangereuses"),
+    c.warning && scanPlural(c.warning, "point à négocier", "points à négocier"),
+    c.ok && scanPlural(c.ok, "point conforme", "points conformes"),
+  ].filter(Boolean).join(" · ");
+};
+const SCAN_TONES = {
+  danger:  { color:"#DC2626", bg:"#FEF2F2", border:"#FECACA", dot:"#EF4444", label:"DANGER",     labelBg:"#FEE2E2", labelColor:"#991B1B" },
+  warning: { color:"#D97706", bg:"#FFFBEB", border:"#FDE68A", dot:"#F59E0B", label:"À NÉGOCIER", labelBg:"#FEF3C7", labelColor:"#92400E" },
+  ok:      { color:"#16A34A", bg:"#F0FDF4", border:"#BBF7D0", dot:"#22C55E", label:"CONFORME",   labelBg:"#DCFCE7", labelColor:"#166534" },
+};
+
+// Rapport PDF d'une analyse (fenêtre du scanner et page « Mes analyses de contrats ») : note, résumé, points,
+// et pour chaque point la clause à proposer ou le message pour le client.
+const downloadScanReport = (findings, { label = "" } = {}) => {
+  if (!findings || !findings.length) { alert("Aucun résultat à télécharger."); return; }
+  if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  doc.setProperties({ title: "Rapport d'analyse de contrat", creator: `Freeley ${APP_VERSION}` });
+  const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR, BOTTOM = 280;
+  const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80];
+  const COLORS = { danger: [200, 60, 60], warning: [200, 150, 40], ok: [39, 119, 63] };
+  const LABELS = { danger: "DANGER", warning: "À NÉGOCIER", ok: "CONFORME" };
+  const today = new Date().toLocaleDateString("fr-FR");
+  let y = 20;
+  const ensure = (h) => { if (y + h > BOTTOM) { doc.addPage(); y = 20; } };
+  const para = (text, { size = 9.5, style = "normal", color = [80, 80, 80], indent = 0, lh = 4.6 } = {}) => {
+    doc.setFont("helvetica", style); doc.setFontSize(size); doc.setTextColor(...color);
+    doc.splitTextToSize(String(text || ""), cw - indent).forEach(line => { ensure(lh); doc.text(line, ML + indent, y); y += lh; });
+  };
+
+  doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 32, "F");
+  doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 32, PW, 32);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(255, 255, 255);
+  doc.text("Rapport d'analyse de contrat", ML, 16);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200, 215, 235);
+  doc.text(`${label ? `${label} — ` : ""}généré le ${today} via Freeley — analyse indicative`, ML, 24);
+  y = 44;
+  para(`Note indicative : ${scanScore(findings)}/10 — ${scanVerdict(findings).title}`, { size: 11, style: "bold", color: DARK, lh: 5.5 });
+  para(scanSummaryText(findings), { size: 9.5, color: [100, 100, 100] });
+  y += 6;
+
+  findings.forEach((f, i) => {
+    const color = COLORS[f.level] || COLORS.ok;
+    ensure(16);
+    doc.setFillColor(...color); doc.roundedRect(ML, y - 4, 28, 6, 1, 1, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(255, 255, 255);
+    doc.text(LABELS[f.level] || "POINT", ML + 14, y, { align: "center" });
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...DARK);
+    const titleLines = doc.splitTextToSize(f.article || `Point ${i + 1}`, cw - 32);
+    titleLines.forEach((line, k) => { if (k > 0) { y += 5; ensure(5); } doc.text(line, ML + 32, y + 0.5); });
+    y += 7;
+    para(f.text);
+    if (f.fix) {
+      y += 1.5;
+      para(f.level === "danger" ? "Clause à proposer :" : "Message pour le client :", { size: 9, style: "bold", color: DARK });
+      para(f.fix, { size: 9, style: "italic", color: [90, 90, 90], indent: 4 });
+    }
+    y += 6;
+  });
+  ensure(12);
+  para("Analyse indicative, réalisée automatiquement. Pour un contrat à fort enjeu, consulte un juriste.", { size: 8.5, style: "italic", color: [120, 120, 120] });
+  doc.save(`Analyse_Contrat_Freeley_${Date.now()}.pdf`);
+};
+
 /* ══════════════════════════════════════════ SCANNER MODAL ══ */
 function CameraCapture({ onCapture, onClose }) {
   const videoRef = useRef(null);
@@ -14185,21 +14753,13 @@ function CameraCapture({ onCapture, onClose }) {
     setCapturing(true);
     // Petit délai pour laisser l'autofocus se stabiliser avant la capture
     setTimeout(() => {
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => {
-        if (!blob) { setCapturing(false); return; }
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const base64 = ev.target.result.split(",")[1];
+      // Version 224 : photo réduite avant l'envoi (1 568 px au plus sur le grand côté, JPEG 0,85)
+      drawToJpegBase64(video, video.videoWidth, video.videoHeight)
+        .then((base64) => {
           if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
           onCapture({ base64, type: "image/jpeg", name: `Photo_Scan_${Date.now()}.jpg` });
-        };
-        reader.readAsDataURL(blob);
-      }, "image/jpeg", 0.95);
+        })
+        .catch(() => setCapturing(false));
     }, 600);
   };
 
@@ -14257,223 +14817,163 @@ function CameraCapture({ onCapture, onClose }) {
 
 function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved }) {
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
-  const [phase, setPhase]       = useState(initialResults ? "result" : "upload");   // "upload" | "loading" | "result"
-
-  const [fileName, setFileName] = useState("");
+  const [phase, setPhase] = useState(initialResults?.aiFindings?.length ? "result" : "upload"); // upload | loading | error | result
+  // Document à analyser : { kind: "pdf", name, data } | { kind: "text", name, text } | { kind: "images", pages: [base64] }
+  const [scanDoc, setScanDoc] = useState(null);
+  const [preparing, setPreparing] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
   const [progress, setProgress] = useState(0);
   const [animFrame, setAnimFrame] = useState(0);
-  const [showClause, setShowClause]   = useState(false);
-  const [showEmail, setShowEmail]     = useState(false);
-  const [copiedClause, setCopiedClause] = useState(false);
-  const [copiedEmail, setCopiedEmail]   = useState(false);
+  const [openFix, setOpenFix] = useState({});
+  const [copiedFix, setCopiedFix] = useState(null);
   const [showPhotoTooltip, setShowPhotoTooltip] = useState(false);
-  const [photoScanning, setPhotoScanning] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [aiFindings, setAiFindings] = useState(initialResults?.aiFindings || null);
+  const [extracted, setExtracted] = useState(initialResults?.extractedData || null);
+  const progressTimer = useRef(null);
+  useEffect(() => () => { if (progressTimer.current) clearInterval(progressTimer.current); }, []);
 
   // ── Permission fichier style iOS ──
   const [filePermission, setFilePermission] = useState("prompt"); // "prompt" | "granted" | "denied"
   const [showFilePermModal, setShowFilePermModal] = useState(false);
   const fileInputRef = useRef(null);
-
   const requestFilePermission = () => {
-    if (filePermission === "granted") {
-      fileInputRef.current?.click();
-    } else {
-      setShowFilePermModal(true);
+    if (filePermission === "granted") fileInputRef.current?.click();
+    else setShowFilePermModal(true);
+  };
+
+  const addPhotoPage = (base64) => setScanDoc(d => {
+    const pages = d && d.kind === "images" ? d.pages : [];
+    if (!base64 || pages.length >= SCAN_MAX_PAGES) return d;
+    return { kind: "images", name: "", pages: [...pages, base64] };
+  });
+  const removePage = (i) => setScanDoc(d => {
+    const pages = (d?.pages || []).filter((_, k) => k !== i);
+    return pages.length ? { ...d, pages } : null;
+  });
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setUploadError("");
+    const kind = scanFileKind(file);
+    if (kind === "doc") { setUploadError("Les anciens fichiers Word (.doc) ne sont pas pris en charge. Enregistre-le en .docx ou en PDF depuis Word, puis réessaie."); return; }
+    if (kind === "other") { setUploadError("Ce type de fichier n'est pas pris en charge. Choisis un PDF, un fichier Word (.docx), un fichier texte (.txt) ou des photos."); return; }
+    setPreparing(true);
+    try {
+      if (kind === "pdf") {
+        if (file.size > SCAN_MAX_FILE_BYTES) {
+          setUploadError(`Ce PDF est trop lourd (${(file.size / 1048576).toFixed(1).replace(".", ",")} Mo). La limite est de 3 Mo. Enregistre-le dans une version plus légère, ou prends les pages en photo.`);
+          return;
+        }
+        setScanDoc({ kind: "pdf", name: file.name, data: await fileToBase64(file) });
+      } else if (kind === "docx") {
+        let text = "";
+        try { text = await readDocxText(await file.arrayBuffer()); } catch (e) { text = ""; }
+        if (!text.trim()) { setUploadError("Ce fichier Word n'a pas pu être lu. Enregistre-le en PDF depuis Word, puis réessaie."); return; }
+        setScanDoc({ kind: "text", name: file.name, text: text.slice(0, SCAN_MAX_TEXT_CHARS) });
+      } else if (kind === "txt") {
+        const text = String(await file.text()).trim();
+        if (!text) { setUploadError("Ce fichier texte est vide."); return; }
+        setScanDoc({ kind: "text", name: file.name, text: text.slice(0, SCAN_MAX_TEXT_CHARS) });
+      } else {
+        addPhotoPage(await imageFileToJpegBase64(file));
+      }
+    } catch (e) {
+      setUploadError("Ce fichier n'a pas pu être lu. Réessaie, ou choisis un autre format.");
+    } finally {
+      setPreparing(false);
     }
   };
-
-  const [fileData, setFileData] = useState(null);
-  const [fileType, setFileType] = useState(null);
-
+  const handleFiles = async (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    if (list.length > 1 && list.every(f => scanFileKind(f) === "image")) {
+      for (const f of list.slice(0, SCAN_MAX_PAGES)) await handleFile(f);
+      return;
+    }
+    await handleFile(list[0]);
+  };
   const handleFileSelected = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    setFileType(file.type);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const base64 = ev.target.result.split(",")[1];
-      setFileData(base64);
-    };
-    reader.readAsDataURL(file);
+    const files = Array.from(e.target.files || []);
     e.target.value = "";
-  };
-
-  const clauseText = "Les droits d'exploitation ne seront transférés au Client qu'à compter du paiement intégral des honoraires dus par le Client.";
-  const emailText  = "Bonjour, concernant l'article 4, étant en micro-entreprise, un délai de 60 jours est difficile pour ma trésorerie. Serait-il possible de passer sur un délai de 30 jours net à réception de facture ?";
-
-  const handleCopy = (text, setter) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setter(true);
-      setTimeout(() => setter(false), 2000);
-    });
-  };
-
-  const loadingMessages = [
-    "Lecture du document PDF…",
-    "Analyse des clauses…",
-    "Analyse de conformité & règles de projet…",
-    "Génération du rapport…",
-  ];
-
-  const handleFakeFile = () => {
-    requestFilePermission();
+    handleFiles(files);
   };
 
   const [showRealCamera, setShowRealCamera] = useState(false);
-
   const handlePhotoScan = () => {
     const doScan = () => setShowRealCamera(true);
-    if (onRequestCamera) {
-      onRequestCamera(doScan, "scanner");
-    } else {
-      doScan();
+    if (onRequestCamera) onRequestCamera(doScan, "scanner");
+    else doScan();
+  };
+  const handleCameraCapture = ({ base64 }) => {
+    setShowRealCamera(false);
+    setUploadError("");
+    addPhotoPage(base64);
+  };
+
+  const loadingMessages = ["Lecture du document…", "Repérage des clauses…", "Analyse des risques pour toi…", "Rédaction des conseils…"];
+
+  const handleAnalyse = async () => {
+    if (!scanDoc || preparing) return;
+    setPhase("loading"); setProgress(0); setAnimFrame(0); setErrorMsg(""); setOpenFix({});
+    let current = 0;
+    const total = 30000, tick = 200;
+    if (progressTimer.current) clearInterval(progressTimer.current);
+    progressTimer.current = setInterval(() => {
+      current += tick;
+      setProgress(Math.min(92, Math.round((current / total) * 92)));
+      setAnimFrame(Math.min(loadingMessages.length - 1, Math.floor((current / total) * loadingMessages.length)));
+    }, tick);
+    const stop = () => { if (progressTimer.current) { clearInterval(progressTimer.current); progressTimer.current = null; } };
+    const fail = (msg) => { stop(); setErrorMsg(msg); setPhase("error"); };
+    try {
+      const prompt = buildScanPrompt(scanDoc.kind);
+      const content = scanDoc.kind === "pdf"
+        ? [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: scanDoc.data } }, { type: "text", text: prompt }]
+        : scanDoc.kind === "images"
+          ? [...scanDoc.pages.map(p => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: p } })), { type: "text", text: prompt }]
+          : [{ type: "text", text: `${prompt}\n\nTEXTE DU CONTRAT :\n"""\n${scanDoc.text}\n"""` }];
+      const body = JSON.stringify({ model: "claude-sonnet-5-5", thinking: { type: "between_tools" }, max_tokens: 4000, messages: [{ role: "user", content }] });
+      if (body.length > SCAN_MAX_BODY_CHARS) return fail("Ce document est trop lourd pour être envoyé. Enregistre-le dans une version plus légère, ou prends moins de pages en photo.");
+      const res = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      if (!res.ok) return fail(res.status === 413
+        ? "Ce document est trop lourd pour être envoyé. Enregistre-le dans une version plus légère, ou prends les pages en photo."
+        : "L'analyse n'a pas pu se faire : le service ne répond pas pour le moment. Réessaie dans un instant.");
+      const data = await res.json();
+      const txt = (data.content || []).map(i => i.text || "").join("").trim();
+      let parsed;
+      try { parsed = parseScanResponse(txt); } catch (e) { return fail("La réponse de l'analyse est incomplète. Réessaie."); }
+      if (!parsed.readable) return fail("Le document n'a pas pu être analysé : il n'a pas l'air d'être un contrat, ou le texte est illisible. Essaie avec un PDF, ou avec des photos plus nettes et bien éclairées.");
+      stop();
+      setProgress(100);
+      setAiFindings(parsed.findings);
+      setExtracted(parsed.extracted);
+      try {
+        const entry = { aiFindings: parsed.findings, extractedData: parsed.extracted, date: new Date().toLocaleDateString("fr-FR") };
+        const existing = JSON.parse(localStorage.getItem("freeley_scan_list") || "[]");
+        existing.unshift(entry);
+        localStorage.setItem("freeley_scan_list", JSON.stringify(existing.slice(0, 10)));
+        localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings: parsed.findings, extractedData: parsed.extracted }));
+        if (onScanSaved) onScanSaved();
+      } catch (e) { /* stockage plein ou bloqué : l'analyse reste affichée */ }
+      setTimeout(() => setPhase("result"), 300);
+    } catch (e) {
+      fail("L'analyse n'a pas pu se faire. Vérifie ta connexion, puis réessaie.");
     }
   };
 
-  const handleCameraCapture = ({ base64, type, name }) => {
-    setShowRealCamera(false);
-    setPhotoScanning(false);
-    setFileName(name);
-    setFileType(type);
-    setFileData(base64);
+  const copyFix = (i, text) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedFix(i);
+      setTimeout(() => setCopiedFix(null), 2000);
+    }).catch(() => {});
   };
 
-  const [aiFindings, setAiFindings] = useState(initialResults?.aiFindings || null);
-
-  const handleAnalyse = async () => {
-    if (!fileName || !fileData) return;
-    setPhase("loading");
-    setProgress(0); setAnimFrame(0);
-    let current = 0; const total = 8000; const tick = 100;
-    const interval = setInterval(() => {
-      current += tick;
-      setProgress(Math.min(90, Math.round((current/total)*90)));
-      setAnimFrame(Math.min(loadingMessages.length-1, Math.floor((current/total)*loadingMessages.length)));
-    }, tick);
-    try {
-      const mt = fileType && fileType.includes("pdf") ? "application/pdf" : (fileType || "image/jpeg");
-      const isImg = mt.startsWith("image/");
-      const src = isImg ? {type:"image",source:{type:"base64",media_type:mt,data:fileData}} : {type:"document",source:{type:"base64",media_type:"application/pdf",data:fileData}};
-      const res = await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-5-5", thinking:{ type:"between_tools" },max_tokens:1500,messages:[{role:"user",content:[src,{type:"text",text:"Analyse ce contrat en francais. Identifie clauses dangereuses, a negocier et positives. JSON: {findings:[{level:danger|warning|ok,article:nom,text:explication}]} Max 6."}]}]})})
-      const data = await res.json();
-      const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
-      const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
-      const findings = parsed.findings||[];
-      setAiFindings(findings);
-      const existing = JSON.parse(localStorage.getItem("freeley_scan_list") || "[]");
-      existing.unshift({ aiFindings: findings, extractedData: null, date: new Date().toLocaleDateString("fr-FR") });
-      localStorage.setItem("freeley_scan_list", JSON.stringify(existing.slice(0, 10)));
-      localStorage.setItem("freeley_scan_results", JSON.stringify({ aiFindings: findings, extractedData: null }));
-      if (onScanSaved) onScanSaved();
-    } catch(e) { setAiFindings(null); }
-    clearInterval(interval); setProgress(100);
-    await handleExtraction();
-    setTimeout(()=>setPhase("result"),300);
-  };
-
-  const handleExtraction = async () => {
-    if (!fileData) return;
-    try {
-      const mt = fileType && fileType.includes("pdf") ? "application/pdf" : (fileType || "image/jpeg");
-      const isImg = mt.startsWith("image/");
-      const src = isImg ? {type:"image",source:{type:"base64",media_type:mt,data:fileData}} : {type:"document",source:{type:"base64",media_type:"application/pdf",data:fileData}};
-      const res = await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-5-5", thinking:{ type:"between_tools" },max_tokens:800,messages:[{role:"user",content:[src,{type:"text",text:"Extrait les infos cles de ce contrat. Reponds UNIQUEMENT en JSON: {client:string,mission:string,montant:string,acompte:string,dates:string}"}]}]})});
-      const data = await res.json();
-      const txt = (data.content||[]).map(i=>i.text||"").join("").trim();
-      const parsed = JSON.parse(txt.replace(/```json|```/g,"").trim());
-      const existingRes = JSON.parse(localStorage.getItem("freeley_scan_results") || "{}");
-      const updatedRes = { ...existingRes, extractedData: parsed };
-      localStorage.setItem("freeley_scan_results", JSON.stringify(updatedRes));
-      const scanList = JSON.parse(localStorage.getItem("freeley_scan_list") || "[]");
-      if (scanList.length > 0) { scanList[0] = updatedRes; localStorage.setItem("freeley_scan_list", JSON.stringify(scanList)); }
-    } catch(e) { /* extraction secondaire optionnelle : on garde l'analyse de risques déjà obtenue */ }
-  };
-
-  const findings = [
-    {
-      level: "danger",
-      color: "#DC2626",
-      bg: "#FEF2F2",
-      border: "#FECACA",
-      dot: "#EF4444",
-      label: "DANGER",
-      labelBg: "#FEE2E2",
-      labelColor: "#991B1B",
-      icon: "🔴",
-      article: "Article 6 — Propriété Intellectuelle",
-      text: "Le client s'approprie vos droits avant le paiement complet. Toute cession de droits doit être conditionnée au règlement intégral de la prestation.",
-    },
-    {
-      level: "warning",
-      color: "#D97706",
-      bg: "#FFFBEB",
-      border: "#FDE68A",
-      dot: "#F59E0B",
-      label: "À NÉGOCIER",
-      labelBg: "#FEF3C7",
-      labelColor: "#92400E",
-      icon: "🟡",
-      article: "Article 4 — Rémunération",
-      text: "Le délai de paiement est fixé à 60 jours. Essayez d'obtenir 30 jours net — c'est le délai standard en France pour les prestations B2B (art. L441-10 C.com.).",
-    },
-    {
-      level: "ok",
-      color: "#16A34A",
-      bg: "#F0FDF4",
-      border: "#BBF7D0",
-      dot: "#22C55E",
-      label: "CONFORME",
-      labelBg: "#DCFCE7",
-      labelColor: "#166534",
-      icon: "🟢",
-      article: "Article 9 — Résiliation",
-      text: "La clause est parfaitement équitable pour les deux parties. Un préavis de 15 jours est prévu de chaque côté, sans pénalité en cas de résiliation à l'amiable.",
-    },
-  ];
-
-  const scoreColor  = "#D97706";
-  const scoreBg     = "#FFFBEB";
-  const scoreBorder = "#FDE68A";
-
-  const downloadScanPDF = (overrideFindings) => {
-    const findings = overrideFindings || aiFindings;
-    if (!findings || !findings.length) { alert("Aucun résultat à télécharger."); return; }
-    if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-    const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80];
-    const DANGER = [200, 60, 60], WARN = [200, 150, 40], OK = [39, 119, 63];
-    const today = new Date().toLocaleDateString("fr-FR");
-    let y = 20;
-
-    doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 32, "F");
-    doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 32, PW, 32);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(255,255,255);
-    doc.text("Rapport d'analyse de contrat", ML, 16);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-    doc.text(`Généré le ${today} via Freeley — analyse automatique`, ML, 24);
-
-    y = 46;
-    findings.forEach((f, i) => {
-      if (y > 260) { doc.addPage(); y = 20; }
-      const color = f.level === "danger" ? DANGER : f.level === "warning" ? WARN : OK;
-      const label = f.level === "danger" ? "RISQUE" : f.level === "warning" ? "À NÉGOCIER" : "POSITIF";
-      doc.setFillColor(...color); doc.roundedRect(ML, y, 28, 6, 1, 1, "F");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(255,255,255);
-      doc.text(label, ML + 14, y + 4, { align: "center" });
-      doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...DARK);
-      doc.text(f.article || `Point ${i+1}`, ML + 32, y + 4.5);
-      y += 10;
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(80,80,80);
-      const lines = doc.splitTextToSize(f.text || "", cw);
-      doc.text(lines, ML, y);
-      y += lines.length * 4.6 + 8;
-    });
-
-    doc.save(`Analyse_Contrat_Freeley_${Date.now()}.pdf`);
-  };
+  const findings = aiFindings || [];
+  const verdict = scanVerdict(findings);
+  const vTone = SCAN_TONES[verdict.tone];
+  const ready = !!scanDoc && !preparing;
 
   return (
     <>
@@ -14487,7 +14987,8 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
     <input
       ref={fileInputRef}
       type="file"
-      accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+      multiple
+      accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,image/*"
       style={{ display:"none" }}
       onChange={handleFileSelected}
     />
@@ -14509,7 +15010,6 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
           animation:"cameraPopIn 0.32s cubic-bezier(.22,.68,0,1.2) both",
           fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
         }}>
-          {/* Icon + Titre + Texte */}
           <div style={{ padding:"24px 20px 20px", textAlign:"center" }}>
             <div style={{
               width:56, height:56, borderRadius:14,
@@ -14520,44 +15020,27 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
             }}>
               <span style={{ fontSize:28 }}>📁</span>
             </div>
-            <div style={{
-              fontSize:17, fontWeight:600, color:"#1C1C1E",
-              letterSpacing:"-0.02em", lineHeight:1.3, marginBottom:10,
-            }}>
+            <div style={{ fontSize:17, fontWeight:600, color:"#1C1C1E", letterSpacing:"-0.02em", lineHeight:1.3, marginBottom:10 }}>
               « Freeley » souhaite accéder à vos fichiers
             </div>
-            <div style={{
-              fontSize:13, color:"#48484A",
-              lineHeight:1.55, letterSpacing:"-0.01em",
-            }}>
-              Cette autorisation permet à l'application d'analyser votre contrat PDF ou Word afin d'en détecter les clauses et risques grâce à notre outil d'analyse.
+            <div style={{ fontSize:13, color:"#48484A", lineHeight:1.55, letterSpacing:"-0.01em" }}>
+              Cette autorisation permet à l'application d'analyser votre contrat (PDF, Word, texte ou photos) afin d'en détecter les clauses et risques grâce à notre outil d'analyse.
             </div>
           </div>
-
-          {/* Séparateur */}
           <div style={{ height:1, background:"#C6C6C8" }} />
-
-          {/* Boutons façon alerte iOS */}
           <div style={{ display:"flex" }}>
             <button
-              onClick={() => {
-                setShowFilePermModal(false);
-                setFilePermission("denied");
-              }}
+              onClick={() => { setShowFilePermModal(false); setFilePermission("denied"); }}
               style={{
-                flex:1, padding:"14px 10px",
-                background:"transparent", border:"none",
-                borderRight:"1px solid #C6C6C8",
-                cursor:"pointer",
+                flex:1, padding:"14px 10px", background:"transparent", border:"none",
+                borderRight:"1px solid #C6C6C8", cursor:"pointer",
                 fontSize:17, fontWeight:400, color:"#007AFF",
                 fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
                 letterSpacing:"-0.01em", transition:"background 0.12s",
               }}
               onMouseOver={e=>e.currentTarget.style.background="#E5E5EA"}
               onMouseOut={e=>e.currentTarget.style.background="transparent"}
-            >
-              Refuser
-            </button>
+            >Refuser</button>
             <button
               onClick={() => {
                 setFilePermission("granted");
@@ -14566,18 +15049,14 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 setTimeout(() => fileInputRef.current?.click(), 80);
               }}
               style={{
-                flex:1, padding:"14px 10px",
-                background:"transparent", border:"none",
-                cursor:"pointer",
+                flex:1, padding:"14px 10px", background:"transparent", border:"none", cursor:"pointer",
                 fontSize:17, fontWeight:600, color:"#007AFF",
                 fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
                 letterSpacing:"-0.01em", transition:"background 0.12s",
               }}
               onMouseOver={e=>e.currentTarget.style.background="#E5E5EA"}
               onMouseOut={e=>e.currentTarget.style.background="transparent"}
-            >
-              Autoriser
-            </button>
+            >Autoriser</button>
           </div>
         </div>
       </div>
@@ -14598,13 +15077,9 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
       }}>
 
         {/* ── Header ── */}
-        <div style={{
-          background:C.navy, padding:"20px 24px",
-          display:"flex", alignItems:"center", justifyContent:"space-between",
-        }}>
+        <div style={{ background:C.navy, padding:"20px 24px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ width:36, height:36, background:"#EFF6FF", borderRadius:8,
-              display:"flex", alignItems:"center", justifyContent:"center", fontSize:17 }}>🔍</div>
+            <div style={{ width:36, height:36, background:"#EFF6FF", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17 }}>🔍</div>
             <div>
               <div style={{ fontFamily:T.display, fontSize:17, color:C.white, fontWeight:600, display:"flex", alignItems:"center", gap:8 }}>
                 Scanner un contrat
@@ -14629,20 +15104,14 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                       boxShadow:"0 8px 24px #00000040",
                     }}>
                       <div style={{ fontFamily:T.body, fontSize:11.5, color:"#CBD5E1", lineHeight:1.65 }}>
-                        Pas de fichier PDF ? Prenez simplement en photo les pages d'un contrat papier ou d'un écran. Freeley se charge de numériser et d'analyser le texte automatiquement.
+                        Pas de fichier ? Prends en photo chaque page du contrat papier, dans l'ordre ({SCAN_MAX_PAGES} pages au maximum). Freeley lit le texte et l'analyse.
                       </div>
-                      <div
-                        onClick={() => setShowPhotoTooltip(false)}
-                        style={{
-                          position:"absolute", top:8, right:10,
-                          fontSize:12, color:"#8BA3C0", cursor:"pointer",
-                        }}
-                      >✕</div>
+                      <div onClick={() => setShowPhotoTooltip(false)} style={{ position:"absolute", top:8, right:10, fontSize:12, color:"#8BA3C0", cursor:"pointer" }}>✕</div>
                     </div>
                   )}
                 </div>
               </div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:1 }}>Analyse automatique · Vérification de conformité & points de négociation</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:1 }}>Analyse automatique · Clauses risquées & points de négociation</div>
             </div>
           </div>
           <button onClick={onClose} style={{
@@ -14658,94 +15127,111 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
           {phase === "upload" && (
             <>
               {/* Zone de dépôt */}
-              <div style={{
-                border:`2px dashed ${fileName ? "#86EFAC" : C.border}`,
-                borderRadius:12, padding:"36px 24px",
-                background: fileName ? "#F0FDF4" : C.creamD,
-                textAlign:"center", marginBottom:20,
-                transition:"all 0.2s",
-              }}>
-                {!fileName ? (
+              <div
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer?.files); }}
+                style={{
+                  border:`2px dashed ${scanDoc ? "#86EFAC" : dragOver ? C.navy : C.border}`,
+                  borderRadius:12, padding:"30px 20px",
+                  background: scanDoc ? "#F0FDF4" : C.creamD,
+                  textAlign:"center", marginBottom:16,
+                  transition:"all 0.2s",
+                }}
+              >
+                {preparing && !scanDoc ? (
                   <>
-                    <div style={{ fontSize:36, marginBottom:12 }}>{photoScanning ? "🧠" : "📄"}</div>
-                    {photoScanning ? (
-                      <>
-                        <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, marginBottom:6 }}>
-                          Numérisation et analyse des clauses...
+                    <div style={{ width:28, height:28, border:`3px solid ${C.border}`, borderTopColor:C.navy, borderRadius:"50%", margin:"6px auto 12px", animation:"spin 0.8s linear infinite" }} />
+                    <div style={{ fontFamily:T.body, fontSize:13, color:C.textM }}>Préparation du fichier…</div>
+                  </>
+                ) : !scanDoc ? (
+                  <>
+                    <div style={{ fontSize:36, marginBottom:12 }}>📄</div>
+                    <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, marginBottom:6 }}>
+                      Choisis le contrat à analyser
+                    </div>
+                    <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom:18, lineHeight:1.6 }}>
+                      PDF, Word (.docx), texte (.txt) ou photos<br/>PDF : 3 Mo au maximum
+                    </p>
+                    <button
+                      onClick={requestFilePermission}
+                      style={{
+                        padding:"11px 24px", background:C.navy, color:C.white,
+                        border:"none", borderRadius:8, cursor:"pointer", fontSize:13,
+                        fontFamily:T.body, fontWeight:600,
+                        display:"inline-flex", alignItems:"center", gap:8,
+                        boxShadow:"0 4px 14px #1B2E4B28", transition:"all 0.18s",
+                      }}
+                      onMouseOver={e=>{ e.currentTarget.style.background="#152438"; e.currentTarget.style.transform="translateY(-1px)"; }}
+                      onMouseOut={e=>{ e.currentTarget.style.background=C.navy; e.currentTarget.style.transform="translateY(0)"; }}
+                    >
+                      <span style={{ fontSize:15 }}>📁</span>
+                      Choisir un fichier
+                    </button>
+                    <div style={{ marginTop:14 }}>
+                      <button
+                        onClick={handlePhotoScan}
+                        style={{
+                          background:"none", border:"none", cursor:"pointer", fontFamily:T.body,
+                          fontSize:12, color:"#3B7DD8", display:"inline-flex", alignItems:"center", gap:5,
+                          padding:"4px 8px", borderRadius:6, transition:"background 0.15s",
+                        }}
+                        onMouseOver={e=>{ e.currentTarget.style.background="#EFF6FF"; }}
+                        onMouseOut={e=>{ e.currentTarget.style.background="none"; }}
+                      >
+                        📷 Prendre les pages en photo
+                      </button>
+                    </div>
+                  </>
+                ) : scanDoc.kind === "images" ? (
+                  <>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#15803D", marginBottom:10 }}>
+                      ✅ {scanDoc.pages.length === 1 ? "1 page photographiée" : `${scanDoc.pages.length} pages photographiées`}
+                    </div>
+                    <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginBottom:12 }}>
+                      {scanDoc.pages.map((p, i) => (
+                        <div key={i} style={{ position:"relative", textAlign:"center" }}>
+                          <img src={`data:image/jpeg;base64,${p}`} alt={`Page ${i + 1}`} style={{ width:54, height:70, objectFit:"cover", borderRadius:6, border:"1px solid #BBF7D0", display:"block" }} />
+                          <span onClick={() => removePage(i)} title="Retirer cette page" style={{ position:"absolute", top:-7, right:-7, width:18, height:18, borderRadius:"50%", background:C.white, border:`1px solid ${C.border}`, fontSize:10, lineHeight:"16px", color:C.textM, cursor:"pointer" }}>✕</span>
+                          <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>Page {i + 1}</div>
                         </div>
-                        <div style={{ fontFamily:T.body, fontSize:12, color:"#3B7DD8", animation:"shimmer 1.2s ease-in-out infinite" }}>
-                          🧠 Traitement des pages photographiées…
-                        </div>
-                      </>
+                      ))}
+                    </div>
+                    {scanDoc.pages.length < SCAN_MAX_PAGES ? (
+                      <button onClick={handlePhotoScan} disabled={preparing} style={{
+                        padding:"8px 16px", background:C.white, color:C.navy, border:`1.5px solid ${C.navy}`,
+                        borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:600,
+                      }}>📷 Ajouter une page</button>
                     ) : (
-                      <>
-                        <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, marginBottom:6 }}>
-                          Dépose ton contrat ici
-                        </div>
-                        <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom:18, lineHeight:1.6 }}>
-                          Formats acceptés : PDF, DOCX, TXT<br/>Taille max : 10 Mo
-                        </p>
-                        <button
-                          onClick={handleFakeFile}
-                          style={{
-                            padding:"11px 24px",
-                            background:C.navy, color:C.white,
-                            border:"none", borderRadius:8,
-                            cursor:"pointer", fontSize:13,
-                            fontFamily:T.body, fontWeight:600,
-                            display:"inline-flex", alignItems:"center", gap:8,
-                            boxShadow:"0 4px 14px #1B2E4B28",
-                            transition:"all 0.18s",
-                          }}
-                          onMouseOver={e=>{ e.currentTarget.style.background="#152438"; e.currentTarget.style.transform="translateY(-1px)"; }}
-                          onMouseOut={e=>{ e.currentTarget.style.background=C.navy; e.currentTarget.style.transform="translateY(0)"; }}
-                        >
-                          <span style={{ fontSize:15 }}>📁</span>
-                          Sélectionner un contrat PDF
-                        </button>
-                        <div style={{ marginTop:14 }}>
-                          <button
-                            onClick={handlePhotoScan}
-                            style={{
-                              background:"none", border:"none",
-                              cursor:"pointer", fontFamily:T.body,
-                              fontSize:12, color:"#3B7DD8",
-                              display:"inline-flex", alignItems:"center", gap:5,
-                              padding:"4px 8px", borderRadius:6,
-                              transition:"background 0.15s",
-                            }}
-                            onMouseOver={e=>{ e.currentTarget.style.background="#EFF6FF"; }}
-                            onMouseOut={e=>{ e.currentTarget.style.background="none"; }}
-                          >
-                            📷 Prendre une photo des pages
-                          </button>
-                        </div>
-                      </>
+                      <div style={{ fontFamily:T.body, fontSize:12, color:C.textM }}>{SCAN_MAX_PAGES} pages au maximum.</div>
                     )}
+                    <p style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, margin:"10px 0 0", lineHeight:1.5 }}>
+                      Prends toutes les pages du contrat, dans l'ordre.
+                    </p>
                   </>
                 ) : (
                   <>
                     <div style={{ fontSize:36, marginBottom:10 }}>✅</div>
-                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#15803D", marginBottom:4 }}>
-                      Fichier sélectionné
-                    </div>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#15803D", marginBottom:6 }}>Fichier prêt</div>
                     <div style={{
-                      display:"inline-flex", alignItems:"center", gap:8,
+                      display:"inline-flex", alignItems:"center", gap:8, maxWidth:"100%",
                       background:C.white, border:"1px solid #BBF7D0",
                       borderRadius:8, padding:"8px 16px",
-                      fontFamily:T.body, fontSize:13, color:C.navy,
+                      fontFamily:T.body, fontSize:13, color:C.navy, boxSizing:"border-box",
                     }}>
                       <span style={{ fontSize:16 }}>📄</span>
-                      {fileName}
-                      <span
-                        onClick={() => setFileName("")}
-                        style={{ fontSize:12, color:C.textL, cursor:"pointer", marginLeft:4 }}
-                        title="Retirer"
-                      >✕</span>
+                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{scanDoc.name}</span>
+                      <span onClick={() => setScanDoc(null)} style={{ fontSize:12, color:C.textL, cursor:"pointer", marginLeft:4 }} title="Retirer">✕</span>
                     </div>
                   </>
                 )}
               </div>
+
+              {uploadError && (
+                <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"10px 14px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.55 }}>
+                  {uploadError}
+                </div>
+              )}
 
               {/* Info banner */}
               <div style={{
@@ -14755,7 +15241,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 display:"flex", gap:8, alignItems:"flex-start",
               }}>
                 <span style={{ fontSize:14, flexShrink:0 }}>ℹ️</span>
-                <span>Chaque article est analysé pour détecter les anomalies, les oublis et les points de négociation commerciale avant signature.</span>
+                <span>Freeley lit le contrat et repère les clauses risquées, les points à négocier et les bons points, avant que tu signes. L'analyse reste indicative.</span>
               </div>
 
               {/* CTA */}
@@ -14766,20 +15252,20 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 }}>Annuler</button>
                 <button
                   onClick={handleAnalyse}
-                  disabled={!fileName}
+                  disabled={!ready}
                   style={{
                     flex:2, padding:"12px",
-                    background: fileName ? C.navy : C.creamDD,
-                    color: fileName ? C.white : C.textL,
+                    background: ready ? C.navy : C.creamDD,
+                    color: ready ? C.white : C.textL,
                     border:"none", borderRadius:8,
-                    cursor: fileName ? "pointer" : "not-allowed",
+                    cursor: ready ? "pointer" : "not-allowed",
                     fontSize:13, fontFamily:T.body, fontWeight:700,
                     display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                    boxShadow: fileName ? "0 4px 14px #1B2E4B28" : "none",
+                    boxShadow: ready ? "0 4px 14px #1B2E4B28" : "none",
                     transition:"all 0.18s",
                   }}
-                  onMouseOver={e=>{ if(fileName){ e.currentTarget.style.background="#152438"; }}}
-                  onMouseOut={e=>{ if(fileName){ e.currentTarget.style.background=C.navy; }}}
+                  onMouseOver={e=>{ if(ready){ e.currentTarget.style.background="#152438"; }}}
+                  onMouseOut={e=>{ if(ready){ e.currentTarget.style.background=C.navy; }}}
                 >
                   <span style={{ fontSize:15 }}>✦</span>
                   Lancer l'analyse
@@ -14791,319 +15277,158 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
           {/* ════════════ PHASE LOADING ════════════ */}
           {phase === "loading" && (
             <div style={{ textAlign:"center", padding:"20px 0 12px" }}>
-              {/* Animated icon */}
               <div style={{
                 width:64, height:64, borderRadius:16,
                 background:"#EFF6FF", margin:"0 auto 20px",
                 display:"flex", alignItems:"center", justifyContent:"center",
-                fontSize:28,
-                animation:"shimmer 1.2s ease-in-out infinite",
+                fontSize:28, animation:"shimmer 1.2s ease-in-out infinite",
               }}>🔍</div>
-
               <div style={{ fontFamily:T.display, fontSize:20, color:C.navy, fontWeight:600, marginBottom:6 }}>
                 Analyse en cours…
               </div>
-              <div style={{
-                fontFamily:T.body, fontSize:13, color:"#3B7DD8",
-                marginBottom:28, minHeight:20,
-                animation:"fadeUp 0.3s ease both",
-                key: animFrame,
-              }}>
+              <div key={animFrame} style={{ fontFamily:T.body, fontSize:13, color:"#3B7DD8", marginBottom:28, minHeight:20, animation:"fadeUp 0.3s ease both" }}>
                 {loadingMessages[animFrame]}
               </div>
-
-              {/* Progress bar */}
-              <div style={{
-                background:C.creamDD, borderRadius:8, height:10,
-                overflow:"hidden", marginBottom:10,
-              }}>
+              <div style={{ background:C.creamDD, borderRadius:8, height:10, overflow:"hidden", marginBottom:10 }}>
                 <div style={{
                   height:"100%", borderRadius:8,
                   background:`linear-gradient(90deg, ${C.navy}, #3B7DD8)`,
-                  width:`${progress}%`,
-                  transition:"width 0.1s linear",
+                  width:`${progress}%`, transition:"width 0.2s linear",
                   boxShadow:"0 0 8px #3B7DD840",
                 }} />
               </div>
               <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{progress}%</div>
-
-              {/* Articles animés */}
-              <div style={{ marginTop:24, display:"flex", flexDirection:"column", gap:6, textAlign:"left" }}>
-                {["Art. 1 — Objet", "Art. 4 — Rémunération", "Art. 6 — Propriété intellectuelle", "Art. 9 — Résiliation"].map((art, i) => {
-                  const articleProgress = (i + 1) * 25;
-                  const done = progress >= articleProgress;
-                  const active = progress >= articleProgress - 24 && progress < articleProgress;
-                  return (
-                    <div key={art} style={{
-                      display:"flex", alignItems:"center", gap:10,
-                      padding:"8px 12px",
-                      background: done ? "#F0FDF4" : active ? "#EFF6FF" : C.creamD,
-                      border:`1px solid ${done ? "#BBF7D0" : active ? "#BFDBFE" : C.borderL}`,
-                      borderRadius:7,
-                      opacity: progress >= articleProgress - 24 ? 1 : 0.35,
-                      transition:"all 0.4s ease",
-                    }}>
-                      <div style={{
-                        width:18, height:18, borderRadius:"50%", flexShrink:0,
-                        background: done ? "#16A34A" : active ? "#3B7DD8" : C.creamDD,
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        fontSize:8, color:C.white, fontWeight:700,
-                        transition:"background 0.3s",
-                      }}>
-                        {done ? "✓" : active ? (
-                          <span style={{ width:7, height:7, border:"1.5px solid white", borderTopColor:"transparent", borderRadius:"50%", display:"inline-block", animation:"spin 0.6s linear infinite" }}/>
-                        ) : i + 1}
-                      </div>
-                      <span style={{ fontFamily:T.body, fontSize:12, fontWeight:500, color: done ? "#15803D" : active ? "#1D4ED8" : C.textL }}>
-                        {art}
-                      </span>
-                      {done && <span style={{ fontFamily:T.body, fontSize:10, color:"#16A34A", marginLeft:"auto" }}>Analysé ✓</span>}
-                      {active && <span style={{ fontFamily:T.body, fontSize:10, color:"#3B7DD8", marginLeft:"auto", animation:"shimmer 1s ease-in-out infinite" }}>En cours…</span>}
-                    </div>
-                  );
-                })}
+              <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginTop:18, lineHeight:1.6 }}>
+                L'analyse prend en général entre 20 secondes et une minute. Garde cette fenêtre ouverte.
               </div>
             </div>
           )}
 
-          {/* ════════════ PHASE AUTH REQUIRED ════════════ */}
-          {phase === "auth-required" && (
-            <div style={{ padding:"40px 24px", textAlign:"center" }}>
-              <div style={{ fontSize:48, marginBottom:16 }}>🔒</div>
-              <h3 style={{ fontFamily:"Georgia, serif", fontSize:20, color:"#1B2E4B", marginBottom:8 }}>
-                Créez un compte pour voir le résultat
-              </h3>
-              <p style={{ fontFamily:"sans-serif", fontSize:13, color:"#8A8780", marginBottom:24, lineHeight:1.6 }}>
-                Votre contrat a été analysé. Créez un compte gratuit pour accéder au rapport complet.
+          {/* ════════════ PHASE ERREUR ════════════ */}
+          {phase === "error" && (
+            <div style={{ textAlign:"center", padding:"12px 4px 4px" }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>⚠️</div>
+              <div style={{ fontFamily:T.display, fontSize:19, color:C.navy, fontWeight:600, marginBottom:10 }}>L'analyse n'a pas marché</div>
+              <p style={{ fontFamily:T.body, fontSize:13.5, color:C.textM, lineHeight:1.6, margin:"0 0 10px" }}>{errorMsg}</p>
+              <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, lineHeight:1.6, margin:"0 0 22px" }}>
+                Aucun résultat n'est affiché : Freeley ne montre jamais un résultat qui ne vient pas de ton contrat.
               </p>
-              <button onClick={() => { onClose(); }} style={{
-                width:"100%", padding:"14px", background:"#1B2E4B", color:"white",
-                border:"none", borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer", marginBottom:10
-              }}>
-                Créer un compte gratuit
-              </button>
-              <button onClick={() => setPhase("upload")} style={{
-                width:"100%", padding:"12px", background:"none", color:"#8A8780",
-                border:"1.5px solid #D8D4CB", borderRadius:12, fontSize:13, cursor:"pointer"
-              }}>
-                Retour
-              </button>
+              <div style={{ display:"flex", gap:10 }}>
+                <button onClick={onClose} style={{
+                  flex:1, padding:"12px", background:C.creamD, border:`1px solid ${C.border}`,
+                  borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
+                }}>Fermer</button>
+                <button onClick={() => setPhase("upload")} style={{
+                  flex:2, padding:"12px", background:C.navy, color:C.white, border:"none",
+                  borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:700,
+                }}>Réessayer</button>
+              </div>
             </div>
           )}
 
           {/* ════════════ PHASE RESULT ════════════ */}
-          {phase === "result" && (
+          {phase === "result" && findings.length > 0 && (
             <>
-              {/* Score global */}
+              {/* Note et résumé, calculés à partir des points trouvés */}
               <div style={{
                 display:"flex", alignItems:"center", gap:16,
-                background:scoreBg, border:`1px solid ${scoreBorder}`,
-                borderRadius:12, padding:"16px 20px", marginBottom:20,
+                background:vTone.bg, border:`1px solid ${vTone.border}`,
+                borderRadius:12, padding:"16px 20px", marginBottom:extracted?.mission || extracted?.client ? 10 : 20,
               }}>
                 <div style={{
                   width:56, height:56, borderRadius:12, flexShrink:0,
-                  background:C.white, border:`2px solid ${scoreBorder}`,
+                  background:C.white, border:`2px solid ${vTone.border}`,
                   display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-                  boxShadow:"0 2px 8px #D9770620",
+                  boxShadow:"0 2px 8px #00000010",
                 }}>
-                  <div style={{ fontFamily:T.display, fontSize:22, fontWeight:700, color:scoreColor, lineHeight:1 }}>6</div>
-                  <div style={{ fontFamily:T.body, fontSize:8, color:scoreColor, fontWeight:600, letterSpacing:"0.05em" }}>/10</div>
+                  <div style={{ fontFamily:T.display, fontSize:22, fontWeight:700, color:vTone.color, lineHeight:1 }}>{scanScore(findings)}</div>
+                  <div style={{ fontFamily:T.body, fontSize:8, color:vTone.color, fontWeight:600, letterSpacing:"0.05em" }}>/10</div>
                 </div>
                 <div>
-                  <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, marginBottom:3 }}>
-                    Contrat risqué — révision recommandée
-                  </div>
-                  <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.5 }}>
-                    <strong>1 clause dangereuse</strong> détectée · 1 point à renégocier · 1 clause conforme
-                  </div>
+                  <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, marginBottom:3 }}>{verdict.title}</div>
+                  <div style={{ fontFamily:T.body, fontSize:12, color:vTone.labelColor, lineHeight:1.5, fontWeight:600 }}>{scanSummaryText(findings)}</div>
+                  <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:3 }}>Note indicative, calculée à partir des points trouvés.</div>
                 </div>
               </div>
+              {(extracted?.mission || extracted?.client) && (
+                <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:16, lineHeight:1.5 }}>
+                  Contrat analysé : {[extracted.mission, extracted.client && `client ${extracted.client}`].filter(Boolean).join(" · ")}
+                </div>
+              )}
 
-              {/* Findings */}
+              {/* Points trouvés */}
               <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-                {(aiFindings ? aiFindings.map(f => ({
-                  ...f,
-                  color: f.level === "danger" ? "#DC2626" : f.level === "warning" ? "#D97706" : "#16A34A",
-                  bg: f.level === "danger" ? "#FEF2F2" : f.level === "warning" ? "#FFFBEB" : "#F0FDF4",
-                  border: f.level === "danger" ? "#FECACA" : f.level === "warning" ? "#FDE68A" : "#BBF7D0",
-                  dot: f.level === "danger" ? "#EF4444" : f.level === "warning" ? "#F59E0B" : "#22C55E",
-                  label: f.level === "danger" ? "DANGER" : f.level === "warning" ? "A NEGOCIER" : "CONFORME",
-                  labelBg: f.level === "danger" ? "#FEE2E2" : f.level === "warning" ? "#FEF3C7" : "#DCFCE7",
-                  labelColor: f.level === "danger" ? "#991B1B" : f.level === "warning" ? "#92400E" : "#166534",
-                  icon: f.level === "danger" ? "🔴" : f.level === "warning" ? "🟡" : "🟢",
-                })) : findings).map((f, i) => (
-                  <div key={i} className="fade-up" style={{
-                    background:f.bg, border:`1.5px solid ${f.border}`,
-                    borderRadius:10, padding:"14px 16px",
-                    animation:`fadeUp 0.4s ${i * 0.1}s both cubic-bezier(.22,.68,0,1.2)`,
-                  }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-                      {/* Colored dot */}
-                      <div style={{
-                        width:10, height:10, borderRadius:"50%",
-                        background:f.dot, flexShrink:0,
-                        boxShadow:`0 0 0 3px ${f.dot}30`,
-                      }} />
-                      {/* Level badge */}
-                      <span style={{
-                        fontFamily:T.body, fontSize:9, fontWeight:700,
-                        letterSpacing:"0.1em", padding:"2px 8px",
-                        background:f.labelBg, color:f.labelColor,
-                        borderRadius:20,
-                      }}>{f.label}</span>
-                      {/* Article name */}
-                      <span style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:f.color }}>
-                        {f.article}
-                      </span>
-                    </div>
-                    <p style={{
-                      fontFamily:T.body, fontSize:12, color:C.textM,
-                      lineHeight:1.65, margin:0, paddingLeft:20,
+                {findings.map((f, i) => {
+                  const tone = SCAN_TONES[f.level] || SCAN_TONES.ok;
+                  const isOpen = !!openFix[i];
+                  const fixLabel = f.level === "danger" ? "💡 Voir la clause à proposer" : "✉️ Message de négociation pour le client";
+                  return (
+                    <div key={i} className="fade-up" style={{
+                      background:tone.bg, border:`1.5px solid ${tone.border}`,
+                      borderRadius:10, padding:"14px 16px",
+                      animation:`fadeUp 0.4s ${i * 0.08}s both cubic-bezier(.22,.68,0,1.2)`,
                     }}>
-                      {f.text}
-                    </p>
-
-                    {/* ── Solution 1 clic : DANGER → Clause corrective ── */}
-                    {f.level === "danger" && (
-                      <div style={{ marginTop:12, paddingLeft:20 }}>
-                        <button
-                          onClick={() => setShowClause(v => !v)}
-                          style={{
-                            display:"inline-flex", alignItems:"center", gap:6,
-                            padding:"6px 12px",
-                            background: showClause ? "#FEE2E2" : C.white,
-                            border:`1.5px solid #FECACA`,
-                            borderRadius:20, cursor:"pointer",
-                            fontFamily:T.body, fontSize:11, fontWeight:600,
-                            color:"#DC2626", transition:"all 0.18s",
-                          }}
-                          onMouseOver={e => e.currentTarget.style.background="#FEE2E2"}
-                          onMouseOut={e => e.currentTarget.style.background= showClause ? "#FEE2E2" : C.white}
-                        >
-                          💡 Voir la clause corrective
-                        </button>
-
-                        {showClause && (
-                          <div style={{
-                            marginTop:10,
-                            background:"#F3F4F6", border:"1.5px solid #E5E7EB",
-                            borderRadius:10, padding:"14px 14px 12px",
-                            animation:"fadeUp 0.25s ease both",
-                          }}>
-                            <p style={{
-                              fontFamily:T.body, fontSize:12, color:"#374151",
-                              lineHeight:1.65, margin:"0 0 10px", fontStyle:"italic",
-                            }}>
-                              « {clauseText} »
-                            </p>
-                            <button
-                              onClick={() => handleCopy(clauseText, setCopiedClause)}
-                              style={{
-                                display:"inline-flex", alignItems:"center", gap:6,
-                                padding:"7px 14px",
-                                background: copiedClause ? "#16A34A" : C.navy,
-                                color:C.white, border:"none",
-                                borderRadius:8, cursor:"pointer",
-                                fontFamily:T.body, fontSize:11, fontWeight:700,
-                                transition:"all 0.2s",
-                              }}
-                            >
-                              {copiedClause ? "✓ Copié !" : "📋 Copier"}
-                            </button>
-                          </div>
-                        )}
+                      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6, flexWrap:"wrap" }}>
+                        <div style={{ width:10, height:10, borderRadius:"50%", background:tone.dot, flexShrink:0, boxShadow:`0 0 0 3px ${tone.dot}30` }} />
+                        <span style={{ fontFamily:T.body, fontSize:9, fontWeight:700, letterSpacing:"0.1em", padding:"2px 8px", background:tone.labelBg, color:tone.labelColor, borderRadius:20 }}>{tone.label}</span>
+                        <span style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:tone.color }}>{f.article}</span>
                       </div>
-                    )}
-
-                    {/* ── Solution 1 clic : WARNING → Message de négociation ── */}
-                    {f.level === "warning" && (
-                      <div style={{ marginTop:12, paddingLeft:20 }}>
-                        <button
-                          onClick={() => setShowEmail(v => !v)}
-                          style={{
-                            display:"inline-flex", alignItems:"center", gap:6,
-                            padding:"6px 12px",
-                            background: showEmail ? "#FEF3C7" : C.white,
-                            border:`1.5px solid #FDE68A`,
-                            borderRadius:20, cursor:"pointer",
-                            fontFamily:T.body, fontSize:11, fontWeight:600,
-                            color:"#D97706", transition:"all 0.18s",
-                          }}
-                          onMouseOver={e => e.currentTarget.style.background="#FEF3C7"}
-                          onMouseOut={e => e.currentTarget.style.background= showEmail ? "#FEF3C7" : C.white}
-                        >
-                          ✉️ Message de négociation pour le client
-                        </button>
-
-                        {showEmail && (
-                          <div style={{
-                            marginTop:10,
-                            background:"#F3F4F6", border:"1.5px solid #E5E7EB",
-                            borderRadius:10, padding:"14px 14px 12px",
-                            animation:"fadeUp 0.25s ease both",
-                          }}>
-                            <p style={{
-                              fontFamily:T.body, fontSize:12, color:"#374151",
-                              lineHeight:1.65, margin:"0 0 10px", fontStyle:"italic",
-                            }}>
-                              « {emailText} »
-                            </p>
-                            <button
-                              onClick={() => handleCopy(emailText, setCopiedEmail)}
-                              style={{
-                                display:"inline-flex", alignItems:"center", gap:6,
-                                padding:"7px 14px",
-                                background: copiedEmail ? "#16A34A" : C.navy,
-                                color:C.white, border:"none",
-                                borderRadius:8, cursor:"pointer",
-                                fontFamily:T.body, fontSize:11, fontWeight:700,
-                                transition:"all 0.2s",
-                              }}
-                            >
-                              {copiedEmail ? "✓ Copié !" : "📋 Copier"}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                  </div>
-                ))}
+                      <p style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.65, margin:0, paddingLeft:20 }}>{f.text}</p>
+                      {f.fix && (f.level === "danger" || f.level === "warning") && (
+                        <div style={{ marginTop:12, paddingLeft:20 }}>
+                          <button
+                            onClick={() => setOpenFix(o => ({ ...o, [i]: !o[i] }))}
+                            style={{
+                              display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px",
+                              background: isOpen ? tone.labelBg : C.white, border:`1.5px solid ${tone.border}`,
+                              borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:600, color:tone.labelColor,
+                            }}
+                          >{fixLabel}</button>
+                          {isOpen && (
+                            <div style={{ marginTop:10, background:"#F3F4F6", border:"1.5px solid #E5E7EB", borderRadius:8, padding:"12px 14px", animation:"fadeUp 0.25s ease both" }}>
+                              <p style={{ fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.65, margin:"0 0 10px", fontStyle:"italic", whiteSpace:"pre-wrap" }}>« {f.fix} »</p>
+                              <button
+                                onClick={() => copyFix(i, f.fix)}
+                                style={{
+                                  display:"inline-flex", alignItems:"center", gap:6, padding:"7px 14px",
+                                  background: copiedFix === i ? "#16A34A" : C.navy, color:C.white, border:"none",
+                                  borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:600, transition:"background 0.2s",
+                                }}
+                              >{copiedFix === i ? "✓ Copié !" : "📋 Copier"}</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* Bouton télécharger PDF du rapport de scan */}
               <button
-                onClick={() => downloadScanPDF()}
+                onClick={() => downloadScanReport(findings, { label: extracted?.mission || "" })}
                 style={{
                   width:"100%", padding:"12px 16px", marginBottom:20,
-                  background:C.gold, color:C.navyD, border:"none",
-                  borderRadius:10, cursor:"pointer",
-                  fontFamily:T.body, fontSize:13, fontWeight:700,
+                  background:C.gold, color:C.navyD, border:"none", borderRadius:8,
+                  cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:700,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:8,
                 }}
               >⬇ Télécharger le rapport PDF</button>
 
-              {/* Disclaimer */}
               <div style={{
-                background:C.creamD, borderRadius:8, padding:"10px 14px", marginBottom:20,
-                fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.6,
+                background:C.creamD, border:`1px solid ${C.border}`, borderRadius:8,
+                padding:"10px 14px", marginBottom:20,
+                fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.6, textAlign:"center",
               }}>
-                ⚖ Analyse à titre indicatif. Pour un contrat à fort enjeu, consultez un juriste spécialisé.
+                ⚖ Analyse à titre indicatif. Pour un contrat à fort enjeu, consulte un juriste spécialisé.
               </div>
 
-              {/* CTA */}
               <button onClick={onClose} style={{
                 width:"100%", padding:"13px",
-                background:C.navy, color:C.white,
-                border:"none", borderRadius:8, cursor:"pointer",
+                background:C.navy, color:C.white, border:"none", borderRadius:8, cursor:"pointer",
                 fontSize:14, fontFamily:T.body, fontWeight:700,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:8,
                 boxShadow:"0 4px 14px #1B2E4B28",
-                transition:"all 0.18s",
-              }}
-                onMouseOver={e=>{ e.currentTarget.style.background="#152438"; e.currentTarget.style.transform="translateY(-1px)"; }}
-                onMouseOut={e=>{ e.currentTarget.style.background=C.navy; e.currentTarget.style.transform="translateY(0)"; }}
-              >
+              }}>
                 ← Fermer et revenir au tableau de bord
               </button>
             </>
@@ -16986,7 +17311,7 @@ function ClientSignaturePage({ contractId }) {
       .then(data => {
         // Un contrat déjà signé n'est plus une erreur : le lien reste la page permanente
         // du client pendant 14 jours (accès au contrat + bouton de rétractation si applicable).
-        if (!data) { setError("Contrat introuvable ou lien expiré."); }
+        if (!data) { setError("Ce contrat n'est pas disponible pour le moment. Le prestataire est peut-être en train de le modifier : il vous renverra le lien quand il sera prêt. Si le problème continue, contactez-le."); }
         else { setContractData(data); }
         setLoading(false);
       })
