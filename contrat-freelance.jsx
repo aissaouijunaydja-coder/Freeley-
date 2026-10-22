@@ -414,7 +414,7 @@ const frDate = (d) => d ? new Date(d).toLocaleDateString("fr-FR", { day: "numeri
 // Lieu de la signature en présence, déclaré par le freelance (particulier ; professionnel depuis la version 222)
 const SIGNATURE_LOCATIONS = {
   locaux: "Dans mes locaux (bureau, atelier ou boutique où je travaille habituellement)",
-  hors_etablissement: "Chez le client ou ailleurs (domicile, café, salon, chantier…)",
+  hors_etablissement: "Chez le client ou ailleurs (domicile, café, chantier…)", // v223 : plus de « salon » (stand de foire ou de salon : pas hors établissement)
   urgence: "Chez le client, pour une réparation urgente qu'il m'a demandée",
 };
 
@@ -517,6 +517,9 @@ const RETRACTATION_BOX_STYLE = { maxHeight:200, overflowY:"auto", whiteSpace:"pr
 // Adresse officielle de Freeley. Stripe y renvoie le client après un paiement (avant, sans adresse
 // fournie, le serveur le renvoyait vers l'ancienne adresse freeley-ten.vercel.app).
 const SITE_URL = "https://www.freeley.fr";
+// Version 223 : les liens envoyés aux clients (contrat, NDA, avenant) pointent toujours vers l'adresse officielle,
+// même si le freelance travaille sur une autre adresse (freeley-ten.vercel.app, aperçu Vercel…).
+const CLIENT_LINK_BASE = `${SITE_URL}/`;
 const STRIPE_RETURN_URLS = { successUrl: `${SITE_URL}/?paiement=succes`, cancelUrl: `${SITE_URL}/?paiement=annule` };
 
 // Appel au serveur de Freeley (api/retraction.js). Le client n'a pas de compte : c'est le serveur qui
@@ -780,6 +783,16 @@ const submitNdaSignature = async (ndaId, clientSignature) => {
   return true;
 };
 
+// Version 223 : la Partie B télécharge son exemplaire signé du NDA. Il est relu en base (fonction get_nda_signed_copy,
+// seulement pour un NDA signé) : même PDF que celui du freelance dans « Mes NDA », avec les deux signatures.
+const downloadSignedNdaForClient = async (ndaId) => {
+  await loadJsPDF();
+  const { data, error } = await supabase.rpc("get_nda_signed_copy", { p_nda_id: ndaId });
+  const n = Array.isArray(data) ? data[0] : data;
+  if (error || !n || n.status !== "signed") throw new Error((error && error.message) || "not_signed");
+  downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at);
+};
+
 // Le client (sans compte) charge l'avenant précis à signer
 const getAvenantForSigning = async (contractId, avenantNum) => {
   const { data, error } = await supabase.rpc("get_avenant_for_signing", { p_contract_id: contractId, p_avenant_num: avenantNum });
@@ -891,7 +904,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "222";
+const APP_VERSION = "223";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -3436,7 +3449,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         setRemoteSignLoading(false);
         return;
       }
-      const link = `${window.location.origin}${window.location.pathname}?sign=${saved.id}`;
+      const link = `${CLIENT_LINK_BASE}?sign=${saved.id}`;
       setRemoteSignLink(link);
       // Rafraîchir l'historique
       setHistory(await getHistory());
@@ -3880,7 +3893,7 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
       const { error } = await supabase.rpc("request_nda_signature", { nda_id: n.id });
       setNdaSignGenerating(null);
       if (error) { console.error("Erreur génération lien signature NDA:", error); alert("Erreur lors de la génération du lien. Réessaie."); return; }
-      const link = `${window.location.origin}${window.location.pathname}?sign-nda=${n.id}`;
+      const link = `${CLIENT_LINK_BASE}?sign-nda=${n.id}`;
       setNdaSignLinks(prev => ({ ...prev, [n.id]: link }));
       setMyNdas(prev => prev.map(x => x.id === n.id ? { ...x, status: "pending_signature" } : x));
     };
@@ -3918,9 +3931,9 @@ Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire av
               <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", maxHeight:260, overflowY:"auto", marginBottom:12 }}>
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(n.content)}</pre>
               </div>
-              <NdaSignatureCertificate partieA={n.partie_a} partieB={n.partie_b} freelanceSignature={n.freelance_signature} clientSignature={n.client_signature} signedAt={n.signed_at} />
+              <NdaSignatureCertificate partieA={n.partie_a} partieB={n.partie_b} freelanceSignature={n.freelance_signature} clientSignature={n.client_signature} signedAt={n.signed_at} createdAt={n.created_at} />
               <div style={{display:"flex", gap:8, marginBottom: (n.status === "signed" || ndaSignLinks[n.id]) ? 10 : 0}}>
-                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
+                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
                 <button onClick={()=>deleteNda(n.id)} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:T.body}}>🗑 Supprimer</button>
               </div>
               {n.status !== "signed" && !ndaSignLinks[n.id] && (
@@ -5863,7 +5876,7 @@ CONSIGNES :
     });
     setAvenantSignLoading(false);
     if (!ok) { setSaveError(true); return; }
-    setAvenantSignLink(`${window.location.origin}${window.location.pathname}?sign-avenant=${contractId}:${avenantNum}`);
+    setAvenantSignLink(`${CLIENT_LINK_BASE}?sign-avenant=${contractId}:${avenantNum}`);
     setSignStep("remote-ready");
   };
 
@@ -8463,9 +8476,14 @@ const cleanNdaText = (text) => String(text || "")
 // Structure fondée sur les clauses qui font consensus en droit français : définition, exclusions, obligations
 // (dont la non-utilisation), propriété, restitution, durée, responsabilité contractuelle (art. 1231-1 C. civ.), litiges.
 const NDA_YEARS = { "2": 2, "3": 3, "5": 5, "10": 10 };
-const buildNdaText = ({ partieA, partieB, objet, ndaType, duration, ref, date }) => {
+// Version 223 : chaque partie est identifiée (Partie A : SIRET et adresse de son profil ; Partie B : son email
+// s'il est donné), et l'objet est cité entre guillemets.
+const buildNdaText = ({ partieA, partieB, partieASiret, partieAAddress, partieBEmail, objet, ndaType, duration, ref, date }) => {
   const A = (partieA || "").trim();
   const B = (partieB || "").trim();
+  const one = (v) => String(v || "").trim().replace(/\s+/g, " ");
+  const idA = [one(partieASiret) ? `SIRET ${fmtSiret(one(partieASiret))}` : "", one(partieAAddress)].filter(Boolean).join(", ");
+  const emailB = one(partieBEmail);
   const obj = (objet || "").trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
   const years = NDA_YEARS[duration] || 3;
   const yearsTxt = { 2: "deux (2)", 3: "trois (3)", 5: "cinq (5)", 10: "dix (10)" }[years];
@@ -8477,17 +8495,17 @@ const buildNdaText = ({ partieA, partieB, objet, ndaType, duration, ref, date })
       ? "La Partie B, qui communique des informations confidentielles, est ci-après dénommée « la Partie divulgatrice ». La Partie A, qui les reçoit, est ci-après dénommée « la Partie réceptrice »."
       : "La Partie A, qui communique des informations confidentielles, est ci-après dénommée « la Partie divulgatrice ». La Partie B, qui les reçoit, est ci-après dénommée « la Partie réceptrice ».";
   const preamble = mutual
-    ? `Dans le cadre de : ${obj} (ci-après « l'Objet »), les Parties sont amenées à se communiquer des informations confidentielles. Le présent accord définit les conditions dans lesquelles ces informations sont protégées.`
-    : `Dans le cadre de : ${obj} (ci-après « l'Objet »), la Partie divulgatrice est amenée à communiquer des informations confidentielles à la Partie réceptrice. Le présent accord définit les conditions dans lesquelles ces informations sont protégées.`;
+    ? `Dans le cadre du projet suivant : « ${obj} » (ci-après « l'Objet »), les Parties sont amenées à se communiquer des informations confidentielles. Le présent accord définit les conditions dans lesquelles ces informations sont protégées.`
+    : `Dans le cadre du projet suivant : « ${obj} » (ci-après « l'Objet »), la Partie divulgatrice est amenée à communiquer des informations confidentielles à la Partie réceptrice. Le présent accord définit les conditions dans lesquelles ces informations sont protégées.`;
   return [
     "ACCORD DE CONFIDENTIALITÉ (NDA)",
     `N° ${ref}`,
     `Établi le ${date}`,
     "",
     "ENTRE LES SOUSSIGNÉS :",
-    `${A}, ci-après « la Partie A »,`,
+    `${A}${idA ? ` (${idA})` : ""}, ci-après « la Partie A »,`,
     "ET",
-    `${B}, ci-après « la Partie B »,`,
+    `${B}${emailB ? ` (adresse électronique : ${emailB})` : ""}, ci-après « la Partie B »,`,
     "ci-après ensemble « les Parties » et individuellement « une Partie ».",
     "",
     roles,
@@ -8539,33 +8557,70 @@ const buildNdaText = ({ partieA, partieB, objet, ndaType, duration, ref, date })
   ].join("\n");
 };
 
-// Génère le PDF d'un NDA — partagé entre la fenêtre de création et la page "Mes NDA"
-const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSignature, clientSignature, signedAt) => {
+// Date et heure de Paris pour les signatures : « 22/10/2026 à 10:54 » (vide si la date est illisible)
+const fmtSignedAtFr = (iso) => {
+  const d = iso ? new Date(iso) : null;
+  if (!d || isNaN(d.getTime())) return "";
+  const day = d.toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" });
+  const time = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
+  return `${day} à ${time}`;
+};
+
+// Génère le PDF d'un NDA — partagé entre la fenêtre de création, la page "Mes NDA" et la page de signature de la
+// Partie B. Version 223 : date du NDA en haut (et non celle du téléchargement), titre une seule fois, titres des
+// articles en gras, pages numérotées, signatures datées, et « En attente de signature » tant que la Partie B n'a pas signé.
+const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSignature, clientSignature, signedAt, createdAt) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   if (!ndaText) { alert("Aucun NDA à télécharger."); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
-  const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-  const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
-  const today = new Date().toLocaleDateString("fr-FR");
+  const PW = 210, PH = 297, ML = 22, MR = 22, cw = PW - ML - MR;
+  const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREY = [120, 120, 120];
+  const A = String(partieAName || "").trim();
+  const B = String(partieBName || "").trim();
+  const ref = String(ndaRef || "").trim();
+  const text = cleanNdaText(ndaText);
+  // Date du NDA : celle écrite dans le texte (« Établi le … »), sinon sa date de création, sinon aujourd'hui
+  const textDate = (text.match(/Établi le (\d{2}\/\d{2}\/\d{4})/) || [])[1];
+  const createdDay = createdAt && !isNaN(new Date(createdAt).getTime()) ? new Date(createdAt).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) : "";
+  const ndaDate = textDate || createdDay || new Date().toLocaleDateString("fr-FR");
+  doc.setProperties({ title: `Accord de confidentialité${ref ? " " + ref : ""}`, creator: `Freeley ${APP_VERSION}` });
   doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
   doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
   doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
   doc.text("ACCORD DE CONFIDENTIALITÉ (NDA)", ML, 15);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-  doc.text(`${ndaRef || ""} · Établi le ${today} via Freeley`, ML, 23);
+  doc.text(`${ref ? ref + " · " : ""}Établi le ${ndaDate} via Freeley`, ML, 23);
   let y = 42;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
-  const lines = doc.splitTextToSize(cleanNdaText(ndaText), cw);
-  lines.forEach(l => {
-    if (y > 270) { doc.addPage(); y = 20; }
-    doc.text(l, ML, y); y += 5.4;
+  const BOTTOM = 276;
+  const room = (h) => { if (y + h > BOTTOM) { doc.addPage(); y = 20; } };
+  // Le bandeau porte déjà le titre, le numéro et la date : on ne les répète pas au début du texte
+  const lines = text.split("\n");
+  let first = 0;
+  if ((lines[first] || "").trim() === "ACCORD DE CONFIDENTIALITÉ (NDA)") first++;
+  if (/^N°\s/.test((lines[first] || "").trim())) first++;
+  if (/^Établi le\s/.test((lines[first] || "").trim())) first++;
+  while (first < lines.length && !lines[first].trim()) first++;
+  lines.slice(first).forEach((raw) => {
+    const l = raw.trim();
+    if (!l) { y += 3; return; }
+    if (/^ARTICLE\s+\d+\s*[—–-]/.test(l) || l === "ENTRE LES SOUSSIGNÉS :") {
+      // Titre en gras, jamais seul en bas d'une page
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
+      const hl = doc.splitTextToSize(l, cw);
+      room(hl.length * 5.4 + 8);
+      hl.forEach((t) => { doc.text(t, ML, y); y += 5.4; });
+      y += 0.6;
+    } else {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
+      doc.splitTextToSize(l, cw).forEach((t) => { room(5.4); doc.text(t, ML, y); y += 5.4; });
+    }
   });
 
-  // Certificat de signature électronique — affiche chaque signature réellement capturée
+  // Certificat de signature électronique : chaque signature réellement capturée, avec sa date et son heure
   if (freelanceSignature || clientSignature) {
-    if (y > 200) { doc.addPage(); y = 20; }
-    y += 10;
+    room(78);
+    y += 8;
     doc.setDrawColor(...GOLD); doc.setLineWidth(0.5); doc.line(ML, y, PW - MR, y);
     y += 10;
     doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...NAVY);
@@ -8573,35 +8628,54 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
     y += 10;
 
     const halfW = (cw - 10) / 2;
-    const colStartY = y;
-    let yA = colStartY, yB = colStartY;
+    const xB = ML + halfW + 10;
+    let yA = y, yB = y;
 
     if (freelanceSignature) {
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
-      doc.text(`${partieAName || "Partie A"} (Partie A)`, ML, yA); yA += 6;
-      try { doc.addImage(freelanceSignature, "PNG", ML, yA, halfW, 26); yA += 30; } catch(e) {}
-      doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(120,120,120);
-      doc.text("Signée à la création du document.", ML, yA); yA += 5;
+      doc.text(`${A || "Partie A"} (Partie A)`, ML, yA); yA += 6;
+      try { doc.addImage(freelanceSignature, "PNG", ML, yA, halfW, 26); } catch(e) {}
+      yA += 30;
+      doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+      const whenA = fmtSignedAtFr(createdAt);
+      doc.text(whenA ? `Signée le ${whenA}.` : "Signée à la création du document.", ML, yA); yA += 5;
     }
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
+    doc.text(`${B || "Partie B"} (Partie B)`, xB, yB); yB += 6;
     if (clientSignature) {
-      const xB = ML + halfW + 10;
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
-      doc.text(`${partieBName || "Partie B"} (Partie B)`, xB, yB); yB += 6;
-      try { doc.addImage(clientSignature, "PNG", xB, yB, halfW, 26); yB += 30; } catch(e) {}
-      doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(120,120,120);
-      const signedLabel = signedAt ? new Date(signedAt).toLocaleString("fr-FR") : today;
-      doc.text(`Signée à distance le ${signedLabel}.`, xB, yB); yB += 5;
+      try { doc.addImage(clientSignature, "PNG", xB, yB, halfW, 26); } catch(e) {}
+      yB += 30;
+      doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+      const whenB = fmtSignedAtFr(signedAt);
+      doc.text(whenB ? `Signée à distance le ${whenB}.` : "Signée à distance.", xB, yB); yB += 5;
+    } else {
+      // Pas encore signé par la Partie B : sa place reste vide, et c'est écrit
+      doc.setDrawColor(205, 205, 205); doc.setLineWidth(0.3);
+      doc.roundedRect(xB, yB, halfW, 26, 2, 2, "S");
+      yB += 30;
+      doc.setFont("helvetica", "bolditalic"); doc.setFontSize(7.5); doc.setTextColor(180, 83, 9);
+      doc.text("En attente de signature.", xB, yB); yB += 5;
     }
     y = Math.max(yA, yB) + 6;
-    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(120,120,120);
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
     doc.text("Signatures capturées électroniquement et horodatées par Freeley.", ML, y);
   }
 
-  doc.save(`NDA_${(partieBName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+  // Numéro de page en bas de chaque page
+  const total = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= total; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...GREY);
+    doc.text(`${ref ? ref + " · " : ""}Page ${i} / ${total}`, PW - MR, PH - 10, { align: "right" });
+  }
+
+  doc.save(`NDA_${(B || "contact").replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}.pdf`);
 };
 
 // Affiche les signatures directement à l'écran (pas seulement dans le PDF téléchargé) — partagé entre la fenêtre de création et la page "Mes NDA"
-function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientSignature, signedAt }) {
+function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientSignature, signedAt, createdAt }) {
+  const whenA = fmtSignedAtFr(createdAt);
+  const whenB = fmtSignedAtFr(signedAt);
   if (!freelanceSignature && !clientSignature) return null;
   return (
     <div style={{ background:"#FFFDF9", border:"1.5px solid #E8D9B5", borderRadius:12, padding:"16px 18px", marginBottom:16 }}>
@@ -8611,16 +8685,23 @@ function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientS
           <div style={{ flex:"1 1 160px" }}>
             <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:600, marginBottom:6 }}>{partieA || "Partie A"}</div>
             <img src={freelanceSignature} alt="Signature Partie A" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
-            <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>Signée à la création du document</div>
+            <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>{whenA ? `Signée le ${whenA}` : "Signée à la création du document"}</div>
           </div>
         )}
-        {clientSignature && (
-          <div style={{ flex:"1 1 160px" }}>
-            <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:600, marginBottom:6 }}>{partieB || "Partie B"}</div>
-            <img src={clientSignature} alt="Signature Partie B" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
-            <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>Signée à distance{signedAt ? ` le ${new Date(signedAt).toLocaleString("fr-FR")}` : ""}</div>
-          </div>
-        )}
+        <div style={{ flex:"1 1 160px" }}>
+          <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:600, marginBottom:6 }}>{partieB || "Partie B"}</div>
+          {clientSignature ? (
+            <>
+              <img src={clientSignature} alt="Signature Partie B" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
+              <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>Signée à distance{whenB ? ` le ${whenB}` : ""}</div>
+            </>
+          ) : (
+            <>
+              <div style={{ width:"100%", maxWidth:180, height:60, background:"#fff", border:`1px dashed ${C.border}`, borderRadius:8 }} />
+              <div style={{ fontFamily:T.body, fontSize:10, color:"#B45309", fontWeight:700, marginTop:4 }}>En attente de signature</div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -8633,6 +8714,9 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     const p = profile || {};
     return withEI(p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" "), p.legalStatus) || "";
   });
+  const [partieASiret, setPartieASiret] = useState(() => String((profile || {}).siret || ""));
+  const [partieAAddress, setPartieAAddress] = useState(() => String((profile || {}).address || ""));
+  const [ndaCreatedAt, setNdaCreatedAt] = useState(null);
   const [partieB, setPartieB]     = useState("");
   const [partieBEmail, setPartieBEmail] = useState("");
   const [objet, setObjet]         = useState("");
@@ -8674,6 +8758,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     objet: row.objet || "", ndaType: row.nda_type || "unilateral", duration: row.duration || "3",
     ndaRef: row.nda_ref || "", nda: row.content || "",
     date: row.created_at ? new Date(row.created_at).toLocaleDateString("fr-FR") : "",
+    createdAt: row.created_at || null,
   });
 
   // Charge le vrai historique depuis Supabase (remplace le repli local dès que disponible)
@@ -8717,18 +8802,25 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     if (!partieA.trim() || !partieB.trim() || !objet.trim()) return;
     if (!hasStrokesA) { alert("Signe en tant que Partie A avant de générer le NDA."); return; }
     const freelanceSig = canvasRefA.current.toDataURL("image/png");
+    // Version 223 : pas d'espace en trop (« Paule Martin  (Partie B) » dans le PDF)
+    const clean = (v) => String(v || "").replace(/\s+/g, " ").trim();
+    const pA = clean(partieA), pB = clean(partieB), pBEmail = clean(partieBEmail), pObjet = String(objet || "").trim();
+    const pASiret = clean(partieASiret), pAAddress = clean(partieAAddress);
+    setPartieA(pA); setPartieB(pB); setPartieBEmail(pBEmail); setPartieASiret(pASiret); setPartieAAddress(pAAddress);
+    const createdIso = new Date().toISOString();
+    setNdaCreatedAt(createdIso);
     setStep("loading");
     // Référence générée par l'app (pas par l'IA) : garantit un identifiant réel et unique, jamais inventé au hasard
     const ref = `NDA-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
     setNdaRef(ref);
     try {
       // Texte fixe, rempli avec les cases du formulaire (plus d'appel à l'IA)
-      const text = buildNdaText({ partieA, partieB, objet, ndaType, duration, ref, date: new Date().toLocaleDateString("fr-FR") });
+      const text = buildNdaText({ partieA: pA, partieB: pB, partieASiret: pASiret, partieAAddress: pAAddress, partieBEmail: pBEmail, objet: pObjet, ndaType, duration, ref, date: new Date().toLocaleDateString("fr-FR") });
       setNda(text);
       setStep("result");
       setSignLink(""); setNdaRowId(null); setNdaSaveError(false); setNdaClientSignature(null); setNdaSignedAt(null); setNdaFreelanceSignature(freelanceSig); // repart de zéro : ce nouveau NDA n'a pas encore d'id ni de lien de signature
       // Sauvegarde de l'historique : Supabase si connecté (source réelle), sinon repli local
-      const entry = { partieA, partieB, partieBEmail, objet, ndaType, duration, ndaRef: ref, nda: text, freelanceSignature: freelanceSig, date: new Date().toLocaleDateString("fr-FR") };
+      const entry = { partieA: pA, partieB: pB, partieBEmail: pBEmail, objet: pObjet, ndaType, duration, ndaRef: ref, nda: text, freelanceSignature: freelanceSig, date: new Date().toLocaleDateString("fr-FR"), createdAt: createdIso };
       if (authUser?.id) {
         setNdaSaving(true);
         supabase.from("ndas").insert(ndaToRow(entry, authUser.id)).select().single()
@@ -8737,6 +8829,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
             if (error) { console.error("Erreur sauvegarde NDA Supabase:", error); setNdaSaveError(true); return; }
             if (!data?.id) { console.error("Erreur sauvegarde NDA Supabase : aucune ligne retournée"); setNdaSaveError(true); return; }
             setNdaRowId(data.id);
+            if (data.created_at) setNdaCreatedAt(data.created_at); // heure enregistrée par la base
           })
           .catch((e) => { console.error("Erreur réseau sauvegarde NDA:", e); setNdaSaving(false); setNdaSaveError(true); });
       }
@@ -8778,7 +8871,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     const { error } = await supabase.rpc("request_nda_signature", { nda_id: ndaRowId });
     setSignLinkGenerating(false);
     if (error) { console.error("Erreur génération lien signature NDA:", error); alert("Erreur lors de la génération du lien. Réessaie."); return; }
-    setSignLink(`${window.location.origin}${window.location.pathname}?sign-nda=${ndaRowId}`);
+    setSignLink(`${CLIENT_LINK_BASE}?sign-nda=${ndaRowId}`);
   };
 
   const copySignLink = () => {
@@ -8848,6 +8941,12 @@ function NdaExpressModal({ onClose, profile, authUser }) {
               <div style={{ marginBottom:14 }}>
                 <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE A — VOUS" : ndaType === "unilateral_b" ? "PARTIE A — VOUS (réceptrice)" : "PARTIE A — VOUS (divulgatrice)"}</label>
                 <input style={inputStyle} value={partieA} onChange={e=>setPartieA(e.target.value)} placeholder="Votre nom ou raison sociale" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                {/* Version 223 : coordonnées de la Partie A, reprises du profil, pour l'identifier dans le NDA */}
+                <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+                  <input style={{ ...inputStyle, flex:"1 1 150px", padding:"10px 12px", fontSize:12 }} value={partieASiret} onChange={e=>setPartieASiret(e.target.value)} placeholder="Ton SIRET" aria-label="SIRET de la Partie A" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                  <input style={{ ...inputStyle, flex:"2 1 220px", padding:"10px 12px", fontSize:12 }} value={partieAAddress} onChange={e=>setPartieAAddress(e.target.value)} placeholder="Ton adresse professionnelle" aria-label="Adresse de la Partie A" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                </div>
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>Ton SIRET et ton adresse viennent de ton profil. Ils identifient la Partie A dans le NDA.</div>
               </div>
               <div style={{ marginBottom:14 }}>
                 <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE B — L'AUTRE PARTIE" : ndaType === "unilateral_b" ? "PARTIE B — CELUI QUI PARTAGE (divulgatrice)" : "PARTIE B — LE DESTINATAIRE (réceptrice)"}</label>
@@ -8860,6 +8959,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
               <div style={{ marginBottom:14 }}>
                 <label style={labelSt}>OBJET / CONTEXTE DU PROJET</label>
                 <textarea style={{ ...inputStyle, resize:"vertical", minHeight:80, lineHeight:1.6 }} value={objet} onChange={e=>setObjet(e.target.value)} placeholder="Ex : Développement d'une application mobile de e-commerce…" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>Décris le projet en quelques mots, sans « je ». Exemple : Création du site internet d'une boulangerie.</div>
               </div>
 
               {/* Durée */}
@@ -8921,8 +9021,8 @@ function NdaExpressModal({ onClose, profile, authUser }) {
                         <div key={i} onClick={() => {
                           setNda(h.nda); setNdaRef(h.ndaRef); setPartieA(h.partieA); setPartieB(h.partieB); setPartieBEmail(h.partieBEmail||""); setObjet(h.objet); setNdaType(h.ndaType||"unilateral"); setDuration(h.duration||"3");
                           setNdaRowId(h.id || null); setNdaSaveError(false);
-                          setNdaClientSignature(h.clientSignature || null); setNdaSignedAt(h.signedAt || null); setNdaFreelanceSignature(h.freelanceSignature || null);
-                          setSignLink(h.id && (h.status === "pending_signature" || h.status === "signed") ? `${window.location.origin}${window.location.pathname}?sign-nda=${h.id}` : "");
+                          setNdaClientSignature(h.clientSignature || null); setNdaSignedAt(h.signedAt || null); setNdaFreelanceSignature(h.freelanceSignature || null); setNdaCreatedAt(h.createdAt || null);
+                          setSignLink(h.id && (h.status === "pending_signature" || h.status === "signed") ? `${CLIENT_LINK_BASE}?sign-nda=${h.id}` : "");
                           setStep("result");
                         }}
                           style={{ padding:"10px 12px", background:C.creamD, border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, color:C.textM }}>
@@ -8956,10 +9056,10 @@ function NdaExpressModal({ onClose, profile, authUser }) {
               <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"20px 20px", maxHeight:320, overflowY:"auto", marginBottom:16 }}>
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(nda)}</pre>
               </div>
-              <NdaSignatureCertificate partieA={partieA} partieB={partieB} freelanceSignature={ndaFreelanceSignature} clientSignature={ndaClientSignature} signedAt={ndaSignedAt} />
+              <NdaSignatureCertificate partieA={partieA} partieB={partieB} freelanceSignature={ndaFreelanceSignature} clientSignature={ndaClientSignature} signedAt={ndaSignedAt} createdAt={ndaCreatedAt} />
               <div style={{ display:"flex", gap:10, marginBottom:10 }}>
                 <button onClick={() => { setStep("form"); setNda(""); }} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM, transition:"all 0.15s" }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
-                <button onClick={() => downloadNdaPDF(nda, ndaRef, partieA, partieB, ndaFreelanceSignature, ndaClientSignature, ndaSignedAt)} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
+                <button onClick={() => downloadNdaPDF(nda, ndaRef, partieA, partieB, ndaFreelanceSignature, ndaClientSignature, ndaSignedAt, ndaCreatedAt)} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
                 <button onClick={copy} style={{ flex:2, padding:"12px", background: copying ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px #1B2E4B30", transition:"all 0.2s" }}>
                   {copying ? <><span>✓</span> Copié !</> : <><span>📋</span> Copier</>}
                 </button>
@@ -12080,14 +12180,14 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
   // Relance : reconstruit le lien de signature de l'avenant (pas besoin de le stocker, il est déterministe)
   const copyAvenantSignLink = (av) => {
-    const link = `${window.location.origin}${window.location.pathname}?sign-avenant=${historyView.id}:${av.num}`;
+    const link = `${CLIENT_LINK_BASE}?sign-avenant=${historyView.id}:${av.num}`;
     navigator.clipboard.writeText(link).then(() => {
       setAvenantLinkCopiedNum(av.num);
       setTimeout(() => setAvenantLinkCopiedNum(null), 2500);
     });
   };
   const sendAvenantSignEmail = (av) => {
-    const link = `${window.location.origin}${window.location.pathname}?sign-avenant=${historyView.id}:${av.num}`;
+    const link = `${CLIENT_LINK_BASE}?sign-avenant=${historyView.id}:${av.num}`;
     const email = historyView.form?.clientEmail || "";
     const subject = `Rappel — Avenant n°${av.num} en attente de signature`;
     const body = `Bonjour,\n\nPetit rappel : l'avenant n°${av.num} est toujours en attente de votre signature.\n\nLien de signature : ${link}\n\nMerci,\n${historyView.form?.freelanceName || ""}`;
@@ -15373,12 +15473,12 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     : "Ton client est un professionnel. Si tu signes ailleurs que dans tes locaux, une petite entreprise peut avoir les mêmes droits qu'un particulier. Choisis la réponse qui correspond à la réalité : elle sera enregistrée dans le contrat, avec la date et l'heure, et elle engage ta responsabilité."}
                 </div>
                 {(isParticulier ? [
-                  { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement.", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
-                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un salon, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander." },
+                  { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement. Si tu es allé voir ton client ailleurs pour lui proposer tes services, et qu'il signe juste après dans tes locaux, choisis plutôt « Chez le client ou ailleurs ».", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
+                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander." },
                   { key:"urgence", title:"Chez le client, pour une réparation urgente qu'il m'a demandée", sub:"Par exemple un dépannage urgent à son domicile, à sa demande.", rule:"La loi autorise alors le paiement tout de suite, mais seulement pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-10, 4°, du Code de la consommation). Si ta mission comprend autre chose, comme un contrat d'entretien, choisis plutôt « Chez le client ou ailleurs »." },
                 ] : [
-                  { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement.", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
-                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Dans les locaux du client, dans un café, sur un salon, sur un chantier…", rule:"Une question de plus juste en dessous : une petite entreprise peut avoir les mêmes droits qu'un particulier." },
+                  { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement. Si tu es allé voir ton client ailleurs pour lui proposer tes services, et qu'il signe juste après dans tes locaux, choisis plutôt « Chez le client ou ailleurs ».", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
+                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Dans les locaux du client, dans un café, sur un chantier…", rule:"Une question de plus juste en dessous : une petite entreprise peut avoir les mêmes droits qu'un particulier." },
                 ]).map(opt => (
                   <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor:"pointer", background: signLocation === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${signLocation === opt.key ? "#6366F1" : C.border}` }}>
                     <input type="radio" name="signLocation" checked={signLocation === opt.key} onChange={() => chooseSignLocation(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
@@ -17234,6 +17334,9 @@ function NdaSignaturePage({ ndaId }) {
   const [error, setError] = useState("");
   const [signing, setSigning] = useState(false);
   const [done, setDone] = useState(false);
+  const [alreadySigned, setAlreadySigned] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const canvasRef = useRef(null);
   const [hasStrokes, setHasStrokes] = useState(false);
   const drawing = useRef(false);
@@ -17242,7 +17345,7 @@ function NdaSignaturePage({ ndaId }) {
     getNdaForSigning(ndaId)
       .then(data => {
         if (!data) { setError("NDA introuvable ou lien expiré."); }
-        else if (data.status === "signed") { setError("Ce NDA a déjà été signé. Merci !"); }
+        else if (data.status === "signed") { setAlreadySigned(true); }
         else { setNdaData(data); }
         setLoading(false);
       })
@@ -17280,7 +17383,31 @@ function NdaSignaturePage({ ndaId }) {
 
   const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
 
+  // Version 223 : la Partie B garde son exemplaire signé (PDF), comme le client d'un contrat
+  const handleDownloadCopy = async () => {
+    setCopyBusy(true); setCopyError("");
+    try { await downloadSignedNdaForClient(ndaId); }
+    catch (e) { console.error("Exemplaire signé du NDA :", e); setCopyError("Le téléchargement n'a pas marché. Réessayez dans quelques instants, ou demandez une copie à l'autre partie."); }
+    setCopyBusy(false);
+  };
+  const copyButton = (
+    <div style={{ marginTop:18 }}>
+      <button onClick={handleDownloadCopy} disabled={copyBusy} style={{ width:"100%", padding:"12px 18px", background:"#1B2E4B", color:"#fff", border:"none", borderRadius:10, cursor: copyBusy ? "default" : "pointer", fontSize:13.5, fontWeight:700 }}>{copyBusy ? "Préparation du PDF…" : "📄 Télécharger mon exemplaire signé (PDF)"}</button>
+      {copyError && <div style={{ fontSize:12, color:"#B91C1C", marginTop:8, lineHeight:1.5 }}>{copyError}</div>}
+    </div>
+  );
+
   if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1B2E4B", fontSize:15 }}>Chargement du NDA…</div></div>;
+
+  if (alreadySigned) return (
+    <div style={{ ...wrap, justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:32, maxWidth:420, width:"100%", textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
+        <div style={{ fontSize:38, marginBottom:12 }}>✅</div>
+        <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>Ce NDA a déjà été signé. Merci !</div>
+        {copyButton}
+      </div>
+    </div>
+  );
 
   if (error) return (
     <div style={{ ...wrap, justifyContent:"center" }}>
@@ -17297,6 +17424,7 @@ function NdaSignaturePage({ ndaId }) {
         <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
         <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>NDA signé !</div>
         <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
+        {copyButton}
       </div>
     </div>
   );
