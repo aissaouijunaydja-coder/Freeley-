@@ -127,12 +127,33 @@ globalStyle.textContent = `
   .plan-card { transition: transform .2s, box-shadow .2s; }
   .plan-card:hover { transform: translateY(-3px); box-shadow: 0 16px 48px #1B2E4B14 !important; }
   body.freeley-window-open .freeley-floating { display: none !important; }
+  /* Version 226 : sur téléphone, les bulles (aide et message) sont plus petites, empilées contre le bord droit, et
+     cachées pendant que tu écris dans une case : elles couvraient du texte et des boutons. */
+  @media (max-width: 640px) {
+    .freeley-fab { width: 42px !important; height: 42px !important; right: 10px !important; font-size: 18px !important; }
+    .freeley-fab-help { bottom: 14px !important; }
+    .freeley-fab-feedback { bottom: 64px !important; }
+    .freeley-feedback-panel { right: 10px !important; bottom: 114px !important; }
+    body.freeley-typing .freeley-fab { display: none !important; }
+  }
   @media (max-width: 480px) {
     body { font-size: 14px; }
     input, textarea, select { font-size: 16px !important; }
   }
 `;
 document.head.appendChild(globalStyle);
+
+// Version 226 : une case de texte a le focus → classe « freeley-typing » sur la page (les bulles se cachent sur téléphone)
+const FREELEY_TYPING_FIELDS = 'textarea, input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="search"], input[type="url"], input[type="password"]';
+document.addEventListener("focusin", (e) => {
+  if (e.target && e.target.matches && e.target.matches(FREELEY_TYPING_FIELDS)) document.body.classList.add("freeley-typing");
+});
+document.addEventListener("focusout", () => {
+  setTimeout(() => {
+    const a = document.activeElement;
+    if (!(a && a.matches && a.matches(FREELEY_TYPING_FIELDS))) document.body.classList.remove("freeley-typing");
+  }, 0);
+});
 
 /* ─── Tokens ─── */
 const C = {
@@ -908,7 +929,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "224";
+const APP_VERSION = "226";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -1058,7 +1079,9 @@ const REVISIONS_WORDS = { "1": "un (1) aller-retour", "2": "deux (2) allers-reto
 const revisionsSentence = (rev) => {
   const r = String(rev ?? "").trim() || "2";
   if (/^illimit/i.test(r)) return "Le présent contrat inclut un nombre illimité d'allers-retours de révisions, dans la limite du périmètre défini à l'article 2.";
-  return `Le présent contrat inclut ${REVISIONS_WORDS[r] || `${r} allers-retours`} de révisions.`;
+  // Version 226 : le contrat dit ce que deviennent les révisions en plus (l'info-bulle du formulaire promettait
+  // « Au-delà, tu peux facturer des modifications supplémentaires », mais le contrat ne l'écrivait pas toujours).
+  return `Le présent contrat inclut ${REVISIONS_WORDS[r] || `${r} allers-retours`} de révisions. Toute révision supplémentaire est considérée comme une demande hors périmètre et suit les règles prévues au présent article.`;
 };
 
 // ── Phrases du contrat qui dépendent des chiffres (prix, acompte, délai de paiement, dates, révisions) ──
@@ -1104,18 +1127,18 @@ const contractNumberClauses = (form, profile) => {
       const horsEtabRef = isB2C ? ", sous réserve du délai de sept jours applicable aux contrats conclus hors établissement rappelé ci-après" : "";
       const paymentSentences = `- "Le montant total des honoraires est fixé à ${fmtEuro(pricing.total)} € ${U}."
 ` + (acomptePct > 0
-        ? `- "Un acompte de ${acomptePct} %, soit ${fmtEuro(pricing.acompte)} € ${U}, est dû à la signature du présent contrat${horsEtabRef}. Le versement de cet acompte conditionne le démarrage de la mission."
+        ? `- "Un acompte de ${acomptePct} %, soit ${fmtEuro(pricing.acompte)} € ${U}, est dû à la signature du présent contrat${horsEtabRef}. Le versement de cet acompte conditionne le démarrage de la mission. Si la date de démarrage prévue à l'article 3 tombe avant ce versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée."
 - "Le solde de ${100 - acomptePct} %, soit ${fmtEuro(pricing.solde)} € ${U}, est exigible à la livraison et à la recette finale de la mission, payable ${soldeTermsLabel}."`
         : form.paymentTerms === "Comptant"
-          ? `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${fmtEuro(pricing.total)} € ${U}, est payable à la signature du présent contrat${horsEtabRef}. Le versement de cette somme conditionne le démarrage de la mission."`
+          ? `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${fmtEuro(pricing.total)} € ${U}, est payable à la signature du présent contrat${horsEtabRef}. Le versement de cette somme conditionne le démarrage de la mission. Si la date de démarrage prévue à l'article 3 tombe avant ce versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée."`
           : `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${fmtEuro(pricing.total)} € ${U}, est facturée à la fin de la mission et payable à ${form.paymentTerms} jours nets à compter de la date de cette facture."`);
       // Contrat hors établissement (art. L221-10 C. conso) : rien ne se paie pendant 7 jours. Si un paiement
       // conditionne le démarrage, le contrat dit ce que deviennent les dates de la mission.
-      const horsEtabSentence = `"Lorsque le présent contrat est conclu hors établissement, aucun paiement ne peut être exigé ni reçu du Client avant l'expiration d'un délai de sept jours à compter de sa conclusion, sauf pour des travaux d'entretien ou de réparation à réaliser en urgence au domicile du Client et expressément sollicités par lui, dans la limite des pièces de rechange et travaux strictement nécessaires pour répondre à l'urgence (article L221-10 du Code de la consommation).${dueAtSigning ? " En dehors de ce cas d'urgence, la somme prévue à la signature n'est alors exigible qu'à l'expiration de ce délai. Si la date de démarrage prévue à l'article 3 tombe avant son versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée." : ""}"`;
+      const horsEtabSentence = `"Lorsque le présent contrat est conclu hors établissement, aucun paiement ne peut être exigé ni reçu du Client avant l'expiration d'un délai de sept jours à compter de sa conclusion, sauf pour des travaux d'entretien ou de réparation à réaliser en urgence au domicile du Client et expressément sollicités par lui, dans la limite des pièces de rechange et travaux strictement nécessaires pour répondre à l'urgence (article L221-10 du Code de la consommation).${dueAtSigning ? " En dehors de ce cas d'urgence, la somme prévue à la signature n'est alors exigible qu'à l'expiration de ce délai." : ""}"`;
       // Client professionnel (version 222) : une petite entreprise signée hors établissement a les droits d'un
       // consommateur (art. L221-3 C. conso). Phrase conditionnelle, comme celle du particulier : le contrat reste juste
       // quel que soit l'endroit où il est signé.
-      const petitProSentence = `"Lorsque le présent contrat est conclu hors établissement, que son objet n'entre pas dans le champ de l'activité principale du Client et que celui-ci emploie au plus cinq salariés, le Client bénéficie des règles du Code de la consommation applicables aux contrats conclus hors établissement, notamment du droit de rétractation de quatorze jours et de l'interdiction de tout paiement avant l'expiration d'un délai de sept jours à compter de la conclusion du contrat (articles L221-3 et L221-10 du Code de la consommation).${dueAtSigning ? " Dans ce cas, la somme prévue à la signature n'est exigible qu'à l'expiration de ce délai. Si la date de démarrage prévue à l'article 3 tombe avant son versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée." : ""}"`;
+      const petitProSentence = `"Lorsque le présent contrat est conclu hors établissement, que son objet n'entre pas dans le champ de l'activité principale du Client et que celui-ci emploie au plus cinq salariés, le Client bénéficie des règles du Code de la consommation applicables aux contrats conclus hors établissement, notamment du droit de rétractation de quatorze jours et de l'interdiction de tout paiement avant l'expiration d'un délai de sept jours à compter de la conclusion du contrat (articles L221-3 et L221-10 du Code de la consommation).${dueAtSigning ? " Dans ce cas, la somme prévue à la signature n'est exigible qu'à l'expiration de ce délai." : ""}"`;
       // Article 9 — résiliation : phrases fixes, et rien qui retienne l'acompte d'un particulier
       const resiliationClient = form.clauseDedit
         ? `Ne mentionne PAS que l'acompte est automatiquement et intégralement conservé comme indemnité forfaitaire fixe en cas de résiliation par le Client : ce sujet est entièrement régi par la clause de dédommagement ci-dessous, qui prévoit une indemnité déterminée selon l'avancement réel de la mission, et ne doit pas être contredite ou dupliquée ici.`
@@ -2168,6 +2191,20 @@ const readUrlDraft = () => {
   } catch(e) { return null; }
 };
 
+/* ── IBAN : vérification de la clé de contrôle (norme ISO 13616, modulo 97) ── */
+// Version 226 : un IBAN lu sur une photo est vérifié avant d'arriver dans le profil (et donc sur les factures).
+const isValidIban = (raw) => {
+  const s = String(raw || "").replace(/[\s-]/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(s)) return false;
+  let rem = 0;
+  for (const ch of s.slice(4) + s.slice(0, 4)) {
+    const digits = /[A-Z]/.test(ch) ? String(ch.charCodeAt(0) - 55) : ch;
+    for (const d of digits) rem = (rem * 10 + Number(d)) % 97;
+  }
+  return rem === 1;
+};
+const joinFr = (list) => list.length <= 1 ? (list[0] || "") : `${list.slice(0, -1).join(", ")} et ${list[list.length - 1]}`;
+
 /* ── Appel au modèle en flux (le texte arrive au fur et à mesure) ── */
 async function streamClaude(messages, maxTokens, onDelta) {
   const res = await fetch("/api/generate", {
@@ -2519,7 +2556,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant"
     ? (acomptePctPdf > 0 ? "Solde dès réception de la facture" : (payFromLabel ? `Comptant, payable à partir du ${payFromLabel} (délai légal de 7 jours)` : "Comptant à la commande"))
     : `${pForm.paymentTerms} jours nets`]);
-  tableRows.push(["Révisions incluses", `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
+  tableRows.push(["Révisions incluses", /^illimit/i.test(String(pForm.revisions || "")) ? "Illimitées" : `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
   if (pricing.b2c) tableRows.push(["Intérêts de retard", pForm.latePaymentPenalty ? "Oui — Taux d'intérêt légal, après mise en demeure" : "Non stipulés"]);
   else tableRows.push(["Pénalités de retard", pForm.latePaymentPenalty ? "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)" : "Non stipulées"]);
 
@@ -2936,6 +2973,7 @@ function AppInner() {
   const [profileScanLoading, setProfileScanLoading] = useState(false);
   const [profileScanSuccess, setProfileScanSuccess] = useState(false);
   const [profileScanError, setProfileScanError] = useState("");
+  const [profileScanNote, setProfileScanNote] = useState(null); // version 226 : { text, warn } — ce que la photo a changé
   const [copied, setCopied]       = useState(false);
   const [jsPDFReady, setPDFReady] = useState(false);
   const [showPaywall, setPaywall] = useState(false);
@@ -3372,6 +3410,7 @@ function AppInner() {
     setProfileScanLoading(true);
     setProfileScanSuccess(false);
     setProfileScanError("");
+    setProfileScanNote(null);
 
     const prompt = `Tu analyses la photo d'un document français (RIB / relevé d'identité bancaire, Kbis, notification INSEE de SIRET, ou en-tête de facture professionnelle). Extrais les informations pour remplir un profil freelance. Réponds UNIQUEMENT avec un objet JSON valide (aucun texte avant/après, pas de balises markdown) contenant EXACTEMENT ces clés :
 - iban (IBAN complet, sans espaces ni tirets superflus, garder le format tel qu'écrit)
@@ -3403,18 +3442,39 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       let txt = (data.content || []).map(b => b.text || "").join("").trim();
       txt = txt.replace(/```json|```/g, "").trim();
       const extracted = JSON.parse(txt);
-      const fieldMap = { iban:"iban", bic:"bic", bankName:"bankName", siret:"siret", companyName:"companyName" };
-      let foundAny = false;
-      Object.keys(fieldMap).forEach(k => {
-        if (extracted[k] && String(extracted[k]).trim()) {
-          updateProfile(fieldMap[k], String(extracted[k]).trim());
-          foundAny = true;
-        }
+      // Version 226 : on dit exactement ce que la photo a rempli ou remplacé. L'IBAN est vérifié (clé de contrôle) : un
+      // chiffre mal lu n'arrive plus sur tes factures. Le SIRET et le nom de l'entreprise ne sont remplis que s'ils sont
+      // vides (avant, la photo d'un RIB pouvait remplacer le nom de l'entreprise par celui du titulaire du compte).
+      const LABELS = { iban: "IBAN", bic: "BIC", bankName: "nom de la banque", siret: "SIRET", companyName: "nom de l'entreprise" };
+      const filled = [], replaced = [], kept = [];
+      let foundAny = false, badIban = false;
+      Object.keys(LABELS).forEach(k => {
+        const v = String(extracted[k] || "").trim();
+        if (!v) return;
+        foundAny = true;
+        if (k === "iban" && !isValidIban(v)) { badIban = true; return; }
+        const cur = String(profile?.[k] || "").trim();
+        if (cur.replace(/\s/g, "").toUpperCase() === v.replace(/\s/g, "").toUpperCase()) return;
+        if (cur && (k === "siret" || k === "companyName")) { kept.push(LABELS[k]); return; }
+        updateProfile(k, v);
+        (cur ? replaced : filled).push(LABELS[k]);
       });
       setProfileScanLoading(false);
       if (foundAny) {
-        setProfileScanSuccess(true);
-        setTimeout(() => setProfileScanSuccess(false), 3500);
+        const plural = (list, one, many) => list.length > 1 ? many : one;
+        const parts = [];
+        if (filled.length) parts.push(`${joinFr(filled)} ${plural(filled, "rempli", "remplis")} à partir de la photo.`);
+        if (replaced.length) parts.push(`${joinFr(replaced)} ${plural(replaced, "remplacé par celui", "remplacés par ceux")} de la photo.`);
+        if (filled.length || replaced.length) parts.push("Vérifie ces informations.");
+        if (kept.length) parts.push(`${joinFr(kept)} déjà ${plural(kept, "rempli : pas changé", "remplis : pas changés")}. Modifie-${plural(kept, "le", "les")} à la main si besoin.`);
+        if (badIban) parts.push("L'IBAN lu sur la photo semble incorrect (un caractère mal lu ?) : il n'a pas été rempli. Tape-le à la main.");
+        if (!parts.length) parts.push("Ces informations étaient déjà dans ton profil.");
+        setProfileScanNote({ text: parts.join(" "), warn: badIban || kept.length > 0 });
+        setTimeout(() => setProfileScanNote(null), 15000);
+        if (filled.length || replaced.length) {
+          setProfileScanSuccess(true);
+          setTimeout(() => setProfileScanSuccess(false), 3500);
+        }
       } else {
         setProfileScanError("Aucune information reconnue sur cette photo. Réessaie avec un RIB ou un Kbis bien net.");
         setTimeout(() => setProfileScanError(""), 5000);
@@ -3950,10 +4010,143 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     },
   };
 
+  // Version 226 : caméra et fenêtre d'autorisation communes à l'écran principal et à la page Profil (avant, le bouton
+  // « Scanner un RIB » du profil ne faisait rien : ces fenêtres n'existaient que sur l'écran principal).
+  const cameraLayer = (
+    <>
+      {profileScanTarget && (
+        <CameraCapture
+          onCapture={handleProfileScanCapture}
+          onClose={() => setProfileScanTarget(false)}
+        />
+      )}
+      {/* ── 📷 Popup permission caméra (simulation iOS/Android) ── */}
+      {showCameraPermissionModal && (
+        <div style={{
+          position:"fixed", inset:0, zIndex:10000,
+          background:"rgba(0,0,0,0.45)", backdropFilter:"blur(5px)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          padding:"12px",
+        }}>
+          <div style={{
+            background:"#F2F2F7",
+            borderRadius:14,
+            width:"100%", maxWidth:290,
+            boxShadow:"0 24px 64px rgba(0,0,0,0.35)",
+            overflow:"hidden",
+            animation:"cameraPopIn 0.32s cubic-bezier(.22,.68,0,1.2) both",
+            fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
+          }}>
+            {/* Icon + Titre + Texte */}
+            <div style={{ padding:"24px 20px 20px", textAlign:"center" }}>
+              {/* Icône caméra façon iOS */}
+              <div style={{
+                width:56, height:56, borderRadius:14,
+                background:"linear-gradient(145deg, #1C1C1E 0%, #2C2C2E 100%)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                margin:"0 auto 14px",
+                boxShadow:"0 4px 14px rgba(0,0,0,0.22)",
+              }}>
+                <span style={{ fontSize:28 }}>📷</span>
+              </div>
+              <div style={{
+                fontSize:17, fontWeight:600, color:"#1C1C1E",
+                letterSpacing:"-0.02em", lineHeight:1.3, marginBottom:10,
+              }}>
+                « Freeley » souhaite accéder à l'appareil photo
+              </div>
+              <div style={{
+                fontSize:13, color:"#48484A",
+                lineHeight:1.55, letterSpacing:"-0.01em",
+              }}>
+                Cette autorisation permet à l'application de photographier vos cartes de visite, briefs de mission ou documents papiers afin d'extraire automatiquement les informations textuelles grâce à notre assistant.
+              </div>
+            </div>
+
+            {/* Séparateur */}
+            <div style={{ height:1, background:"#C6C6C8" }} />
+
+            {/* Boutons façon alerte iOS */}
+            <div style={{ display:"flex" }}>
+              <button
+                onClick={() => {
+                  setShowCameraPermissionModal(false);
+                  setCameraPermission("denied");
+                  setCameraPermissionDenied(true);
+                  setTimeout(() => setCameraPermissionDenied(false), 4500);
+                }}
+                style={{
+                  flex:1, padding:"14px 10px",
+                  background:"transparent", border:"none",
+                  borderRight:"1px solid #C6C6C8",
+                  cursor:"pointer",
+                  fontSize:17, fontWeight:400, color:"#007AFF",
+                  fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
+                  letterSpacing:"-0.01em", transition:"background 0.12s",
+                }}
+                onMouseOver={e=>e.currentTarget.style.background="#E5E5EA"}
+                onMouseOut={e=>e.currentTarget.style.background="transparent"}
+              >
+                Refuser
+              </button>
+              <button
+                onClick={() => {
+                  setCameraPermission("granted");
+                  setShowCameraPermissionModal(false);
+                  if (cameraPermissionCallback) {
+                    cameraPermissionCallback();
+                    setCameraPermissionCallback(null);
+                  }
+                }}
+                style={{
+                  flex:1, padding:"14px 10px",
+                  background:"transparent", border:"none",
+                  cursor:"pointer",
+                  fontSize:17, fontWeight:600, color:"#007AFF",
+                  fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
+                  letterSpacing:"-0.01em", transition:"background 0.12s",
+                }}
+                onMouseOver={e=>e.currentTarget.style.background="#E5E5EA"}
+                onMouseOut={e=>e.currentTarget.style.background="transparent"}
+              >
+                Autoriser
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Message discret si permission refusée ── */}
+      {cameraPermissionDenied && (
+        <div style={{
+          position:"fixed", bottom:100, left:"50%", transform:"translateX(-50%)",
+          zIndex:9999, pointerEvents:"none",
+          animation:"toastSlideIn 0.3s cubic-bezier(.22,.68,0,1.2) both",
+        }}>
+          <div style={{
+            display:"flex", alignItems:"center", gap:9,
+            background:"rgba(44,44,46,0.92)", backdropFilter:"blur(10px)",
+            color:"#F2F2F7", borderRadius:50,
+            padding:"11px 20px",
+            fontFamily:T.body, fontSize:12.5, fontWeight:500,
+            boxShadow:"0 6px 24px rgba(0,0,0,0.28)",
+            whiteSpace:"nowrap",
+          }}>
+            <span style={{ fontSize:14 }}>🚫</span>
+            {cameraDeniedContext === "scanner"
+              ? "L'accès à l'appareil photo a été refusé. Vous pouvez toujours importer un fichier depuis votre appareil."
+              : "L'accès à l'appareil photo a été refusé. Vous pouvez toujours remplir les champs manuellement."}
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   /* ── PROFILE ── */
   if (screen === "profile") return (
     <Shell>
       {AuthModalEl}
+      {cameraLayer}
       <Header {...headerProps} />
       <ProfilePage
         profile={profile}
@@ -3970,6 +4163,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         profileScanLoading={profileScanLoading}
         profileScanSuccess={profileScanSuccess}
         profileScanError={profileScanError}
+        profileScanNote={profileScanNote}
         stripeConnectReady={stripeConnectReady}
         onConnectStripe={handleConnectStripe}
         connectingStripe={connectingStripe}
@@ -4313,7 +4507,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
       {/* ── Bouton fixe Centre d'aide ── */}
       <button
-        className="freeley-floating"
+        className="freeley-floating freeley-fab freeley-fab-help"
         onClick={() => setShowHelp(true)}
         title="Centre d'aide"
         style={{
@@ -4348,12 +4542,6 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         <CameraCapture
           onCapture={handleMagicFillCapture}
           onClose={() => setMagicFillTarget(null)}
-        />
-      )}
-      {profileScanTarget && (
-        <CameraCapture
-          onCapture={handleProfileScanCapture}
-          onClose={() => setProfileScanTarget(false)}
         />
       )}
       {showScannerModal && (
@@ -4424,125 +4612,8 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         />
       )}
 
-      {/* ── 📷 Popup permission caméra (simulation iOS/Android) ── */}
-      {showCameraPermissionModal && (
-        <div style={{
-          position:"fixed", inset:0, zIndex:10000,
-          background:"rgba(0,0,0,0.45)", backdropFilter:"blur(5px)",
-          display:"flex", alignItems:"center", justifyContent:"center",
-          padding:"12px",
-        }}>
-          <div style={{
-            background:"#F2F2F7",
-            borderRadius:14,
-            width:"100%", maxWidth:290,
-            boxShadow:"0 24px 64px rgba(0,0,0,0.35)",
-            overflow:"hidden",
-            animation:"cameraPopIn 0.32s cubic-bezier(.22,.68,0,1.2) both",
-            fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
-          }}>
-            {/* Icon + Titre + Texte */}
-            <div style={{ padding:"24px 20px 20px", textAlign:"center" }}>
-              {/* Icône caméra façon iOS */}
-              <div style={{
-                width:56, height:56, borderRadius:14,
-                background:"linear-gradient(145deg, #1C1C1E 0%, #2C2C2E 100%)",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                margin:"0 auto 14px",
-                boxShadow:"0 4px 14px rgba(0,0,0,0.22)",
-              }}>
-                <span style={{ fontSize:28 }}>📷</span>
-              </div>
-              <div style={{
-                fontSize:17, fontWeight:600, color:"#1C1C1E",
-                letterSpacing:"-0.02em", lineHeight:1.3, marginBottom:10,
-              }}>
-                « Freeley » souhaite accéder à l'appareil photo
-              </div>
-              <div style={{
-                fontSize:13, color:"#48484A",
-                lineHeight:1.55, letterSpacing:"-0.01em",
-              }}>
-                Cette autorisation permet à l'application de photographier vos cartes de visite, briefs de mission ou documents papiers afin d'extraire automatiquement les informations textuelles grâce à notre assistant.
-              </div>
-            </div>
+      {cameraLayer}
 
-            {/* Séparateur */}
-            <div style={{ height:1, background:"#C6C6C8" }} />
-
-            {/* Boutons façon alerte iOS */}
-            <div style={{ display:"flex" }}>
-              <button
-                onClick={() => {
-                  setShowCameraPermissionModal(false);
-                  setCameraPermission("denied");
-                  setCameraPermissionDenied(true);
-                  setTimeout(() => setCameraPermissionDenied(false), 4500);
-                }}
-                style={{
-                  flex:1, padding:"14px 10px",
-                  background:"transparent", border:"none",
-                  borderRight:"1px solid #C6C6C8",
-                  cursor:"pointer",
-                  fontSize:17, fontWeight:400, color:"#007AFF",
-                  fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
-                  letterSpacing:"-0.01em", transition:"background 0.12s",
-                }}
-                onMouseOver={e=>e.currentTarget.style.background="#E5E5EA"}
-                onMouseOut={e=>e.currentTarget.style.background="transparent"}
-              >
-                Refuser
-              </button>
-              <button
-                onClick={() => {
-                  setCameraPermission("granted");
-                  setShowCameraPermissionModal(false);
-                  if (cameraPermissionCallback) {
-                    cameraPermissionCallback();
-                    setCameraPermissionCallback(null);
-                  }
-                }}
-                style={{
-                  flex:1, padding:"14px 10px",
-                  background:"transparent", border:"none",
-                  cursor:"pointer",
-                  fontSize:17, fontWeight:600, color:"#007AFF",
-                  fontFamily:"-apple-system, 'SF Pro Display', 'DM Sans', system-ui, sans-serif",
-                  letterSpacing:"-0.01em", transition:"background 0.12s",
-                }}
-                onMouseOver={e=>e.currentTarget.style.background="#E5E5EA"}
-                onMouseOut={e=>e.currentTarget.style.background="transparent"}
-              >
-                Autoriser
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Message discret si permission refusée ── */}
-      {cameraPermissionDenied && (
-        <div style={{
-          position:"fixed", bottom:100, left:"50%", transform:"translateX(-50%)",
-          zIndex:9999, pointerEvents:"none",
-          animation:"toastSlideIn 0.3s cubic-bezier(.22,.68,0,1.2) both",
-        }}>
-          <div style={{
-            display:"flex", alignItems:"center", gap:9,
-            background:"rgba(44,44,46,0.92)", backdropFilter:"blur(10px)",
-            color:"#F2F2F7", borderRadius:50,
-            padding:"11px 20px",
-            fontFamily:T.body, fontSize:12.5, fontWeight:500,
-            boxShadow:"0 6px 24px rgba(0,0,0,0.28)",
-            whiteSpace:"nowrap",
-          }}>
-            <span style={{ fontSize:14 }}>🚫</span>
-            {cameraDeniedContext === "scanner"
-              ? "L'accès à l'appareil photo a été refusé. Vous pouvez toujours importer un fichier depuis votre appareil."
-              : "L'accès à l'appareil photo a été refusé. Vous pouvez toujours remplir les champs manuellement."}
-          </div>
-        </div>
-      )}
       <Header {...headerProps} />
 
       {/* ══ ⚡ VOS OUTILS IA INSTANTANÉS ══ */}
@@ -6736,6 +6807,12 @@ function ContractModifyBox({ dark = false, contractText, form, profile, freelanc
               }}>{loading ? "Modification du contrat en cours…" : "✨ Appliquer les modifications"}</button>
             )}
           </div>
+          {/* Version 225 : la réécriture arrive aussi en direct ; en veille, elle s'arrête (le contrat ne change pas) */}
+          {loading && (
+            <div data-testid="keep-awake-modify" style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:8, padding:"9px 12px", marginTop:10, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
+              📱 Garde ton écran allumé jusqu'à la fin. Si ton téléphone se met en veille, la modification s'arrête et ton contrat reste comme avant.
+            </div>
+          )}
         </>
       )}
     </div>
@@ -6749,7 +6826,7 @@ function ContractCheckBox({ text, form, profile, onGoToProfile }) {
   if (!issues.length) return (
     <div data-testid="contract-check" style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"10px 14px", marginBottom:16, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.5 }}>
       <span style={{ fontSize:14 }}>✓</span>
-      <span>Contrôle automatique : rien d'anormal dans les points vérifiés (mentions obligatoires, montants, dates, clauses interdites avec un particulier).</span>
+      <span>Contrôle automatique : rien d'anormal dans les points vérifiés (mentions obligatoires, montants, paiement, dates, révisions, clauses interdites avec un particulier).</span>
     </div>
   );
   const needsProfile = issues.some(m => m.includes("profil"));
@@ -7192,6 +7269,10 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
     return () => clearInterval(t);
   }, []);
 
+  // Version 225 : l'écran de rédaction s'ouvre en haut (sur téléphone, il restait en bas de la page, là où se trouvait
+  // le bouton « Générer mon contrat »), pour que le message sur la mise en veille soit visible tout de suite.
+  _useEffect(() => { try { window.scrollTo(0, 0); } catch (e) {} }, []);
+
   const d1 = form.startDate ? new Date(form.startDate).toLocaleDateString("fr-FR") : "—";
   const d2 = form.endDate   ? new Date(form.endDate).toLocaleDateString("fr-FR")   : "—";
   const dots = ".".repeat(dotCount);
@@ -7232,6 +7313,21 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
               animation: i === phase - 1 ? "shimmer 1s ease-in-out infinite" : "none",
             }}/>
           ))}
+        </div>
+      </div>
+
+      {/* Version 225 : rester sur l'écran pendant la rédaction (demande de Junayd : « comme ça les gens sont prévenus »).
+          Le contrat arrive en direct sur l'appareil : en veille, la connexion est coupée et la rédaction est perdue. */}
+      <div data-testid="keep-awake-notice" className="fade-up" style={{
+        display:"flex", alignItems:"flex-start", gap:12,
+        background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:10,
+        padding:"14px 16px", marginBottom:24,
+        fontFamily:T.body, fontSize:13, color:"#92400E", lineHeight:1.55,
+      }}>
+        <span style={{ fontSize:20, lineHeight:1.1 }}>📱</span>
+        <div>
+          <div style={{ fontWeight:700, marginBottom:2 }}>Garde ton écran allumé jusqu'à la fin de la rédaction.</div>
+          <div>Ne mets pas ton téléphone en veille : sinon, la rédaction s'arrête et tu devras la relancer.</div>
         </div>
       </div>
 
@@ -7789,7 +7885,7 @@ function FeedbackBubble() {
   return (
     <>
       <button
-        className="freeley-floating"
+        className="freeley-floating freeley-fab freeley-fab-feedback"
         onClick={() => setOpen(o => !o)}
         aria-label="Signaler un problème ou une idée"
         style={{
@@ -7803,7 +7899,7 @@ function FeedbackBubble() {
       >💬</button>
 
       {open && (
-        <div className="freeley-floating" style={{
+        <div className="freeley-floating freeley-feedback-panel" style={{
           position:"fixed", bottom:88, right:24, zIndex:9999,
           width:320, maxWidth:"calc(100vw - 40px)",
           background:"#fff", borderRadius:16, padding:18,
@@ -10876,7 +10972,7 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
   const qualityColor = quality === "bonne" ? "#16A34A" : quality === "moyenne" ? "#D97706" : "#DC2626";
   const qualityBg = quality === "bonne" ? "#F0FDF4" : quality === "moyenne" ? "#FFFBEB" : "#FEF2F2";
   const qualityBorder = quality === "bonne" ? "#BBF7D0" : quality === "moyenne" ? "#FDE68A" : "#FECACA";
-  const qualityLabel = quality === "bonne" ? "✓ Bonne description — contrat précis garanti" : quality === "moyenne" ? "⚡ Ajoute plus de détails pour un contrat plus solide" : "⚠ Description trop courte — ton contrat sera vague";
+  const qualityLabel = quality === "bonne" ? "✓ Description assez détaillée" : quality === "moyenne" ? "⚡ Ajoute plus de détails pour un contrat plus solide" : "⚠ Description trop courte — ton contrat sera vague";
 
   const canImprove = len >= 20 && !improving;
 
@@ -12568,6 +12664,16 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     try {
       const clauseDeditActive = historyView.form?.clauseDedit ? "OUI, activée sur ce contrat" : "NON, pas activée sur ce contrat";
       const acomptePct = historyView.form?.acomptePourcentage || "0";
+      // Version 226 : l'assistant sait si le contrat est signé. Avant, il disait « tu es protégé » sur un contrat que le
+      // client n'avait pas signé, et conseillait un avenant, qui n'existe qu'une fois le contrat signé par les deux.
+      const clientSigned = historyView.signatureStatus === "signed" || !!historyView.clientSignature;
+      const signatureState = historyView.retractationExercisedAt
+        ? "ANNULÉ : le client a exercé son droit de rétractation"
+        : clientSigned
+          ? "signé par les deux parties"
+          : (historyView.signatureStatus === "pending_client" || historyView.freelanceSignature)
+            ? "signé par le freelance seulement : le client ne l'a PAS encore signé"
+            : "PAS ENCORE SIGNÉ, ni par le freelance ni par le client";
       const prompt = `Tu es un assistant qui aide un freelance à comprendre CE contrat précis, un seul, celui fourni ci-dessous — pas un avocat généraliste, pas un chatbot de discussion libre.
 
 RÈGLE ABSOLUE, à respecter avant toute autre chose : tu réponds UNIQUEMENT aux questions concernant ce contrat précis et la situation du freelance avec ce client. Si la question posée sort de ce cadre (sujet hors contrat, discussion générale, question sans rapport avec ce contrat ou ce client), réponds simplement une phrase du type "Je suis là uniquement pour t'aider sur ce contrat précis — reformule ta question par rapport à ta situation avec ce client." et n'ajoute rien d'autre. Ne développe jamais un autre sujet, même si le freelance insiste ou reformule pour te faire dévier.
@@ -12578,17 +12684,20 @@ ${historyView.contract || "Non disponible"}
 """
 
 INFORMATIONS COMPLÉMENTAIRES SUR CE CONTRAT (à utiliser si pertinent, ne pas recalculer) :
+- Signature du contrat : ${signatureState}
 - Acompte prévu : ${acomptePct}%
-- Statut du paiement : ${({ pending: "en attente", paid: "payé" })[historyView.paymentStatus] || historyView.paymentStatus || "en attente"}
+- Statut du paiement : ${({ pending: "en attente", paid: "payé", late: "en retard" })[historyView.paymentStatus] || historyView.paymentStatus || "en attente"}
 - Clause de dédommagement en cas d'annulation : ${clauseDeditActive}
 - ${historyView.form?.typeClient === "particulier" ? "Intérêts de retard" : "Pénalités de retard"} : ${historyView.form?.latePaymentPenalty || historyView.form?.typeClient !== "particulier" ? "oui" : "non"}
 
 QUESTION DU FREELANCE : "${assistantQuestion}"
 
+SIGNATURE (uniquement pour une question qui concerne bien ce contrat) : si le contrat n'est pas encore signé par le client (voir « Signature du contrat » ci-dessus), commence ta réponse en le disant clairement : tant que le client ne l'a pas signé, ce contrat ne l'engage pas encore par écrit (seules d'autres preuves de son accord, comme un email d'acceptation ou un paiement, pourraient compter). Dans ce cas, ne dis jamais que le freelance « est protégé » : explique ce que le contrat prévoit une fois signé, et conseille de le faire signer avant de commencer ou de continuer le travail. Pour changer le contrat avant la signature du client, conseille l'option (o), jamais un avenant. Si le contrat est annulé par la rétractation du client, dis-le dès le début de ta réponse.
+
 Si la question concerne bien ce contrat/ce client, réponds en :
 1. Répondant clairement si le freelance est protégé ou non dans sa situation, en citant l'article ou la clause exacte du contrat qui s'applique (ou en disant clairement qu'aucune clause ne le couvre si c'est le cas)
-2. Donnant un conseil concret et actionnable pour cette situation précise
-3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client), (j) clause de bonne conduite et respect mutuel en cas de comportement abusif du client, (k) clause de suspension du travail en cas de retard de paiement persistant, (l) clause de sécurité et assurance professionnelle pour les interventions sur site à risque, (m) clause d'interlocuteur unique désigné côté client, (n) clause de préavis de 30 jours pour les missions récurrentes. N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
+2. Donnant un conseil concret et actionnable pour cette situation précise. Si une option de la liste ci-dessous sert dès maintenant (par exemple l'outil de recouvrement pour un impayé, ou l'option (o) avant la signature du client), cite-la ici plutôt que dans « Pour la prochaine fois »
+3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, une fois le contrat signé par les deux parties, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client), (j) clause de bonne conduite et respect mutuel en cas de comportement abusif du client, (k) clause de suspension du travail en cas de retard de paiement persistant, (l) clause de sécurité et assurance professionnelle pour les interventions sur site à risque, (m) clause d'interlocuteur unique désigné côté client, (n) clause de préavis de 30 jours pour les missions récurrentes, (o) « Modifier le contrat » : changer le texte ou les chiffres du contrat tant que le client ne l'a pas signé. N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
 4. Terminant par une courte phrase indiquant que cette analyse est indicative et qu'un avocat reste recommandé pour un désaccord persistant ou un montant important
 
 Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 150-250 mots maximum. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple, il sera affiché tel quel.`;
@@ -16545,7 +16654,7 @@ function MiniPlanCard({ icon, title, price, sub, color, recommended, onSelect })
 }
 
 /* ══════════════════════════════════════════ PROFILE PAGE ══ */
-function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, stripeConnectReady, onConnectStripe, connectingStripe, onConnectSuperPdp, onDisconnectSuperPdp, connectingSuperPdp }) {
+function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, profileScanNote, stripeConnectReady, onConnectStripe, connectingStripe, onConnectSuperPdp, onDisconnectSuperPdp, connectingSuperPdp }) {
   const [newSkill, setNewSkill] = useState("");
   const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState(initialSection || "identity");
@@ -16891,6 +17000,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 </button>
                 {profileScanError && (
                   <div style={{ marginTop:8, fontFamily:T.body, fontSize:11, color:"#B91C1C", lineHeight:1.5 }}>⚠️ {profileScanError}</div>
+                )}
+                {profileScanNote && (
+                  <div data-testid="profile-scan-note" style={{ marginTop:8, fontFamily:T.body, fontSize:11.5, lineHeight:1.5, color: profileScanNote.warn ? "#92400E" : "#166534" }}>{profileScanNote.warn ? "⚠️ " : "✓ "}{profileScanNote.text}</div>
                 )}
               </div>
             )}
