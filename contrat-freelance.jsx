@@ -929,7 +929,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "227";
+const APP_VERSION = "229";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -2213,7 +2213,10 @@ const LOGO_MAX_W = 600, LOGO_MAX_H = 240;
 const normalizeLogoDataUrl = (src) => new Promise((resolve, reject) => {
   if (!src) { reject(new Error("pas d'image")); return; }
   const img = new Image();
+  // Version 228 : jamais d'attente sans fin (le profil, le contrat et la facture attendent ce résultat)
+  const timer = setTimeout(() => reject(new Error("image trop longue à lire")), 8000);
   img.onload = () => {
+    clearTimeout(timer);
     try {
       const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
       if (!w0 || !h0) throw new Error("image vide");
@@ -2225,29 +2228,85 @@ const normalizeLogoDataUrl = (src) => new Promise((resolve, reject) => {
       resolve(canvas.toDataURL("image/png"));
     } catch (e) { reject(e); }
   };
-  img.onerror = () => reject(new Error("image illisible"));
+  img.onerror = () => { clearTimeout(timer); reject(new Error("image illisible")); };
   img.src = src;
 });
+// Version 228 : logo du profil prêt pour une facture. Un logo ajouté avant la version 227 n'a jamais été ajusté
+// (n'importe quelle taille, jusqu'à 2 Mo) : il est ajusté ici, au moment du PDF, sans rien changer au profil.
+// Si l'image ne peut pas être lue, on garde l'original (drawPdfLogo n'affiche alors simplement pas de logo).
+// Version 229 : on regarde aussi si le logo est clair (logoLight), pour le poser sur un fond foncé dans la facture.
+const profileWithPdfLogo = async (profile) => {
+  if (!profile?.logo) return profile;
+  let logo;
+  try { logo = await normalizeLogoDataUrl(profile.logo); } catch (e) { return profile; }
+  let logoLight = false;
+  try { logoLight = await logoIsLight(logo); } catch (e) { logoLight = false; }
+  return { ...profile, logo, logoLight };
+};
+// Version 229 : un logo « clair » (blanc, crème, jaune pâle…) est presque invisible sur une facture blanche et dans le
+// cadre blanc du contrat : il est alors posé sur un fond bleu foncé. Clair = image en partie transparente (logo prévu
+// pour un fond sombre) dont presque aucun point visible n'est foncé. Un logo qui a son propre fond n'est jamais « clair ».
+const logoIsLight = (src) => new Promise((resolve) => {
+  if (!src) { resolve(false); return; }
+  let done = false, timer = null;
+  const finish = (v) => { if (!done) { done = true; if (timer) clearTimeout(timer); resolve(!!v); } };
+  try {
+    timer = setTimeout(() => finish(false), 8000);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+        if (!w0 || !h0) { finish(false); return; }
+        const r = Math.min(1, 120 / w0, 120 / h0);
+        const w = Math.max(1, Math.round(w0 * r)), h = Math.max(1, Math.round(h0 * r));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        const px = ctx.getImageData(0, 0, w, h).data;
+        let opaque = 0, transparent = 0, dark = 0;
+        for (let i = 0; i < px.length; i += 4) {
+          if (px[i + 3] < 128) { transparent++; continue; }
+          opaque++;
+          if (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2] < 170) dark++;
+        }
+        finish(opaque > 0 && transparent / (opaque + transparent) >= 0.1 && dark / opaque < 0.06);
+      } catch (e) { finish(false); }
+    };
+    img.onerror = () => finish(false);
+    img.src = src;
+  } catch (e) { finish(false); }
+});
+// Fonds foncés pour un logo clair (version 229) : sur la bande bleue du contrat et de l'avenant, un cadre à peine plus
+// clair que la bande ; sur la facture (page blanche), un bloc bleu marine.
+const LOGO_BADGE_ON_BAND = [40, 70, 112], LOGO_BADGE_ON_WHITE = [26, 54, 93];
 const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = (ev) => resolve(ev.target.result);
   reader.onerror = () => reject(new Error("lecture impossible"));
   reader.readAsDataURL(file);
 });
-// Logo dans un PDF : il tient dans maxW × maxH (en mm) sans être déformé. Sur un fond sombre, un cadre blanc arrondi le
-// rend lisible. Si le PDF ne sait pas lire l'image, il n'y a simplement pas de logo (le document est quand même créé).
-const drawPdfLogo = (doc, src, { x, y, maxW, maxH, align = "left", badge = false }) => {
+// Version 228 : les images des PDF sont compressées, sans aucune perte (l'image reste exactement la même). Avant, jsPDF
+// les rangeait telles quelles : un logo pesait de 225 à 400 Ko, deux signatures plus de 500 Ko, si bien qu'un contrat
+// signé dépassait 600 Ko. « SLOW » est la compression la plus forte de jsPDF ; nos images sont petites (logo de
+// 600 × 240 px au plus, signatures, QR code), elle reste rapide. Les documents sont aussi créés avec « compress: true »
+// (le texte des pages est compressé : 69 Ko → 20 Ko pour un contrat de 8 pages).
+const PDF_IMAGE_COMPRESSION = "SLOW";
+// Logo (ou signature) dans un PDF : il tient dans maxW × maxH (en mm) sans être déformé. Sur un fond sombre, un cadre blanc
+// arrondi le rend lisible (marge « pad », coins « radius »). Si le PDF ne sait pas lire l'image, il n'y a simplement pas
+// d'image (le document est quand même créé). Renvoie la place occupée (cadre compris), ou null.
+const drawPdfLogo = (doc, src, { x, y, maxW, maxH, align = "left", badge = false, pad: padOpt, radius = 1.5, badgeColor = [255, 255, 255] }) => {
   if (!src) return null;
   try {
     const props = doc.getImageProperties(src);
     if (!props || !(props.width > 0) || !(props.height > 0)) return null;
-    const pad = badge ? 1.6 : 0;
+    const pad = badge ? (padOpt ?? 1.6) : 0;
     const r = Math.min((maxW - 2 * pad) / props.width, (maxH - 2 * pad) / props.height);
     const w = props.width * r, h = props.height * r;
     const left = align === "right" ? x - w - 2 * pad : x;
     const type = String(props.fileType || (/^data:image\/jpe?g/i.test(String(src)) ? "JPEG" : "PNG")).toUpperCase();
-    if (badge) { doc.setFillColor(255, 255, 255); doc.roundedRect(left, y, w + 2 * pad, h + 2 * pad, 1.5, 1.5, "F"); }
-    doc.addImage(src, type, left + pad, y + pad, w, h);
+    if (badge) { doc.setFillColor(...badgeColor); doc.roundedRect(left, y, w + 2 * pad, h + 2 * pad, radius, radius, "F"); }
+    doc.addImage(src, type, left + pad, y + pad, w, h, undefined, PDF_IMAGE_COMPRESSION);
     return { x: left, y, w: w + 2 * pad, h: h + 2 * pad };
   } catch (e) { return null; }
 };
@@ -2405,7 +2464,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   // SIRET du client professionnel, affiché dans ses cadres comme celui du prestataire (version 222)
   const pClientSiret = pForm.typeClient !== "particulier" && String(pForm.clientSiret || "").trim() ? fmtSiret(pForm.clientSiret) : "";
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   doc.setProperties({ title: `Contrat — ${pForm.missionTitle || "Mission"}`, creator: `Freeley ${APP_VERSION}` });
   const PW = 210, PH = 297;
   const ML = 22, MR = 22, cw = PW - ML - MR;
@@ -2507,21 +2566,26 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   doc.setTextColor(180, 210, 240);
   doc.text("DE SERVICES INDÉPENDANT", ML + 2, 38.5);
 
+  // Logo du prestataire (version 227), enregistré avec le contrat (même PDF pour le freelance et pour le client), en haut
+  // à droite de la bande. Version 228 : un peu plus grand (cadre jusqu'à 56 × 17 mm ; avant 46 × 12,5 mm). Il est placé
+  // avant la référence du document : quand son cadre descend plus bas que l'ancien (16 mm), la référence descend
+  // d'autant, de 5 mm au plus, pour ne jamais être recouverte. Sans logo, rien ne bouge.
+  // Version 229 : un logo clair garde sa place, sur un cadre bleu à peine plus clair que la bande (il reste visible)
+  const logoBox = drawPdfLogo(doc, pForm.freelanceLogo, { x: PW - MR, y: 4, maxW: 56, maxH: 17, align: "right", badge: true, pad: 1.8, radius: 2, badgeColor: pForm.freelanceLogoLight ? LOGO_BADGE_ON_BAND : [255, 255, 255] });
+  const refShift = logoBox ? Math.min(5, Math.max(0, logoBox.y + logoBox.h - 16)) : 0;
+
   // Numéro de contrat (coin droit de la bande)
   doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
   doc.setTextColor(160, 190, 230);
   if (contractNumber) {
-    doc.text("Réf. document", PW - MR, 20, { align:"right" });
+    doc.text("Réf. document", PW - MR, 20 + refShift, { align:"right" });
     doc.setFont("helvetica","bold"); doc.setFontSize(9);
     doc.setTextColor(...WHITE);
-    doc.text(contractNumber, PW - MR, 28, { align:"right" });
+    doc.text(contractNumber, PW - MR, 28 + refShift, { align:"right" });
   }
   doc.setFont("helvetica","normal"); doc.setFontSize(7);
   doc.setTextColor(180, 210, 240);
-  doc.text(`Fait le ${contractDate}`, PW - MR, 35, { align:"right" });
-  // Version 227 : logo du prestataire, enregistré avec le contrat (même PDF pour le freelance et pour le client),
-  // en haut à droite de la bande, au-dessus de la référence du document
-  drawPdfLogo(doc, pForm.freelanceLogo, { x: PW - MR, y: 3.5, maxW: 46, maxH: 12.5, align: "right", badge: true });
+  doc.text(`Fait le ${contractDate}`, PW - MR, 35 + refShift, { align:"right" });
 
   // ── Bloc titre mission (sous la bande) ──
   let cy = 58;
@@ -2829,7 +2893,8 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   if (pForm.freelanceSiret) { doc.setTextColor(...GREY); doc.text(`SIRET : ${fmtSiret(pForm.freelanceSiret)}`, ML + 4, y + 30); }
   // Signature réelle si disponible, sinon ligne à remplir à la main
   if (pFreelanceSig) {
-    try { doc.addImage(pFreelanceSig, "PNG", ML + 4, y + 33, bw - 8, 16); } catch(e) {}
+    // Version 228 : signature jamais déformée (avant : étirée sur toute la largeur du cadre) et compressée
+    drawPdfLogo(doc, pFreelanceSig, { x: ML + 4, y: y + 33, maxW: bw - 8, maxH: 16 });
     doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
     drawCheck(ML + 5.6, y + 54.4, 2.6, GREEN);
     doc.text(pFreelanceSignedAt ? `Signé électroniquement le ${new Date(pFreelanceSignedAt).toLocaleDateString("fr-FR")}` : "Signé électroniquement", ML + 8.5, y + 55.5);
@@ -2873,7 +2938,8 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   }
   // Signature réelle si disponible, sinon ligne à remplir à la main
   if (pClientSig) {
-    try { doc.addImage(pClientSig, "PNG", cx3 + 4, y + 33, bw - 8, 16); } catch(e) {}
+    // Version 228 : signature jamais déformée (avant : étirée sur toute la largeur du cadre) et compressée
+    drawPdfLogo(doc, pClientSig, { x: cx3 + 4, y: y + 33, maxW: bw - 8, maxH: 16 });
     doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...GREEN);
     const signedLabel = pSignedAt ? new Date(pSignedAt).toLocaleDateString("fr-FR") : today;
     drawCheck(cx3 + 5.6, y + 54.4, 2.6, GREEN);
@@ -3260,6 +3326,13 @@ function AppInner() {
   // Colonnes ajoutées en version 219 (script SQL v219). Tant que le script n'a pas été lancé, Supabase refuse
   // toute la sauvegarde à cause d'elles : on réessaie alors sans elles, et elles restent gardées sur l'appareil.
   const PROFILE_V219_COLUMNS = ["mediateur", "assurance"];
+  // Version 229 : colonnes lues pour le profil. Le secret de facturation électronique n'en fait plus partie : seul le
+  // serveur en a besoin. Ce sont les colonnes que la sauvegarde du profil écrit déjà, plus la connexion Stripe et
+  // l'identifiant Super PDP.
+  const PROFILE_SELECT_COLUMNS = ["id", "first_name", "last_name", "job_title", "bio", "tjm", "siret", "linkedin", "portfolio", "github",
+    "skills", "photo", "company_name", "legal_status", "tva_number", "address", "iban", "bic", "bank_name", "logo",
+    "mediateur", "assurance", "super_pdp_client_id", "stripe_connect_account_id", "stripe_connect_ready"];
+  const isUnknownColumnError = (error) => !!error && (error.code === "42703" || error.code === "PGRST204" || /column .*does not exist|could not find .*column/i.test(String(error.message || "")));
   const isMissingColumnError = (error) => !!error && (error.code === "PGRST204" || error.code === "42703" || PROFILE_V219_COLUMNS.some(c => String(error.message || "").includes(c)));
 
   // Convertit une ligne Supabase (snake_case) vers le format du profil (camelCase)
@@ -3274,8 +3347,9 @@ function AppInner() {
     // Seulement si la colonne existe déjà : sinon on garderait un champ vide à la place de ce qui est sur l'appareil
     ...(row.mediateur !== undefined ? { mediateur: row.mediateur || "" } : {}),
     ...(row.assurance !== undefined ? { assurance: row.assurance || "" } : {}),
-    // Le client_secret n'est jamais renvoyé au navigateur après sauvegarde, seulement un indicateur
-    superPdpConnected: !!(row.super_pdp_client_id && row.super_pdp_client_secret),
+    // Version 229 : le secret (super_pdp_client_secret) n'est plus lu par le navigateur ; l'identifiant suffit
+    // (les deux sont enregistrés et effacés ensemble). Avant, select("*") l'envoyait au navigateur.
+    superPdpConnected: !!row.super_pdp_client_id,
   });
 
   // Récupère le profil réel depuis Supabase (appelée depuis loadUserData à la connexion).
@@ -3283,7 +3357,12 @@ function AppInner() {
   const loadProfileFromSupabase = async (userId, seq, attempt = 0) => {
     let data = null;
     try {
-      const res = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+      // Version 229 : seulement les colonnes utiles (plus le secret de facturation électronique). Si une colonne
+      // manque encore dans la base (script SQL pas lancé), on réessaie sans celles de la v219, puis comme avant.
+      const sel = (cols) => supabase.from("profiles").select(cols).eq("id", userId).maybeSingle();
+      let res = await sel(PROFILE_SELECT_COLUMNS.join(", "));
+      if (res.error && isUnknownColumnError(res.error)) res = await sel(PROFILE_SELECT_COLUMNS.filter(c => !PROFILE_V219_COLUMNS.includes(c)).join(", "));
+      if (res.error && isUnknownColumnError(res.error)) { console.warn("Profil : colonne absente de la base, lecture complète", res.error); res = await sel("*"); }
       if (res.error) throw res.error;
       data = res.data;
     } catch(e) {
@@ -3520,7 +3599,6 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         if (badIban) parts.push("L'IBAN lu sur la photo semble incorrect (un caractère mal lu ?) : il n'a pas été rempli. Tape-le à la main.");
         if (!parts.length) parts.push("Ces informations étaient déjà dans ton profil.");
         setProfileScanNote({ text: parts.join(" "), warn: badIban || kept.length > 0 });
-        setTimeout(() => setProfileScanNote(null), 15000);
         if (filled.length || replaced.length) {
           setProfileScanSuccess(true);
           setTimeout(() => setProfileScanSuccess(false), 3500);
@@ -3679,10 +3757,14 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     // les avenants montrent le même logo, même si le profil change ensuite.
     let freelanceLogo = "";
     if (profile?.logo) { try { freelanceLogo = await normalizeLogoDataUrl(profile.logo); } catch (e) { freelanceLogo = ""; } }
+    // Version 229 : un logo clair sera posé sur un fond foncé dans les PDF (sinon il serait invisible)
+    let freelanceLogoLight = false;
+    if (freelanceLogo) { try { freelanceLogoLight = await logoIsLight(freelanceLogo); } catch (e) { freelanceLogoLight = false; } }
     const genForm = {
       ...form,
       ...trimmed,
       freelanceLogo,
+      freelanceLogoLight,
       freelanceLegalStatus: legalStatus,
       freelanceCompanyName: !isEntrepreneurIndividuel(legalStatus) ? String(profile?.companyName || "").trim() : "",
       freelanceTvaNumber: String(profile?.tvaNumber || "").trim(),
@@ -4219,6 +4301,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         profileScanSuccess={profileScanSuccess}
         profileScanError={profileScanError}
         profileScanNote={profileScanNote}
+        onDismissScanNote={() => setProfileScanNote(null)}
         stripeConnectReady={stripeConnectReady}
         onConnectStripe={handleConnectStripe}
         connectingStripe={connectingStripe}
@@ -5558,11 +5641,11 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
 /* ══════════════════════════════════════════ AVENANT MODAL ══ */
 // Génère le PDF d'un avenant — partagé entre la fenêtre de création et la liste des avenants déjà sauvegardés
-const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature, logo = null) => {
+const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature, logo = null, logoLight = false) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
     const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
     const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
     const today = new Date().toLocaleDateString("fr-FR");
@@ -5573,7 +5656,7 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
     doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
     doc.text(`${contractNum ? `Au contrat ${contractNum} · ` : ""}Établi le ${today} via Freeley`, ML, 23);
     // Version 227 : logo du prestataire (celui du contrat), en haut à droite de la bande
-    drawPdfLogo(doc, logo, { x: PW - MR, y: 4, maxW: 46, maxH: 20, align: "right", badge: true });
+    drawPdfLogo(doc, logo, { x: PW - MR, y: 4, maxW: 46, maxH: 20, align: "right", badge: true, badgeColor: logoLight ? LOGO_BADGE_ON_BAND : [255, 255, 255] });
     let y = 42;
     doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(40,40,40);
     const lines = doc.splitTextToSize((avenantText || "").replace(/\\n/g, "\n"), cw);
@@ -5595,13 +5678,13 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
       if (freelanceSignature) {
         doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
         doc.text(`${freelanceName || "Prestataire"}`, ML, yA); yA += 5;
-        try { doc.addImage(freelanceSignature, "PNG", ML, yA, halfW, 26); yA += 30; } catch(e) {}
+        if (drawPdfLogo(doc, freelanceSignature, { x: ML, y: yA, maxW: halfW, maxH: 26 })) yA += 30; // version 228 : jamais déformée, compressée
       }
       if (clientSignature) {
         const xB = ML + halfW + 10;
         doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
         doc.text(`${clientName || "Client"}`, xB, yB); yB += 5;
-        try { doc.addImage(clientSignature, "PNG", xB, yB, halfW, 26); yB += 30; } catch(e) {}
+        if (drawPdfLogo(doc, clientSignature, { x: xB, y: yB, maxW: halfW, maxH: 26 })) yB += 30; // version 228 : jamais déformée, compressée
       }
       y = Math.max(yA, yB) + 6;
       doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(120,120,120);
@@ -5688,7 +5771,7 @@ function renderInvoicePDF({
   profile, typeClient, qrBase64, footNote, filename, dueDays = 0,
 }) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   doc.setProperties({ title: `Facture ${invoiceNum || ""}`.trim(), creator: `Freeley ${APP_VERSION}` });
   const PW = 210, ML = 20, MR = 20, cw = PW - ML - MR;
   const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80], GREY = [110, 110, 110];
@@ -5703,7 +5786,8 @@ function renderInvoicePDF({
   let y = 18;
 
   // Version 227 : le logo garde ses proportions (avant : carré forcé de 26 × 26 mm, un logo en longueur était écrasé)
-  drawPdfLogo(doc, p.logo, { x: ML, y, maxW: 50, maxH: 24 });
+  // Version 229 : un logo clair (invisible sur la page blanche) est posé sur un bloc bleu marine, dans la même place
+  drawPdfLogo(doc, p.logo, { x: ML, y, maxW: 50, maxH: 24, ...(p.logoLight ? { badge: true, badgeColor: LOGO_BADGE_ON_WHITE, pad: 2, radius: 2 } : {}) });
   doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(...NAVY);
   doc.text("FACTURE", PW - MR, y + 8, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
@@ -5803,7 +5887,7 @@ function renderInvoicePDF({
       const qrBoxX = hasIban ? ML + ibanBoxW + 4 : ML;
       const qrBoxW = hasIban ? cw - ibanBoxW - 4 : payBoxH + 6;
       doc.setFillColor(248, 246, 240); doc.roundedRect(qrBoxX, y, qrBoxW, payBoxH, 2, 2, "F");
-      try { doc.addImage(qrBase64, "PNG", qrBoxX + (qrBoxW - payBoxH) / 2 + 2, y + 2, payBoxH - 4, payBoxH - 4); } catch(e) {}
+      try { doc.addImage(qrBase64, "PNG", qrBoxX + (qrBoxW - payBoxH) / 2 + 2, y + 2, payBoxH - 4, payBoxH - 4, undefined, PDF_IMAGE_COMPRESSION); } catch(e) {}
     }
     y += payBoxH + 6;
     if (qrBase64) {
@@ -5838,7 +5922,7 @@ const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, free
     const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: "avenant", avenantNum });
     renderInvoicePDF({
       invoiceNum, designation: `Avenant n°${avenantNum}`, missionTitle, montant,
-      freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, clientName, clientCompany, clientAddress, clientEmail, clientSiret, typeClient, profile,
+      freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, clientName, clientCompany, clientAddress, clientEmail, clientSiret, typeClient, profile: await profileWithPdfLogo(profile),
       filename: `Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
@@ -5857,7 +5941,7 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
     renderInvoicePDF({
       invoiceNum, designation: finalDesignation, missionTitle, montant,
       freelanceName, freelanceSiret, freelanceEmail, freelanceAddress: extra.form?.freelanceAddress || "",
-      clientName, clientCompany, clientAddress, clientEmail, typeClient, profile,
+      clientName, clientCompany, clientAddress, clientEmail, typeClient, profile: await profileWithPdfLogo(profile),
       clientSiret: extra.clientSiret || extra.form?.clientSiret || "",
       footNote: spec ? spec.footNote : undefined, dueDays: spec ? spec.dueDays : 0,
       filename: `Facture_${invoiceNum}.pdf`,
@@ -6134,7 +6218,7 @@ CONSIGNES :
   };
 
   const handleDownloadAvenantPDF = () => {
-    downloadAvenantPDF(avenantText, avenantNum, contractNum, contractFreelanceName(form), form.clientName, freelanceSigDataUrl, clientSigDataUrl, form.freelanceLogo);
+    downloadAvenantPDF(avenantText, avenantNum, contractNum, contractFreelanceName(form), form.clientName, freelanceSigDataUrl, clientSigDataUrl, form.freelanceLogo, !!form.freelanceLogoLight);
   };
 
   // Montant de l'ajustement, peu importe le mode utilisé pour générer l'avenant
@@ -6898,6 +6982,18 @@ function ContractCheckBox({ text, form, profile, onGoToProfile }) {
   );
 }
 
+// Version 229 : la vraie clause de retard de paiement d'un contrat, pour l'encadré de l'écran (« Contrat généré » et
+// Mes contrats). Avant, toute ligne contenant « retard », « indemnité », « pénalité » ou « 40 € » était encadrée sous
+// l'étiquette « pénalités de retard » : suspension, force majeure, résiliation… Renvoie "penalites" (professionnel :
+// pénalités de retard, article L441-10, taux de la BCE, indemnité de 40 €), "interets" (particulier : intérêts de
+// retard au taux légal après mise en demeure, article 1231-6 du Code civil) ou null.
+const latePaymentClauseKind = (line) => {
+  const t = String(line || "");
+  if (/int[ée]r[êe]ts?\s+de\s+retard/i.test(t) && /1231-6|mise\s+en\s+demeure/i.test(t)) return "interets";
+  if (/p[ée]nalit[ée]s?\s+de\s+retard/i.test(t) && /L\.?\s?441-10|banque\s+centrale|\bBCE\b|indemnit[ée]\s+forfaitaire|\b40\s?€|quarante\s+euros/i.test(t)) return "penalites";
+  return null;
+};
+
 function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, signedByFreelanceAt, retractationWaivedAt, consumerLike }) {
   // Formulaire sans statut juridique : on suit le texte du contrat (« Nom EI »)
   const form = resolveLegalStatus(rawForm, text);
@@ -6913,54 +7009,11 @@ function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSigna
     );
   };
 
-  // ── Detect "pénalité de retard / 40€" block
-  const isPenaltyLine = (line) =>
-    /p[eé]nalit[eé]/i.test(line) || /40\s*[€e]/i.test(line) || /indemnit[eé]/i.test(line) || /retard/i.test(line);
-
-  // ── Detect price table trigger line
-  const isPriceLine = (line) =>
-    /acompte|honoraire|montant total|rémunération|mission.*€|€.*mission/i.test(line) && /\d/.test(line);
-
-  // ── Build price table from a content line
-  const buildPriceTable = (line, idx) => {
-    const clean = line.replace(/\*\*/g, "");
-    // Try to extract label + amount pairs like "Acompte 30% : 500 €"
-    const amountMatch = clean.match(/(\d[\d\s.,]*)\s*€/g) || [];
-    const price = form?.price ? parseFloat(form.price) : null;
-
-    const rows = [];
-    if (price) {
-      const acompte = form?.paymentTerms === "Acompte 30%" ? price * 0.3
-        : form?.paymentTerms === "Acompte 50%" ? price * 0.5 : null;
-      rows.push({ label: "Mission — " + (form?.missionTitle || "Prestation"), amount: price.toLocaleString("fr-FR") + " €" });
-      if (acompte) rows.push({ label: "Acompte à la signature", amount: acompte.toLocaleString("fr-FR") + " €" });
-      rows.push({ label: "Solde à la livraison", amount: (acompte ? price - acompte : price).toLocaleString("fr-FR") + " €" });
-    } else {
-      // Fallback: just render the line cleaned
-      return null;
-    }
-
-    return (
-      <div key={idx} style={{ margin: "18px 0 14px" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'DM Sans', sans-serif", fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: "#1a365d", color: "#fff" }}>
-              <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 700, borderRadius: "6px 0 0 0", letterSpacing: "0.04em" }}>DÉSIGNATION</th>
-              <th style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700, borderRadius: "0 6px 0 0", letterSpacing: "0.04em" }}>MONTANT HT</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} style={{ background: i % 2 === 0 ? "#F7F5F0" : "#fff", borderBottom: "1px solid #E8E4DB" }}>
-                <td style={{ padding: "10px 16px", color: "#2D3748" }}>{r.label}</td>
-                <td style={{ padding: "10px 16px", textAlign: "right", color: "#1a365d", fontWeight: 700 }}>{r.amount}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
+  // Version 229 : plus de tableau de prix à la place du texte. Avant, toute ligne parlant d'acompte, d'honoraires ou
+  // de montant était REMPLACÉE par un tableau (« Mission » / « Solde à la livraison »), faux en plus (solde même pour un
+  // paiement comptant, acompte jamais montré) : la recette, le paiement, la propriété intellectuelle ou le plafond de
+  // responsabilité n'apparaissaient pas à l'écran. Chaque clause est maintenant affichée telle qu'elle est écrite.
+  // L'encadré « retard de paiement » ne se met plus que sur la vraie clause (latePaymentClauseKind).
 
   // ── Main line renderer
   const renderLine = (line, idx, allLines) => {
@@ -7058,8 +7111,9 @@ function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSigna
       );
     }
 
-    // Penalty / late payment block
-    if (isPenaltyLine(trimmed) && trimmed.length > 20) {
+    // Clause de retard de paiement (version 229 : seulement la vraie, avec la bonne étiquette)
+    const lateKind = trimmed.length > 20 ? latePaymentClauseKind(trimmed) : null;
+    if (lateKind) {
       return (
         <div key={idx} style={{
           display: "flex",
@@ -7076,7 +7130,7 @@ function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSigna
             padding: "10px 14px",
           }}>
             <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#92400E", marginBottom: 4, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              ⚠ Clause pénalités de retard
+              {lateKind === "interets" ? "⚠ Clause d'intérêts de retard" : "⚠ Clause de pénalités de retard"}
             </div>
             <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12.5, color: "#78350F", lineHeight: 1.7 }}>
               {renderInline(trimmed.replace(/\*\*/g, ""))}
@@ -7084,12 +7138,6 @@ function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSigna
           </div>
         </div>
       );
-    }
-
-    // Price table trigger
-    if (isPriceLine(trimmed) && form?.price) {
-      const table = buildPriceTable(trimmed, idx);
-      if (table) return table;
     }
 
     // Horizontal rule
@@ -7310,10 +7358,14 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
 
   const phases = [
     { label: "Analyse de ta mission…", icon: "🔍" },
-    { label: "Rédaction des clauses commerciales…", icon: "✍️" },
+    { label: `Rédaction de l'article ${Math.min(Math.max(articlesWritten, 1), articles.length)} sur ${articles.length}…`, icon: "✍️" },
     { label: "Finalisation et vérification…", icon: "✅" },
   ];
-  const currentPhase = phases[Math.max(0, phase - 1)] || phases[0];
+  // Version 229 : l'étape affichée suit la vraie progression du texte reçu. Avant, deux minuteries (0,6 s et 1,3 s)
+  // affichaient « Finalisation et vérification… » au bout d'une seconde, pendant toute la rédaction (1 à 2 minutes).
+  // Aucun article encore → analyse ; articles en cours → rédaction (article x sur 13) ; dernier article → finalisation.
+  const realPhase = (apiReady || articlesWritten >= articles.length) ? 3 : articlesWritten > 0 ? 2 : 1;
+  const currentPhase = phases[realPhase - 1];
 
   // Une fois l'API prête (flux terminé), laisse un court instant pour l'effet visuel puis transite
   _useEffect(() => {
@@ -7366,9 +7418,9 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
           {phases.map((p, i) => (
             <div key={i} style={{
               width:28, height:6, borderRadius:3,
-              background: i < phase ? C.gold : i === phase - 1 ? C.goldL : "#354F6E",
+              background: i < realPhase ? C.gold : i === realPhase - 1 ? C.goldL : "#354F6E",
               transition:"background 0.4s",
-              animation: i === phase - 1 ? "shimmer 1s ease-in-out infinite" : "none",
+              animation: i === realPhase - 1 ? "shimmer 1s ease-in-out infinite" : "none",
             }}/>
           ))}
         </div>
@@ -9035,7 +9087,7 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   if (!ndaText) { alert("Aucun NDA à télécharger."); return; }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const PW = 210, PH = 297, ML = 22, MR = 22, cw = PW - ML - MR;
   const NAVY = [26, 54, 93], GOLD = [180, 140, 70], GREY = [120, 120, 120];
   const A = String(partieAName || "").trim();
@@ -9096,7 +9148,7 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
     if (freelanceSignature) {
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
       doc.text(`${A || "Partie A"} (Partie A)`, ML, yA); yA += 6;
-      try { doc.addImage(freelanceSignature, "PNG", ML, yA, halfW, 26); } catch(e) {}
+      drawPdfLogo(doc, freelanceSignature, { x: ML, y: yA, maxW: halfW, maxH: 26 }); // version 228 : jamais déformée, compressée
       yA += 30;
       doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
       const whenA = fmtSignedAtFr(createdAt);
@@ -9105,7 +9157,7 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
     doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
     doc.text(`${B || "Partie B"} (Partie B)`, xB, yB); yB += 6;
     if (clientSignature) {
-      try { doc.addImage(clientSignature, "PNG", xB, yB, halfW, 26); } catch(e) {}
+      drawPdfLogo(doc, clientSignature, { x: xB, y: yB, maxW: halfW, maxH: 26 }); // version 228 : jamais déformée, compressée
       yB += 30;
       doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
       const whenB = fmtSignedAtFr(signedAt);
@@ -9565,6 +9617,69 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 // CURRENT_PENALTY_RATE_B2B et CURRENT_LEGAL_RATE_B2C dans RecouvrementFermeModal.
 // Les relances amiables avant échéance et le message pour client silencieux restent disponibles.
 const FORMAL_LETTER_ENABLED = false;
+// Version 229 : consigne de l'assistant « J'ai un problème » (avant : écrite dans askContractAssistant). Changements :
+// les outils sont nommés comme dans l'appli (avant : liste (a)…(o), et l'IA écrivait « l'option (o) ») ; la phrase sur
+// les preuves est reformulée (l'IA la recopiait en écrivant « seuls d'autres preuves ») ; « Recouvrement Ferme » est
+// décrit selon ce qu'il propose vraiment : tant que la mise en demeure est masquée (FORMAL_LETTER_ENABLED faux), l'IA
+// ne l'envoie plus vers un outil qui ne la propose pas.
+const buildAssistantPrompt = ({ historyView, question, formalLetterEnabled }) => {
+  const formal = formalLetterEnabled === undefined ? FORMAL_LETTER_ENABLED : !!formalLetterEnabled;
+  const clauseDeditActive = historyView.form?.clauseDedit ? "OUI, activée sur ce contrat" : "NON, pas activée sur ce contrat";
+  const acomptePct = historyView.form?.acomptePourcentage || "0";
+  // Version 226 : l'assistant sait si le contrat est signé. Avant, il disait « tu es protégé » sur un contrat que le
+  // client n'avait pas signé, et conseillait un avenant, qui n'existe qu'une fois le contrat signé par les deux.
+  const clientSigned = historyView.signatureStatus === "signed" || !!historyView.clientSignature;
+  const signatureState = historyView.retractationExercisedAt
+    ? "ANNULÉ : le client a exercé son droit de rétractation"
+    : clientSigned
+      ? "signé par les deux parties"
+      : (historyView.signatureStatus === "pending_client" || historyView.freelanceSignature)
+        ? "signé par le freelance seulement : le client ne l'a PAS encore signé"
+        : "PAS ENCORE SIGNÉ, ni par le freelance ni par le client";
+  const prompt = `Tu es un assistant qui aide un freelance à comprendre CE contrat précis, un seul, celui fourni ci-dessous — pas un avocat généraliste, pas un chatbot de discussion libre.
+
+RÈGLE ABSOLUE, à respecter avant toute autre chose : tu réponds UNIQUEMENT aux questions concernant ce contrat précis et la situation du freelance avec ce client. Si la question posée sort de ce cadre (sujet hors contrat, discussion générale, question sans rapport avec ce contrat ou ce client), réponds simplement une phrase du type "Je suis là uniquement pour t'aider sur ce contrat précis — reformule ta question par rapport à ta situation avec ce client." et n'ajoute rien d'autre. Ne développe jamais un autre sujet, même si le freelance insiste ou reformule pour te faire dévier.
+
+TEXTE INTÉGRAL DU CONTRAT CONCERNÉ (client : ${historyView.clientName || "—"}) :
+"""
+${historyView.contract || "Non disponible"}
+"""
+
+INFORMATIONS COMPLÉMENTAIRES SUR CE CONTRAT (à utiliser si pertinent, ne pas recalculer) :
+- Signature du contrat : ${signatureState}
+- Acompte prévu : ${acomptePct}%
+- Statut du paiement : ${({ pending: "en attente", paid: "payé", late: "en retard" })[historyView.paymentStatus] || historyView.paymentStatus || "en attente"}
+- Clause de dédommagement en cas d'annulation : ${clauseDeditActive}
+- ${historyView.form?.typeClient === "particulier" ? "Intérêts de retard" : "Pénalités de retard"} : ${historyView.form?.latePaymentPenalty || historyView.form?.typeClient !== "particulier" ? "oui" : "non"}
+
+QUESTION DU FREELANCE : "${question}"
+
+SIGNATURE (uniquement pour une question qui concerne bien ce contrat) : si le contrat n'est pas encore signé par le client (voir « Signature du contrat » ci-dessus), commence ta réponse en le disant clairement : tant que le client ne l'a pas signé, ce contrat ne l'engage pas encore par écrit. Un email où le client accepte la mission, ou un paiement de sa part, peut aider à prouver son accord, mais c'est moins solide qu'un contrat signé. Dans ce cas, ne dis jamais que le freelance « est protégé » : explique ce que le contrat prévoit une fois signé, et conseille de le faire signer avant de commencer ou de continuer le travail. Pour changer le contrat avant la signature du client, conseille « Modifier le contrat », jamais un avenant. Si le contrat est annulé par la rétractation du client, dis-le dès le début de ta réponse.
+
+Si la question concerne bien ce contrat/ce client, réponds en :
+1. Répondant clairement si le freelance est protégé ou non dans sa situation, en citant l'article ou la clause exacte du contrat qui s'applique (ou en disant clairement qu'aucune clause ne le couvre si c'est le cas)
+2. Donnant un conseil concret et actionnable pour cette situation précise. Si un outil ou un réglage de la liste ci-dessous sert dès maintenant (par exemple « Modifier le contrat » avant la signature du client${formal ? ", ou « Recouvrement Ferme » pour un impayé" : ""}), cite-le ici plutôt que dans « Pour la prochaine fois »
+3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'un des outils ou réglages RÉELLEMENT existants ci-dessous aurait aidé dans cette situation précise. Voici la liste FERMÉE de ce qui existe réellement dans Freeley, avec le nom exact à utiliser :
+- « Acompte à la commande » : le pourcentage du prix payé à la signature ;
+- « Délai de paiement » : comptant, 15, 30, 45 ou 60 jours ;
+- « Pénalités de retard de paiement » : toujours écrites dans un contrat entre professionnels ; avec un particulier, ce sont les « Intérêts de retard de paiement », à activer dans le formulaire ;
+- « Clause de dédommagement en cas d'annulation » : un dédommagement si le client annule la mission en cours ;
+- « Révisions incluses » : le nombre d'allers-retours de corrections compris dans le prix ;
+- « Créer un avenant » : changer le périmètre ou le prix une fois le contrat signé par les deux parties ;
+- « Recouvrement Ferme » : ${formal ? "rappel avant l'échéance d'une facture, relance d'un client qui ne répond plus, et mise en demeure en cas d'impayé" : "rappel avant l'échéance d'une facture, et relance d'un client qui ne répond plus. La mise en demeure d'un impayé n'y est PAS disponible en ce moment : pour une facture déjà en retard, conseille au freelance de relancer lui-même son client, puis, si besoin, de lui envoyer une mise en demeure par lettre recommandée avec accusé de réception ; ne dis jamais que Freeley peut la rédiger ou l'envoyer"} ;
+- « Radar Client » : vérifier l'entreprise du client avant de signer ;
+- « Clause de bonne conduite et respect mutuel » : en cas de comportement abusif du client ;
+- « Clause de suspension en cas de retard de paiement » : arrêter le travail tant qu'un paiement est en retard ;
+- « Clause de sécurité et assurance professionnelle » : pour les interventions sur un site à risque ;
+- « Clause d'interlocuteur unique côté client » : une seule personne désignée chez le client ;
+- « Clause de préavis pour mission récurrente » : un préavis de 30 jours pour arrêter une mission récurrente ;
+- « Modifier le contrat » : changer le texte ou les chiffres du contrat tant que le client ne l'a pas signé.
+Désigne toujours ces outils et réglages par leur nom, entre guillemets comme ci-dessus : n'écris jamais de lettre ni de numéro pour les désigner (jamais « l'option (o) » ou « option a »). N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
+4. Terminant par une courte phrase indiquant que cette analyse est indicative et qu'un avocat reste recommandé pour un désaccord persistant ou un montant important
+
+Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 150-250 mots maximum. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple, il sera affiché tel quel.`;
+  return prompt;
+};
 // Vrai quand le courrier serait une mise en demeure formelle (échéance dépassée ou non renseignée)
 const isFormalLetterPath = (dueDate) => !(dueDate && Math.floor((new Date() - new Date(dueDate)) / (1000 * 60 * 60 * 24)) < 0);
 function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripeConnectAccountId, stripeConnectReady, onGoToProfileTva }) {
@@ -9978,7 +10093,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       }
 
       const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
       const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
       const NAVY = isSilence ? [30, 64, 175] : isPreventive ? [180, 140, 70] : [26, 54, 93];
       const GOLD = [180, 140, 70];
@@ -10012,7 +10127,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
           ? `Scanner ce code pour régler dès maintenant le montant de ${totalLabel} € avant l'échéance.`
           : `Scanner ce code pour régler immédiatement le montant total de ${totalLabel} € réclamé dans ce courrier.`;
         doc.text(doc.splitTextToSize(boxText, cw - 40), ML + 4, y + 15);
-        try { doc.addImage(qrBase64, "PNG", ML + cw - 32, y + 3, 30, 30); } catch(e) {}
+        try { doc.addImage(qrBase64, "PNG", ML + cw - 32, y + 3, 30, 30, undefined, PDF_IMAGE_COMPRESSION); } catch(e) {}
         y += boxH;
       }
 
@@ -12720,45 +12835,8 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     setAssistantLoading(true);
     setAssistantAnswer("");
     try {
-      const clauseDeditActive = historyView.form?.clauseDedit ? "OUI, activée sur ce contrat" : "NON, pas activée sur ce contrat";
-      const acomptePct = historyView.form?.acomptePourcentage || "0";
-      // Version 226 : l'assistant sait si le contrat est signé. Avant, il disait « tu es protégé » sur un contrat que le
-      // client n'avait pas signé, et conseillait un avenant, qui n'existe qu'une fois le contrat signé par les deux.
-      const clientSigned = historyView.signatureStatus === "signed" || !!historyView.clientSignature;
-      const signatureState = historyView.retractationExercisedAt
-        ? "ANNULÉ : le client a exercé son droit de rétractation"
-        : clientSigned
-          ? "signé par les deux parties"
-          : (historyView.signatureStatus === "pending_client" || historyView.freelanceSignature)
-            ? "signé par le freelance seulement : le client ne l'a PAS encore signé"
-            : "PAS ENCORE SIGNÉ, ni par le freelance ni par le client";
-      const prompt = `Tu es un assistant qui aide un freelance à comprendre CE contrat précis, un seul, celui fourni ci-dessous — pas un avocat généraliste, pas un chatbot de discussion libre.
-
-RÈGLE ABSOLUE, à respecter avant toute autre chose : tu réponds UNIQUEMENT aux questions concernant ce contrat précis et la situation du freelance avec ce client. Si la question posée sort de ce cadre (sujet hors contrat, discussion générale, question sans rapport avec ce contrat ou ce client), réponds simplement une phrase du type "Je suis là uniquement pour t'aider sur ce contrat précis — reformule ta question par rapport à ta situation avec ce client." et n'ajoute rien d'autre. Ne développe jamais un autre sujet, même si le freelance insiste ou reformule pour te faire dévier.
-
-TEXTE INTÉGRAL DU CONTRAT CONCERNÉ (client : ${historyView.clientName || "—"}) :
-"""
-${historyView.contract || "Non disponible"}
-"""
-
-INFORMATIONS COMPLÉMENTAIRES SUR CE CONTRAT (à utiliser si pertinent, ne pas recalculer) :
-- Signature du contrat : ${signatureState}
-- Acompte prévu : ${acomptePct}%
-- Statut du paiement : ${({ pending: "en attente", paid: "payé", late: "en retard" })[historyView.paymentStatus] || historyView.paymentStatus || "en attente"}
-- Clause de dédommagement en cas d'annulation : ${clauseDeditActive}
-- ${historyView.form?.typeClient === "particulier" ? "Intérêts de retard" : "Pénalités de retard"} : ${historyView.form?.latePaymentPenalty || historyView.form?.typeClient !== "particulier" ? "oui" : "non"}
-
-QUESTION DU FREELANCE : "${assistantQuestion}"
-
-SIGNATURE (uniquement pour une question qui concerne bien ce contrat) : si le contrat n'est pas encore signé par le client (voir « Signature du contrat » ci-dessus), commence ta réponse en le disant clairement : tant que le client ne l'a pas signé, ce contrat ne l'engage pas encore par écrit (seules d'autres preuves de son accord, comme un email d'acceptation ou un paiement, pourraient compter). Dans ce cas, ne dis jamais que le freelance « est protégé » : explique ce que le contrat prévoit une fois signé, et conseille de le faire signer avant de commencer ou de continuer le travail. Pour changer le contrat avant la signature du client, conseille l'option (o), jamais un avenant. Si le contrat est annulé par la rétractation du client, dis-le dès le début de ta réponse.
-
-Si la question concerne bien ce contrat/ce client, réponds en :
-1. Répondant clairement si le freelance est protégé ou non dans sa situation, en citant l'article ou la clause exacte du contrat qui s'applique (ou en disant clairement qu'aucune clause ne le couvre si c'est le cas)
-2. Donnant un conseil concret et actionnable pour cette situation précise. Si une option de la liste ci-dessous sert dès maintenant (par exemple l'outil de recouvrement pour un impayé, ou l'option (o) avant la signature du client), cite-la ici plutôt que dans « Pour la prochaine fois »
-3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'une des options RÉELLEMENT existantes ci-dessous aurait aidé dans cette situation précise. La liste FERMÉE des options qui existent réellement dans Freeley est : (a) pourcentage d'acompte à la commande, (b) délai de paiement (comptant/15/30/45/60 jours), (c) pénalités de retard automatiques, (d) clause de dédommagement en cas d'annulation par le client, (e) nombre de révisions incluses, (f) génération d'avenant en cas de changement de périmètre, une fois le contrat signé par les deux parties, (g) outil de recouvrement/mise en demeure en cas d'impayé, (h) relance "silence prolongé" en cas de client injoignable, (i) vérification de l'entreprise cliente avant signature (Radar Client), (j) clause de bonne conduite et respect mutuel en cas de comportement abusif du client, (k) clause de suspension du travail en cas de retard de paiement persistant, (l) clause de sécurité et assurance professionnelle pour les interventions sur site à risque, (m) clause d'interlocuteur unique désigné côté client, (n) clause de préavis de 30 jours pour les missions récurrentes, (o) « Modifier le contrat » : changer le texte ou les chiffres du contrat tant que le client ne l'a pas signé. N'invente JAMAIS une fonctionnalité, une clause ou une case à cocher qui ne figure pas dans cette liste — si aucune de ces options ne concerne la situation décrite, dis-le clairement et simplement (ex : "Freeley n'a pas encore d'option dédiée à ce type de situation") plutôt que d'en inventer une.
-4. Terminant par une courte phrase indiquant que cette analyse est indicative et qu'un avocat reste recommandé pour un désaccord persistant ou un montant important
-
-Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 150-250 mots maximum. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple, il sera affiché tel quel.`;
+      // Version 229 : la consigne est construite par buildAssistantPrompt (outils nommés, plus de lettres)
+      const prompt = buildAssistantPrompt({ historyView, question: assistantQuestion });
 
       const res = await fetch("/api/generate", {
         method:"POST",
@@ -13140,7 +13218,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                     </div>
                   )}
 
-                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature, historyView.form?.freelanceLogo)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
+                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature, historyView.form?.freelanceLogo, !!historyView.form?.freelanceLogoLight)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
                 </div>
               </details>
             );
@@ -13581,6 +13659,53 @@ const explainEInvoiceError = (result) => {
 // Bouton d'envoi en facturation électronique — réutilisé sur TOUTES les factures de l'app
 // (facture libre, acompte, solde, avenant), pour que la loi B2B soit proposée de façon cohérente
 // partout, peu importe le type de facture. Un seul endroit à corriger si jamais un détail change.
+// Version 229 : trace d'une facture envoyée par la facturation électronique, gardée dans le contrat
+// (content.eInvoicesSent, par numéro de facture). Avant, rien n'était gardé : après un rechargement de la page, on
+// pouvait renvoyer la même facture sans le savoir. Lecture sans réserver de numéro.
+const readEInvoiceState = async ({ contractId, invoiceKey, avenantNum }) => {
+  if (!contractId) return null;
+  const { data, error } = await supabase.from("contracts").select("content").eq("id", contractId).single();
+  if (error || !data) return null;
+  const c = parseContent(data.content);
+  const num = invoiceKey === "avenant"
+    ? (((Array.isArray(c.avenants) ? c.avenants : []).find(a => String(a.num) === String(avenantNum)) || {}).invoiceNumber || null)
+    : (c[invoiceKey] || null);
+  const sentMap = c.eInvoicesSent && typeof c.eInvoicesSent === "object" ? c.eInvoicesSent : {};
+  const rec = num ? sentMap[num] : null;
+  return { num, sent: rec ? { num, at: rec.at || null, id: rec.id || null } : null };
+};
+const recordEInvoiceSent = async ({ contractId, invoiceNum, at, id }) => {
+  if (!contractId || !invoiceNum) return;
+  const { data, error } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+  if (error || !data) return;
+  const c = parseContent(data.content);
+  const sentMap = c.eInvoicesSent && typeof c.eInvoicesSent === "object" ? c.eInvoicesSent : {};
+  await supabase.rpc("update_contract_content", {
+    p_contract_id: contractId,
+    p_new_content: JSON.stringify({ ...c, eInvoicesSent: { ...sentMap, [invoiceNum]: { at, id: id || null } } }),
+    p_new_status: data.status,
+  });
+};
+// Version 229 : vérifie auprès de Super PDP les identifiants enregistrés dans le profil, sans envoyer de facture
+// (mode « checkCredentials » de api/generate-ubl-invoice.js). Renvoie { verified: true, companyName }, { verified: false, reason }, ou null quand la
+// vérification n'a pas pu se faire (service indisponible, page pas encore à jour…).
+const checkSuperPdpCredentials = async () => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch("/api/generate-ubl-invoice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+      body: JSON.stringify({ checkCredentials: true }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data && data.verified === true) return { verified: true, companyName: String(data.companyName || "") };
+    if (data && data.verified === false && (data.reason === "refused" || data.reason === "missing")) return { verified: false, reason: data.reason };
+    return null;
+  } catch (e) { return null; }
+};
+const dateFr = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d.toLocaleDateString("fr-FR") : ""; };
+
 function SendElectronicInvoiceButton({
   contractId, invoiceKey, avenantNum, designation, montant, missionTitle,
   freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
@@ -13589,6 +13714,19 @@ function SendElectronicInvoiceButton({
 }) {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
+  // Version 229 : confirmation avant l'envoi (une facture envoyée ne se modifie plus), et facture déjà envoyée
+  // signalée grâce à la trace gardée dans le contrat.
+  const [confirming, setConfirming] = useState(false);
+  const [sentInfo, setSentInfo] = useState(null);   // { num, at, id } : déjà envoyée
+  const [knownNum, setKnownNum] = useState(null);   // numéro déjà attribué à cette facture (rien n'est réservé ici)
+  useEffect(() => {
+    if (typeClient !== "professionnel" || !contractId) return;
+    let alive = true;
+    readEInvoiceState({ contractId, invoiceKey, avenantNum })
+      .then(st => { if (alive && st) { setKnownNum(st.num); setSentInfo(st.sent); } })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [contractId, invoiceKey, avenantNum, typeClient]);
 
   if (typeClient !== "professionnel") {
     if (compact) return null;
@@ -13600,6 +13738,7 @@ function SendElectronicInvoiceButton({
   }
 
   const handleSend = async () => {
+    setConfirming(false);
     setSending(true);
     setResult(null);
     try {
@@ -13620,6 +13759,11 @@ function SendElectronicInvoiceButton({
       const data = await res.json();
       if (data.sendResult?.success) {
         setResult({ success: true, invoice_id: data.sendResult.invoice_id });
+        const info = { num: invoiceNum, at: new Date().toISOString(), id: data.sendResult.invoice_id || null };
+        setSentInfo(info);
+        setKnownNum(invoiceNum);
+        try { await recordEInvoiceSent({ contractId, invoiceNum, at: info.at, id: info.id }); }
+        catch (e) { console.error("Erreur trace de la facture électronique:", e); }
       } else {
         setResult({
           error: data.sendResult?.error || data.error || "Erreur inconnue",
@@ -13634,19 +13778,46 @@ function SendElectronicInvoiceButton({
     }
   };
 
+  const openConfirm = () => { if (sending) return; setResult(null); setConfirming(c => !c); };
+  const who = String(clientCompany || clientName || "").trim() || "ton client";
+  const amount = `${fmtEuro(montant)} €${tvaNumber ? " HT" : ""}`;
+  const shownNum = sentInfo?.num || knownNum;
+  const numLabel = shownNum ? ` ${shownNum}` : "";
+  const sent = !!(result?.success || sentInfo);
+  const sentDate = dateFr(sentInfo?.at);
+  const confirmBox = confirming && (
+    <div data-testid="einvoice-confirm" style={{
+      marginTop:8, padding:"10px 12px", textAlign:"left",
+      background: sentInfo ? "#FFFBEB" : "#F8FAFC", border:`1px solid ${sentInfo ? "#FCD34D" : C.border}`,
+      borderRadius:8, fontFamily:T.body, fontSize:12, color: sentInfo ? "#92400E" : C.textM, lineHeight:1.55,
+      maxWidth: compact ? 320 : "none",
+    }}>
+      {sentInfo ? (
+        <div><strong>⚠️ Cette facture{numLabel} a déjà été envoyée{sentDate ? ` le ${sentDate}` : ""}.</strong> La renvoyer créerait un doublon chez ton client. Tu veux vraiment la renvoyer ?</div>
+      ) : (
+        <div>Envoyer la facture{numLabel} de {amount} à {who} par la facturation électronique ? Une fois envoyée, une facture ne se modifie plus : pour la corriger, il faudra faire un avoir.</div>
+      )}
+      <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+        <button data-testid="einvoice-confirm-send" onClick={handleSend} style={{ padding:"7px 12px", background:C.navy, color:C.white, border:"none", borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{sentInfo ? "Renvoyer quand même" : "Confirmer l'envoi"}</button>
+        <button data-testid="einvoice-confirm-cancel" onClick={() => setConfirming(false)} style={{ padding:"7px 12px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Annuler</button>
+      </div>
+    </div>
+  );
+
   if (compact) {
     return (
       <div style={{ display:"inline-block" }}>
-        <button onClick={handleSend} disabled={sending} title={result?.error || "Envoyer via facturation électronique (bêta)"} style={{
+        <button onClick={openConfirm} disabled={sending} title={result?.error || "Envoyer via facturation électronique (bêta)"} style={{
           padding:"8px 14px",
-          background: result?.success ? "#16A34A" : "#fff",
-          border: `1px solid ${result?.success ? "#16A34A" : C.border}`,
+          background: sent ? "#16A34A" : "#fff",
+          border: `1px solid ${sent ? "#16A34A" : C.border}`,
           borderRadius:8, cursor: sending ? "wait" : "pointer",
           fontSize:12, fontFamily:T.body, fontWeight:700,
-          color: result?.success ? C.white : (result?.error ? C.error : C.textM),
+          color: sent ? C.white : (result?.error ? C.error : C.textM),
         }}>
-          {sending ? "⏳ Envoi…" : result?.success ? "✓ Envoyée" : result?.error ? "⚠ Échec — réessayer" : "📤 Facturation électronique"}
+          {sending ? "⏳ Envoi…" : sent ? (sentDate ? `✓ Envoyée le ${sentDate}` : "✓ Envoyée") : result?.error ? "⚠ Échec — réessayer" : "📤 Facturation électronique"}
         </button>
+        {confirmBox}
         {result?.error && (
           <div style={{ marginTop:6, fontSize:11, color:C.error, fontFamily:T.body, lineHeight:1.45, maxWidth:320 }}>{explainEInvoiceError(result)}</div>
         )}
@@ -13671,23 +13842,24 @@ function SendElectronicInvoiceButton({
         type de client. À partir du 1er septembre 2027, ce sera obligatoire pour toutes les
         micro-entreprises — autant prendre l'habitude dès maintenant, tranquillement.
       </p>
-      <button onClick={handleSend} disabled={sending} style={{
+      <button onClick={openConfirm} disabled={sending} style={{
         width:"100%", padding:"10px",
-        background: result?.success ? "#16A34A" : "transparent",
-        border: `1px solid ${result?.success ? "#16A34A" : C.borderL}`,
+        background: sent ? "#16A34A" : "transparent",
+        border: `1px solid ${sent ? "#16A34A" : C.borderL}`,
         borderRadius:8, cursor: sending ? "wait" : "pointer",
         fontSize:12.5, fontFamily:T.body, fontWeight:700,
-        color: result?.success ? C.white : C.textM,
+        color: sent ? C.white : C.textM,
         display:"flex", alignItems:"center", justifyContent:"center", gap:7,
         opacity: sending ? 0.7 : 1,
       }}>
         {sending
           ? <><span style={{fontSize:14}}>⏳</span> Envoi en cours…</>
-          : result?.success
-          ? <><span style={{fontSize:14}}>✓</span> Envoyée électroniquement</>
+          : sent
+          ? <><span style={{fontSize:14}}>✓</span> {sentDate ? `Envoyée électroniquement le ${sentDate}` : "Envoyée électroniquement"}</>
           : <><span style={{fontSize:14}}>📤</span> Envoyer via facturation électronique (bêta)</>
         }
       </button>
+      {confirmBox}
       {result?.error && (
         <div style={{ marginTop:6, fontSize:11.5, color:C.error, fontFamily:T.body, lineHeight:1.5 }}>
           {explainEInvoiceError(result)}
@@ -13994,7 +14166,7 @@ ${freelanceName}`;
         clientAddress: form.clientAddress,
         clientEmail: form.clientEmail,
         clientSiret: form.clientSiret,
-        profile,
+        profile: await profileWithPdfLogo(profile), // version 228 : un logo ajouté avant la v227 est ajusté (poids)
         typeClient: form.typeClient,
         qrBase64,
         footNote: spec.footNote,
@@ -14821,7 +14993,7 @@ const downloadScanReport = (findings, { label = "" } = {}) => {
   if (!findings || !findings.length) { alert("Aucun résultat à télécharger."); return; }
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   doc.setProperties({ title: "Rapport d'analyse de contrat", creator: `Freeley ${APP_VERSION}` });
   const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR, BOTTOM = 280;
   const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80];
@@ -16712,7 +16884,7 @@ function MiniPlanCard({ icon, title, price, sub, color, recommended, onSelect })
 }
 
 /* ══════════════════════════════════════════ PROFILE PAGE ══ */
-function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, profileScanNote, stripeConnectReady, onConnectStripe, connectingStripe, onConnectSuperPdp, onDisconnectSuperPdp, connectingSuperPdp }) {
+function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, profileScanNote, onDismissScanNote, stripeConnectReady, onConnectStripe, connectingStripe, onConnectSuperPdp, onDisconnectSuperPdp, connectingSuperPdp }) {
   const [newSkill, setNewSkill] = useState("");
   const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState(initialSection || "identity");
@@ -16722,10 +16894,32 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const fileInputRef = useRef(null);
   const logoInputRef = useRef(null);
   const [logoError, setLogoError] = useState(""); // version 227 : affichée à côté du logo (avant : tout en haut de la page)
+  // Version 229 : un logo clair est montré sur un fond foncé (sur le fond crème, il était invisible)
+  const [logoLight, setLogoLight] = useState(false);
+  useEffect(() => () => { if (onDismissScanNote) onDismissScanNote(); }, []); // version 229 : message du scan RIB effacé en quittant le profil
+  useEffect(() => {
+    let alive = true;
+    if (!profile.logo) { setLogoLight(false); return; }
+    logoIsLight(profile.logo).then(v => { if (alive) setLogoLight(v); }).catch(() => {});
+    return () => { alive = false; };
+  }, [profile.logo]);
 
   const [uploadError, setUploadError] = useState("");
   const [superPdpClientIdInput, setSuperPdpClientIdInput] = useState("");
   const [superPdpClientSecretInput, setSuperPdpClientSecretInput] = useState("");
+  // Version 229 : les identifiants de facturation électronique sont vérifiés auprès de Super PDP (avant, « connectée »
+  // voulait seulement dire « enregistrés »). null : pas encore vérifié ; "checking" ; "unavailable" ; ou le résultat.
+  const [superPdpCheck, setSuperPdpCheck] = useState(null);
+  const runSuperPdpCheck = async () => {
+    setSuperPdpCheck("checking");
+    const r = await checkSuperPdpCredentials();
+    setSuperPdpCheck(r || "unavailable");
+  };
+  useEffect(() => { if (!profile.superPdpConnected) setSuperPdpCheck(null); }, [profile.superPdpConnected]);
+  useEffect(() => {
+    if (activeSection !== "facturation" || !profile.superPdpConnected || superPdpCheck !== null) return;
+    runSuperPdpCheck();
+  }, [activeSection, profile.superPdpConnected, superPdpCheck]);
 
   const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
@@ -17063,7 +17257,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                   <div style={{ marginTop:8, fontFamily:T.body, fontSize:11, color:"#B91C1C", lineHeight:1.5 }}>⚠️ {profileScanError}</div>
                 )}
                 {profileScanNote && (
-                  <div data-testid="profile-scan-note" style={{ marginTop:8, fontFamily:T.body, fontSize:11.5, lineHeight:1.5, color: profileScanNote.warn ? "#92400E" : "#166534" }}>{profileScanNote.warn ? "⚠️ " : "✓ "}{profileScanNote.text}</div>
+                  <div data-testid="profile-scan-note" style={{ marginTop:8, fontFamily:T.body, fontSize:11.5, lineHeight:1.5, color: profileScanNote.warn ? "#92400E" : "#166534" }}>{profileScanNote.warn ? "⚠️ " : "✓ "}{profileScanNote.text}
+                    {onDismissScanNote && <button data-testid="profile-scan-note-ok" onClick={onDismissScanNote} style={{ marginLeft:8, padding:"2px 10px", background:"none", border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, color:C.textM }}>OK</button>}
+                  </div>
                 )}
               </div>
             )}
@@ -17172,10 +17368,30 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>FACTURATION ÉLECTRONIQUE</div>
             {profile.superPdpConnected ? (
               <div>
-                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:10, marginBottom:12 }}>
-                  <span style={{ fontSize:18 }}>✅</span>
-                  <div style={{ fontFamily:T.body, fontSize:12.5, color:"#166534", fontWeight:600 }}>Ton entreprise est connectée à la facturation électronique.</div>
-                </div>
+                {(() => {
+                  // Version 229 : « enregistrés », puis le résultat de la vraie vérification auprès de Super PDP
+                  const res = superPdpCheck && typeof superPdpCheck === "object" ? superPdpCheck : null;
+                  const ok = !!(res && res.verified), refused = !!(res && !res.verified);
+                  const tone = ok ? { bg:"#F0FDF4", bd:"#86EFAC", fg:"#166534", icon:"✅" }
+                    : refused ? { bg:"#FEF2F2", bd:"#FECACA", fg:"#991B1B", icon:"⚠️" }
+                    : { bg:"#F8FAFC", bd:C.border, fg:C.textM, icon:"🔑" };
+                  const detail = superPdpCheck === "checking" ? "Vérification auprès de Super PDP…"
+                    : ok ? `Super PDP les accepte${res.companyName ? ` : entreprise « ${res.companyName} »` : ""}. Tu peux envoyer tes factures électroniques.`
+                    : refused && res.reason === "refused" ? "Mais Super PDP les refuse. Vérifie-les dans ton espace Super PDP, puis clique sur « Déconnecter » et entre les bons identifiants."
+                    : refused ? "Mais aucun identifiant n'a été retrouvé. Clique sur « Déconnecter », puis entre-les à nouveau."
+                    : superPdpCheck === "unavailable" ? "La vérification auprès de Super PDP n'a pas pu se faire pour le moment. Réessaie un peu plus tard."
+                    : "";
+                  return (
+                    <div data-testid="superpdp-status" style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"12px 14px", background:tone.bg, border:`1px solid ${tone.bd}`, borderRadius:10, marginBottom:12 }}>
+                      <span style={{ fontSize:18, lineHeight:1.2 }}>{tone.icon}</span>
+                      <div style={{ fontFamily:T.body, fontSize:12.5, color:tone.fg, lineHeight:1.55 }}>
+                        <div style={{ fontWeight:600 }}>Tes identifiants de facturation électronique sont enregistrés.</div>
+                        {detail && <div>{detail}</div>}
+                      </div>
+                    </div>
+                  );
+                })()}
+                <button data-testid="superpdp-recheck" onClick={runSuperPdpCheck} disabled={superPdpCheck === "checking"} style={{ padding:"9px 14px", marginRight:8, background:"none", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontFamily:T.body, cursor: superPdpCheck === "checking" ? "wait" : "pointer" }}>Vérifier la connexion</button>
                 <button onClick={onDisconnectSuperPdp} style={{ padding:"9px 14px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontFamily:T.body, cursor:"pointer" }}>Déconnecter</button>
               </div>
             ) : (
@@ -17215,7 +17431,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>LOGO PROFESSIONNEL</div>
             <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Ton logo apparaîtra en haut de tes factures et des contrats que tu crées ensuite.</div>
             <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-              <div style={{ width:72, height:72, borderRadius:12, border:`1.5px dashed ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", background:C.creamD, flexShrink:0 }}>
+              <div data-testid="logo-preview-box" style={{ width:72, height:72, borderRadius:12, border:`1.5px dashed ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", background: profile.logo && logoLight ? "#1a365d" : C.creamD, flexShrink:0 }}>
                 {profile.logo ? <img src={profile.logo} alt="logo" style={{ width:"100%", height:"100%", objectFit:"contain" }} /> : <span style={{ fontSize:26 }}>🏢</span>}
               </div>
               <div style={{ flex:1 }}>
@@ -17225,6 +17441,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 </button>
                 {profile.logo && <button onClick={() => { updateProfile("logo", null); setLogoError(""); }} style={{ marginLeft:8, padding:"10px 14px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Retirer</button>}
                 <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:8 }}>PNG, JPG — max 2 Mo</div>
+                {profile.logo && logoLight && <div data-testid="logo-light-note" style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, marginTop:8, lineHeight:1.5 }}>Ton logo est clair : dans tes documents, il sera posé sur un fond bleu foncé pour rester visible.</div>}
                 {logoError && <div data-testid="logo-error" style={{ fontFamily:T.body, fontSize:11.5, color:C.error, marginTop:8, lineHeight:1.5 }}>⚠️ {logoError}</div>}
               </div>
             </div>
