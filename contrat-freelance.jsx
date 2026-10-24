@@ -929,7 +929,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "226";
+const APP_VERSION = "227";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -2205,6 +2205,53 @@ const isValidIban = (raw) => {
 };
 const joinFr = (list) => list.length <= 1 ? (list[0] || "") : `${list.slice(0, -1).join(", ")} et ${list[list.length - 1]}`;
 
+/* ── Logo du freelance (version 227) ── */
+// Le logo est redessiné en PNG (transparence gardée), 600 × 240 px au plus, sans changer ses proportions : il pèse peu,
+// et le PDF sait toujours le lire. Avant, n'importe quelle image était gardée telle quelle, jusqu'à 2 Mo, et un format
+// que le PDF ne sait pas lire faisait disparaître le logo des factures sans aucun message.
+const LOGO_MAX_W = 600, LOGO_MAX_H = 240;
+const normalizeLogoDataUrl = (src) => new Promise((resolve, reject) => {
+  if (!src) { reject(new Error("pas d'image")); return; }
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+      if (!w0 || !h0) throw new Error("image vide");
+      const r = Math.min(1, LOGO_MAX_W / w0, LOGO_MAX_H / h0);
+      const w = Math.max(1, Math.round(w0 * r)), h = Math.max(1, Math.round(h0 * r));
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/png"));
+    } catch (e) { reject(e); }
+  };
+  img.onerror = () => reject(new Error("image illisible"));
+  img.src = src;
+});
+const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = (ev) => resolve(ev.target.result);
+  reader.onerror = () => reject(new Error("lecture impossible"));
+  reader.readAsDataURL(file);
+});
+// Logo dans un PDF : il tient dans maxW × maxH (en mm) sans être déformé. Sur un fond sombre, un cadre blanc arrondi le
+// rend lisible. Si le PDF ne sait pas lire l'image, il n'y a simplement pas de logo (le document est quand même créé).
+const drawPdfLogo = (doc, src, { x, y, maxW, maxH, align = "left", badge = false }) => {
+  if (!src) return null;
+  try {
+    const props = doc.getImageProperties(src);
+    if (!props || !(props.width > 0) || !(props.height > 0)) return null;
+    const pad = badge ? 1.6 : 0;
+    const r = Math.min((maxW - 2 * pad) / props.width, (maxH - 2 * pad) / props.height);
+    const w = props.width * r, h = props.height * r;
+    const left = align === "right" ? x - w - 2 * pad : x;
+    const type = String(props.fileType || (/^data:image\/jpe?g/i.test(String(src)) ? "JPEG" : "PNG")).toUpperCase();
+    if (badge) { doc.setFillColor(255, 255, 255); doc.roundedRect(left, y, w + 2 * pad, h + 2 * pad, 1.5, 1.5, "F"); }
+    doc.addImage(src, type, left + pad, y + pad, w, h);
+    return { x: left, y, w: w + 2 * pad, h: h + 2 * pad };
+  } catch (e) { return null; }
+};
+
 /* ── Appel au modèle en flux (le texte arrive au fur et à mesure) ── */
 async function streamClaude(messages, maxTokens, onDelta) {
   const res = await fetch("/api/generate", {
@@ -2472,6 +2519,9 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   doc.setFont("helvetica","normal"); doc.setFontSize(7);
   doc.setTextColor(180, 210, 240);
   doc.text(`Fait le ${contractDate}`, PW - MR, 35, { align:"right" });
+  // Version 227 : logo du prestataire, enregistré avec le contrat (même PDF pour le freelance et pour le client),
+  // en haut à droite de la bande, au-dessus de la référence du document
+  drawPdfLogo(doc, pForm.freelanceLogo, { x: PW - MR, y: 3.5, maxW: 46, maxH: 12.5, align: "right", badge: true });
 
   // ── Bloc titre mission (sous la bande) ──
   let cy = 58;
@@ -3625,9 +3675,14 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     ["freelanceName", "freelanceActivity", "freelanceEmail", "freelanceAddress", "freelanceSiret", "freelancePhone",
      "clientName", "clientCompany", "clientEmail", "clientAddress", "clientSiret", "clientPhone", "missionTitle"]
       .forEach(k => { if (typeof form[k] === "string") trimmed[k] = form[k].replace(/\s+/g, " ").trim(); });
+    // Version 227 : le logo du profil (ajusté) est enregistré avec le contrat. Le PDF du freelance, celui du client et
+    // les avenants montrent le même logo, même si le profil change ensuite.
+    let freelanceLogo = "";
+    if (profile?.logo) { try { freelanceLogo = await normalizeLogoDataUrl(profile.logo); } catch (e) { freelanceLogo = ""; } }
     const genForm = {
       ...form,
       ...trimmed,
+      freelanceLogo,
       freelanceLegalStatus: legalStatus,
       freelanceCompanyName: !isEntrepreneurIndividuel(legalStatus) ? String(profile?.companyName || "").trim() : "",
       freelanceTvaNumber: String(profile?.tvaNumber || "").trim(),
@@ -5503,7 +5558,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
 /* ══════════════════════════════════════════ AVENANT MODAL ══ */
 // Génère le PDF d'un avenant — partagé entre la fenêtre de création et la liste des avenants déjà sauvegardés
-const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature) => {
+const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature, logo = null) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const { jsPDF } = window.jspdf;
@@ -5517,6 +5572,8 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
     doc.text(`AVENANT N°${avenantNum}`, ML, 15);
     doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
     doc.text(`${contractNum ? `Au contrat ${contractNum} · ` : ""}Établi le ${today} via Freeley`, ML, 23);
+    // Version 227 : logo du prestataire (celui du contrat), en haut à droite de la bande
+    drawPdfLogo(doc, logo, { x: PW - MR, y: 4, maxW: 46, maxH: 20, align: "right", badge: true });
     let y = 42;
     doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(40,40,40);
     const lines = doc.splitTextToSize((avenantText || "").replace(/\\n/g, "\n"), cw);
@@ -5645,7 +5702,8 @@ function renderInvoicePDF({
   const fmt = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits:2, maximumFractionDigits:2 }).replace(/[\u202F\u00A0]/g, " ");
   let y = 18;
 
-  if (p.logo) { try { doc.addImage(p.logo, "PNG", ML, y, 26, 26); } catch(e) {} }
+  // Version 227 : le logo garde ses proportions (avant : carré forcé de 26 × 26 mm, un logo en longueur était écrasé)
+  drawPdfLogo(doc, p.logo, { x: ML, y, maxW: 50, maxH: 24 });
   doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(...NAVY);
   doc.text("FACTURE", PW - MR, y + 8, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
@@ -6076,7 +6134,7 @@ CONSIGNES :
   };
 
   const handleDownloadAvenantPDF = () => {
-    downloadAvenantPDF(avenantText, avenantNum, contractNum, contractFreelanceName(form), form.clientName, freelanceSigDataUrl, clientSigDataUrl);
+    downloadAvenantPDF(avenantText, avenantNum, contractNum, contractFreelanceName(form), form.clientName, freelanceSigDataUrl, clientSigDataUrl, form.freelanceLogo);
   };
 
   // Montant de l'ajustement, peu importe le mode utilisé pour générer l'avenant
@@ -13082,7 +13140,7 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
                     </div>
                   )}
 
-                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
+                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature, historyView.form?.freelanceLogo)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
                 </div>
               </details>
             );
@@ -16663,6 +16721,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const [deleteError, setDeleteError] = useState("");
   const fileInputRef = useRef(null);
   const logoInputRef = useRef(null);
+  const [logoError, setLogoError] = useState(""); // version 227 : affichée à côté du logo (avant : tout en haut de la page)
 
   const [uploadError, setUploadError] = useState("");
   const [superPdpClientIdInput, setSuperPdpClientIdInput] = useState("");
@@ -16683,19 +16742,21 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
     reader.readAsDataURL(file);
   };
 
-  const handleLogoUpload = (e) => {
+  const handleLogoUpload = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
+    setLogoError("");
     if (file.size > 2 * 1024 * 1024) {
-      setUploadError("Ce logo dépasse 2 Mo. Choisis un fichier plus léger.");
-      setTimeout(() => setUploadError(""), 5000);
-      e.target.value = "";
+      setLogoError("Ce logo dépasse 2 Mo. Choisis un fichier plus léger.");
       return;
     }
-    setUploadError("");
-    const reader = new FileReader();
-    reader.onload = (ev) => updateProfile("logo", ev.target.result);
-    reader.readAsDataURL(file);
+    try {
+      // Version 227 : redessiné en PNG, proportions gardées, 600 × 240 px au plus (voir normalizeLogoDataUrl)
+      updateProfile("logo", await normalizeLogoDataUrl(await readFileAsDataUrl(file)));
+    } catch (err) {
+      setLogoError("Cette image n'a pas pu être lue. Choisis un logo au format PNG ou JPG.");
+    }
   };
 
   const addSkill = () => {
@@ -17152,7 +17213,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           {/* Logo entreprise */}
           <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>LOGO PROFESSIONNEL</div>
-            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Ton logo apparaîtra en en-tête de tes contrats et factures.</div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Ton logo apparaîtra en haut de tes factures et des contrats que tu crées ensuite.</div>
             <div style={{ display:"flex", alignItems:"center", gap:16 }}>
               <div style={{ width:72, height:72, borderRadius:12, border:`1.5px dashed ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", background:C.creamD, flexShrink:0 }}>
                 {profile.logo ? <img src={profile.logo} alt="logo" style={{ width:"100%", height:"100%", objectFit:"contain" }} /> : <span style={{ fontSize:26 }}>🏢</span>}
@@ -17162,8 +17223,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 <button onClick={() => logoInputRef.current?.click()} style={{ padding:"10px 18px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600 }}>
                   {profile.logo ? "Changer le logo" : "Ajouter un logo"}
                 </button>
-                {profile.logo && <button onClick={() => updateProfile("logo", null)} style={{ marginLeft:8, padding:"10px 14px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Retirer</button>}
+                {profile.logo && <button onClick={() => { updateProfile("logo", null); setLogoError(""); }} style={{ marginLeft:8, padding:"10px 14px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Retirer</button>}
                 <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:8 }}>PNG, JPG — max 2 Mo</div>
+                {logoError && <div data-testid="logo-error" style={{ fontFamily:T.body, fontSize:11.5, color:C.error, marginTop:8, lineHeight:1.5 }}>⚠️ {logoError}</div>}
               </div>
             </div>
           </div>
