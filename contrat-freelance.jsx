@@ -929,7 +929,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "229";
+const APP_VERSION = "230";
 
 // Nom du freelance tel qu'il figure dans un contrat. Les contrats créés à partir de la version 218
 // enregistrent le statut juridique (même vide) : on y ajoute « EI ». Une société (EURL, SASU, SARL, SAS)
@@ -2311,17 +2311,46 @@ const drawPdfLogo = (doc, src, { x, y, maxW, maxH, align = "left", badge = false
   } catch (e) { return null; }
 };
 
-/* ── Appel au modèle en flux (le texte arrive au fur et à mesure) ── */
-async function streamClaude(messages, maxTokens, onDelta) {
+/* ── Version 230 : appels au serveur de Freeley avec le jeton de connexion du freelance ──
+   Le service de rédaction (api/generate) et les liens de paiement Stripe sont réservés aux comptes connectés.
+   La rédaction est limitée à 50 utilisations par jour et par compte (compteur dans Supabase, script SQL v230). */
+const AI_DAILY_LIMIT = 50;
+async function authHeaders() {
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data?.session?.access_token || null; } catch (e) { /* pas de session */ }
+  return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+}
+// Appel au service de rédaction. Quand la limite du jour est atteinte ou que la session a expiré, l'erreur porte
+// un message clair (err.aiAccess) : chaque écran l'affiche à la place de son message d'erreur habituel.
+async function callAi(body) {
   const res = await fetch("/api/generate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
-      max_tokens: maxTokens,
-      stream: true,
-      messages,
-    }),
+    headers: await authHeaders(),
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+  if (res.status === 401 || res.status === 429) {
+    let data = null;
+    try { data = await res.clone().json(); } catch (e) { /* réponse illisible */ }
+    const type = data?.error?.type;
+    if (type === "login_required" || type === "daily_limit") {
+      const err = new Error(type === "daily_limit"
+        ? `Tu as atteint la limite de ${data?.limit || AI_DAILY_LIMIT} utilisations pour aujourd'hui (rédaction, assistant, scanner…). Tu pourras continuer demain.`
+        : "Ta session a expiré. Reconnecte-toi, puis réessaie.");
+      err.aiAccess = true;
+      err.status = res.status;
+      throw err;
+    }
+  }
+  return res;
+}
+
+/* ── Appel au modèle en flux (le texte arrive au fur et à mesure) ── */
+async function streamClaude(messages, maxTokens, onDelta) {
+  const res = await callAi({
+    model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
+    max_tokens: maxTokens,
+    stream: true,
+    messages,
   });
   if (!res.ok || !res.body) {
     const errBody = await res.text().catch(() => "");
@@ -3551,20 +3580,16 @@ function AppInner() {
 Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'invente jamais d'information.`;
 
     try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
-          max_tokens: 800,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: type || "image/jpeg", data: base64 } },
-              { type: "text", text: prompt },
-            ],
-          }],
-        }),
+      const res = await callAi({
+        model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
+        max_tokens: 800,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: type || "image/jpeg", data: base64 } },
+            { type: "text", text: prompt },
+          ],
+        }],
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
@@ -3609,7 +3634,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       }
     } catch(e) {
       setProfileScanLoading(false);
-      setProfileScanError("Impossible de lire le document. Réessaie avec une photo plus nette ou remplis les champs manuellement.");
+      setProfileScanError(e?.aiAccess ? e.message : "Impossible de lire le document. Réessaie avec une photo plus nette ou remplis les champs manuellement.");
       setTimeout(() => setProfileScanError(""), 5000);
     }
   };
@@ -3653,20 +3678,16 @@ ${champsDemandes}
 Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'invente jamais d'information.`;
 
     try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
-          max_tokens: 1500,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: type || "image/jpeg", data: base64 } },
-              { type: "text", text: prompt },
-            ],
-          }],
-        }),
+      const res = await callAi({
+        model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
+        max_tokens: 1500,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: type || "image/jpeg", data: base64 } },
+            { type: "text", text: prompt },
+          ],
+        }],
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
@@ -3698,7 +3719,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       setTimeout(() => setSuccessT(false), 7000);
     } catch(e) {
       setLoadingT(false);
-      alert("Impossible de lire le document. Réessaie avec une photo plus nette ou remplis les champs manuellement.");
+      alert(e?.aiAccess ? e.message : "Impossible de lire le document. Réessaie avec une photo plus nette ou remplis les champs manuellement.");
     }
   };
 
@@ -3830,7 +3851,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
     } catch (err) {
       console.error("[Freeley] Erreur génération:", err);
-      setApiError("Erreur lors de la génération. Vérifie ta connexion et réessaie.");
+      setApiError(err?.aiAccess ? err.message : "Erreur lors de la génération. Vérifie ta connexion et réessaie.");
       setLoadingPhase(0);
       setLoading(false);
     } finally {
@@ -3930,13 +3951,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     if (!authUser?.id || connectingStripe) return;
     setConnectingStripe(true);
     try {
+      // Version 230 : réservé au freelance connecté. Le serveur prend le compte Stripe de son profil (ou le crée)
+      // et l'enregistre lui-même : la base refuse désormais que l'application écrive ce compte.
       const res = await fetch("/api/stripe-connect-onboard", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(),
         body: JSON.stringify({
-          userId: authUser.id,
-          email: authUser.email,
-          existingAccountId: stripeConnectAccountId || undefined,
           // Retour sur l'adresse où le freelance est connecté (sinon il serait déconnecté au retour)
           returnUrl: `${window.location.origin}/?stripe_connect=done`,
           refreshUrl: `${window.location.origin}/?stripe_connect=refresh`,
@@ -3944,10 +3964,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       });
       const data = await res.json();
       if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
-      if (data.accountId && data.accountId !== stripeConnectAccountId) {
-        setStripeConnectAccountId(data.accountId);
-        await supabase.from("profiles").update({ stripe_connect_account_id: data.accountId }).eq("id", authUser.id);
-      }
+      if (data.accountId && data.accountId !== stripeConnectAccountId) setStripeConnectAccountId(data.accountId);
       window.location.href = data.url;
     } catch(e) {
       console.error("Erreur connexion Stripe:", e);
@@ -4002,12 +4019,10 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     if (params.get("stripe_connect") !== "done") return;
     (async () => {
       try {
-        const res = await fetch(`/api/stripe-connect-status?accountId=${encodeURIComponent(stripeConnectAccountId)}`);
+        // Version 230 : le serveur vérifie le compte Stripe de ton profil et enregistre lui-même le résultat
+        const res = await fetch("/api/stripe-connect-status", { headers: await authHeaders() });
         const data = await res.json();
-        if (data.ready) {
-          setStripeConnectReady(true);
-          await supabase.from("profiles").update({ stripe_connect_ready: true }).eq("id", authUser.id);
-        }
+        if (data.ready) setStripeConnectReady(true);
       } catch(e) { console.error("Erreur vérification Stripe Connect:", e); }
       // Nettoie l'URL pour ne pas re-vérifier à chaque rafraîchissement
       window.history.replaceState({}, "", window.location.pathname);
@@ -6041,14 +6056,10 @@ CONSIGNES :
 - Maximum 300 mots, style juridique français rigoureux
 - Ne laisse aucun champ vide`;
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-        }),
+      const res = await callAi({
+        model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
+        max_tokens: 1000,
+        messages: [{ role: "user", content: prompt }],
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -6091,7 +6102,7 @@ CONSIGNES :
         }
       }
     } catch (err) {
-      setError("Erreur lors de la génération. Vérifie ta connexion et réessaie.");
+      setError(err?.aiAccess ? err.message : "Erreur lors de la génération. Vérifie ta connexion et réessaie.");
       setPhase("form");
     }
   };
@@ -6235,14 +6246,13 @@ CONSIGNES :
     try {
       const res = await fetch("/api/create-payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(),
         body: JSON.stringify({
           ...STRIPE_RETURN_URLS,
           amount: withTva(effectiveAjustement, profile),
           description: `Avenant n°${avenantNum} — ${form.missionTitle || "mission"}`,
           customerEmail: form.clientEmail || undefined,
           metadata: { contractId: contractId || "", paymentType: "avenant", avenantNum: String(avenantNum) },
-          connectedAccountId: stripeConnectAccountId || undefined,
         }),
       });
       const data = await res.json();
@@ -6826,7 +6836,8 @@ function ContractModifyBox({ dark = false, contractText, form, profile, freelanc
       if (stopReason === "max_tokens" || !looksComplete(newContract)) throw new Error("incomplet");
       await save({ newContract, newForm, changes, removeFreelanceSignature: !!freelanceSigned });
     } catch (e) {
-      setError(e?.message === "incomplet"
+      setError(e?.aiAccess ? e.message
+        : e?.message === "incomplet"
         ? "La modification n'a pas pu être terminée. Ton contrat n'a pas été changé. Réessaie."
         : "La modification n'a pas marché. Vérifie ta connexion et réessaie. Ton contrat n'a pas été changé.");
     } finally {
@@ -9871,11 +9882,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   };
 
   const callAI = async (prompt) => {
-    const res = await fetch("/api/generate", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:2500, messages:[{role:"user",content:prompt}] }),
-    });
+    const res = await callAi({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:2500, messages:[{role:"user",content:prompt}] });
     // Version 224 : une erreur du service n'affiche plus un message vide
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -9916,8 +9923,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         setAutoLetter(text);
         setAutoStep("result");
       }
-    } catch {
-      setAutoLetter("Erreur de génération. Vérifie ta connexion et réessaie.");
+    } catch (e) {
+      setAutoLetter(e?.aiAccess ? e.message : "Erreur de génération. Vérifie ta connexion et réessaie.");
       setAutoStep("result");
     }
   };
@@ -9935,8 +9942,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         const text = await callAI(prompt);
         setManLetter(text);
         setManStep("result");
-      } catch {
-        setManLetter("Erreur de génération. Vérifie ta connexion et réessaie.");
+      } catch (e) {
+        setManLetter(e?.aiAccess ? e.message : "Erreur de génération. Vérifie ta connexion et réessaie.");
         setManStep("result");
       }
       return;
@@ -9971,8 +9978,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         setManLetter(text);
         setManStep("result");
       }
-    } catch {
-      setManLetter("Erreur de génération. Vérifie ta connexion et réessaie.");
+    } catch (e) {
+      setManLetter(e?.aiAccess ? e.message : "Erreur de génération. Vérifie ta connexion et réessaie.");
       setManStep("result");
     }
   };
@@ -10028,13 +10035,12 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     try {
       const res = await fetch("/api/create-payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(),
         body: JSON.stringify({
           ...STRIPE_RETURN_URLS,
           amount: total,
           description: `Règlement — ${mission || clientName}`,
           customerEmail: clientEmail || undefined,
-          connectedAccountId: stripeConnectAccountId,
         }),
       });
       const data = await res.json();
@@ -11156,14 +11162,10 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
     setImproved(false);
     const before = value;
     try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
-          max_tokens: 800,
-          messages: [{ role: "user", content: buildImprovePrompt(missionTitle, value) }],
-        }),
+      const res = await callAi({
+        model: "claude-sonnet-5-5", thinking: { type: "between_tools" },
+        max_tokens: 800,
+        messages: [{ role: "user", content: buildImprovePrompt(missionTitle, value) }],
       });
       if (!res.ok) throw new Error(`Erreur ${res.status}`);
       const data = await res.json();
@@ -11175,8 +11177,8 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
       setImproved(true);
       setCanUndo(true);
       setTimeout(() => setImproved(false), 4000);
-    } catch {
-      setImproveError("Erreur lors de l'amélioration. Réessaie.");
+    } catch (e) {
+      setImproveError(e?.aiAccess ? e.message : "Erreur lors de l'amélioration. Réessaie.");
     }
     setImproving(false);
   };
@@ -11593,14 +11595,13 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     if (!stripeConnectReady) throw new Error("STRIPE_NOT_CONNECTED");
     const res = await fetch("/api/create-payment", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeaders(),
       body: JSON.stringify({
         ...STRIPE_RETURN_URLS,
         amount: soldeDue,
         description: `Solde — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
         metadata: { contractId: entry?.id || "", paymentType: "solde" },
-        connectedAccountId: stripeConnectAccountId || undefined,
       }),
     });
     const data = await res.json();
@@ -11660,14 +11661,13 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     if (!stripeConnectReady) throw new Error("STRIPE_NOT_CONNECTED");
     const res = await fetch("/api/create-payment", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeaders(),
       body: JSON.stringify({
         ...STRIPE_RETURN_URLS,
         amount: depositDue,
         description: `${paymentWordCap} — ${entry?.missionTitle || "Prestation Freeley"}`,
         customerEmail: entry?.form?.clientEmail || undefined,
         metadata: { contractId: entry?.id || "", paymentType: "contract" },
-        connectedAccountId: stripeConnectAccountId || undefined,
       }),
     });
     const data = await res.json();
@@ -12838,18 +12838,14 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       // Version 229 : la consigne est construite par buildAssistantPrompt (outils nommés, plus de lettres)
       const prompt = buildAssistantPrompt({ historyView, question: assistantQuestion });
 
-      const res = await fetch("/api/generate", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:1200, messages:[{role:"user",content:prompt}] }),
-      });
+      const res = await callAi({ model:"claude-sonnet-5-5", thinking:{ type:"between_tools" }, max_tokens:1200, messages:[{role:"user",content:prompt}] });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const text = (data.content||[]).map(i=>i.text||"").join("\n").trim();
       if (!text) throw new Error("Réponse vide"); // version 224 : plus de réponse vide en cas d'erreur du service
       setAssistantAnswer(text);
-    } catch {
-      setAssistantAnswer("Erreur de génération. Vérifie ta connexion et réessaie.");
+    } catch (e) {
+      setAssistantAnswer(e?.aiAccess ? e.message : "Erreur de génération. Vérifie ta connexion et réessaie.");
     } finally {
       setAssistantLoading(false);
     }
@@ -13984,14 +13980,13 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
   const createCardPaymentLink = async () => {
     const res = await fetch("/api/create-payment", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeaders(),
       body: JSON.stringify({
         ...STRIPE_RETURN_URLS,
         amount: withTva(acompte, profile),
         description: `${depositPct === 100 ? "Paiement" : "Acompte " + depositPct + " %"} — ${form.missionTitle || "Prestation Freeley"}`,
         customerEmail: form.clientEmail || undefined,
         metadata: { contractId: contractId || standaloneEntryId || "", paymentType: "contract" },
-        connectedAccountId: stripeConnectAccountId,
       }),
     });
     const data = await res.json();
@@ -15275,7 +15270,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
           : [{ type: "text", text: `${prompt}\n\nTEXTE DU CONTRAT :\n"""\n${scanDoc.text}\n"""` }];
       const body = JSON.stringify({ model: "claude-sonnet-5-5", thinking: { type: "between_tools" }, max_tokens: 4000, messages: [{ role: "user", content }] });
       if (body.length > SCAN_MAX_BODY_CHARS) return fail("Ce document est trop lourd pour être envoyé. Enregistre-le dans une version plus légère, ou prends moins de pages en photo.");
-      const res = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      const res = await callAi(body);
       if (!res.ok) return fail(res.status === 413
         ? "Ce document est trop lourd pour être envoyé. Enregistre-le dans une version plus légère, ou prends les pages en photo."
         : "L'analyse n'a pas pu se faire : le service ne répond pas pour le moment. Réessaie dans un instant.");
@@ -15298,7 +15293,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
       } catch (e) { /* stockage plein ou bloqué : l'analyse reste affichée */ }
       setTimeout(() => setPhase("result"), 300);
     } catch (e) {
-      fail("L'analyse n'a pas pu se faire. Vérifie ta connexion, puis réessaie.");
+      fail(e?.aiAccess ? e.message : "L'analyse n'a pas pu se faire. Vérifie ta connexion, puis réessaie.");
     }
   };
 
@@ -15937,14 +15932,13 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     try {
       const res = await fetch("/api/create-payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(),
         body: JSON.stringify({
           ...STRIPE_RETURN_URLS,
           amount: withTva(acompte, profile),
           description: `${isComptant ? "Paiement" : "Acompte"} — ${form?.missionTitle || "Prestation Freeley"}`,
           customerEmail: form?.clientEmail || undefined,
           metadata: { contractId: contractId || "", paymentType: "contract" },
-          connectedAccountId: stripeConnectAccountId || undefined,
         }),
       });
       const data = await res.json();
