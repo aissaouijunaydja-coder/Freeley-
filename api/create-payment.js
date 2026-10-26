@@ -9,6 +9,12 @@
 //   - un lien relié à un contrat n'est créé que si ce contrat lui appartient ;
 //   - après le paiement, le client revient toujours sur Freeley.
 //
+// Version 231 :
+//   - le serveur garde lui-même le numéro du lien (acompte ou solde) dans le contrat : la vérification de secours
+//     (api/check-payment) marche aussi pour les liens créés pendant la signature ou depuis une facture ;
+//   - si Stripe ne reconnaît plus le compte du profil (par exemple un compte de test après le passage en
+//     production), le profil repasse en « pas encore connecté » et le message dit quoi faire.
+//
 // Variables d'environnement : STRIPE_SECRET_KEY, VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 
 import { createClient } from "@supabase/supabase-js";
@@ -20,6 +26,10 @@ const ALLOWED_ORIGIN = /^https:\/\/((www\.)?freeley\.fr|freeley-[a-z0-9-]+\.verc
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PAYMENT_TYPES = new Set(["contract", "solde", "avenant"]);
 const MAX_AMOUNT = 999999.99;
+// Réponses de Stripe qui veulent dire : ce compte n'existe pas (ou plus) pour cette clé
+const ACCOUNT_GONE = new Set(["account_invalid", "resource_missing", "livemode_mismatch"]);
+// Colonne du contrat où le numéro du lien est gardé, selon ce que le client paie
+const SESSION_COLUMN = { contract: "stripe_session_id", solde: "solde_stripe_session_id" };
 
 function safeReturnUrl(url, fallback) {
   try {
@@ -115,10 +125,24 @@ export default async function handler(req, res) {
       },
       body: params.toString(),
     });
-    const data = await response.json();
+    let data = {};
+    try { data = (await response.json()) || {}; } catch (e) { /* réponse illisible */ }
     if (!response.ok) {
       console.error("[stripe] Erreur:", data);
+      if (ACCOUNT_GONE.has(data?.error?.code)) {
+        // Le compte du profil n'existe plus pour Stripe : le bouton « Connecter mon compte Stripe » doit revenir
+        const { error: saveError } = await supabase.from("profiles").update({ stripe_connect_ready: false }).eq("id", user.id);
+        if (saveError) console.error("[create-payment] état Stripe non enregistré", saveError);
+        return res.status(409).json({ error: "Stripe ne reconnaît plus ton compte. Recharge la page, puis reconnecte ton compte Stripe dans ton Profil → Facturation.", code: "stripe_reconnect" });
+      }
       return res.status(response.status).json({ error: data?.error?.message || "Erreur Stripe" });
+    }
+
+    // Garde le numéro du lien dans le contrat, pour la vérification de secours (api/check-payment)
+    const sessionColumn = metadata.contractId ? SESSION_COLUMN[metadata.paymentType] : null;
+    if (sessionColumn && data.id) {
+      const { error: saveError } = await supabase.from("contracts").update({ [sessionColumn]: data.id }).eq("id", metadata.contractId);
+      if (saveError) console.error("[create-payment] numéro du lien non enregistré dans le contrat", saveError);
     }
     return res.status(200).json({ url: data.url, id: data.id });
   } catch (err) {

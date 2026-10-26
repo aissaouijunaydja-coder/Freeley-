@@ -4,11 +4,18 @@
 // vérifié est celui de SON profil, et c'est le serveur qui enregistre le résultat dans le profil (la base refuse
 // que l'application le fasse elle-même, script SQL v230).
 //
+// Version 231 : si ce compte n'existe plus pour Stripe (par exemple un compte de test après le passage en
+// production), le profil repasse en « pas encore connecté » : le bouton « Connecter mon compte Stripe » revient, et
+// l'inscription crée un nouveau compte.
+//
 // Variables d'environnement : STRIPE_SECRET_KEY, VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+// Réponses de Stripe qui veulent dire : ce compte n'existe pas (ou plus) pour cette clé
+const ACCOUNT_GONE = new Set(["account_invalid", "resource_missing", "livemode_mismatch"]);
 
 async function userFromRequest(req) {
   const token = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "").trim();
@@ -21,6 +28,11 @@ async function userFromRequest(req) {
     console.error("[stripe-connect-status] jeton de connexion illisible", e);
     return null;
   }
+}
+
+async function saveReady(userId, ready) {
+  const { error } = await supabase.from("profiles").update({ stripe_connect_ready: ready }).eq("id", userId);
+  if (error) console.error("[stripe-connect-status] état non enregistré", error);
 }
 
 export default async function handler(req, res) {
@@ -46,14 +58,19 @@ export default async function handler(req, res) {
     const response = await fetch(`https://api.stripe.com/v1/accounts/${encodeURIComponent(accountId)}`, {
       headers: { "Authorization": `Bearer ${process.env.STRIPE_SECRET_KEY}` },
     });
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json({ error: data.error?.message || "Erreur Stripe" });
+    let data = {};
+    try { data = (await response.json()) || {}; } catch (e) { /* réponse illisible */ }
+    if (!response.ok) {
+      if (ACCOUNT_GONE.has(data.error?.code)) {
+        console.warn("[stripe-connect-status] compte du profil introuvable chez Stripe", accountId, data.error?.code);
+        if (profile.stripe_connect_ready) await saveReady(user.id, false);
+        return res.status(200).json({ connected: false, ready: false, chargesEnabled: false, detailsSubmitted: false, accountGone: true });
+      }
+      return res.status(response.status).json({ error: data.error?.message || "Erreur Stripe" });
+    }
 
     const ready = !!(data.charges_enabled && data.details_submitted);
-    if (ready !== !!profile.stripe_connect_ready) {
-      const { error: saveError } = await supabase.from("profiles").update({ stripe_connect_ready: ready }).eq("id", user.id);
-      if (saveError) console.error("[stripe-connect-status] état non enregistré", saveError);
-    }
+    if (ready !== !!profile.stripe_connect_ready) await saveReady(user.id, ready);
     return res.status(200).json({
       connected: true,
       ready,
