@@ -266,6 +266,9 @@ const getHistory = async () => {
       signatureLocation: content.signatureLocation || null,
       clientPetitPro: content.clientPetitPro === true ? true : content.clientPetitPro === false ? false : null,
       earlyPaymentAck: content.earlyPaymentAck ? { ...content.earlyPaymentAck, atServer: content.earlyPaymentAckAtServer || null } : null,
+      signatureProof: content.signatureProof || null, // version 232
+      acompteInvoiceNumber: content.acompteInvoiceNumber || null, // version 232 : référence des virements
+      soldeInvoiceNumber: content.soldeInvoiceNumber || null,
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
       paymentStatus: row.payment_status || "pending",
@@ -600,6 +603,66 @@ const saveEarlyPaymentAck = async (contractId, { action, allowedFrom }) => {
 // Date et heure lisibles, heure de Paris : « 13 octobre 2026 à 15:30 »
 const frDateTime = (d) => d ? `${frDate(d)} à ${new Date(d).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}` : "";
 
+// ── Preuve de signature (version 232) ──
+// Le serveur de Freeley enregistre chaque signature avec une preuve : son heure, l'adresse IP et le navigateur de
+// l'appareil qui signe, et l'empreinte SHA-256 du texte signé. Une fois signé, le document est verrouillé en base.
+// Empreinte SHA-256 d'un texte, calculée comme le serveur (null si le navigateur ne sait pas la calculer)
+const sha256Hex = async (text) => {
+  try {
+    if (!window.crypto || !window.crypto.subtle || typeof TextEncoder === "undefined") return null;
+    const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(text || "")));
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch (e) { return null; }
+};
+// « 27 octobre 2026 à 18:45:12 », heure de Paris
+const frDateTimeSec = (d) => d ? `${frDate(d)} à ${new Date(d).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Europe/Paris" })}` : "";
+// Lignes de la preuve, pour l'écran et les PDF. docLabel : « du contrat », « de l'avenant » ou « du NDA ».
+const signatureProofLines = (p, docLabel = "du contrat") => {
+  if (!p || !p.at) return [];
+  return [
+    `${p.mode === "presence" ? "Signé en présence, sur l'appareil du prestataire" : "Signé à distance"}, le ${frDateTimeSec(p.at)} (heure de Paris, horloge du serveur Freeley).`,
+    p.ip ? `Adresse IP de l'appareil : ${p.ip}` : null,
+    p.userAgent ? `Navigateur : ${p.userAgent}` : null,
+    p.textSha256 ? `Empreinte SHA-256 du texte ${docLabel} : ${p.textSha256}` : null,
+  ].filter(Boolean);
+};
+const PROOF_LOCK_NOTE = "Toute modification du texte, même d'un seul caractère, changerait cette empreinte. Depuis la signature, Freeley ne permet plus de modifier ce document.";
+// Bloc « Preuve de signature » (Mes contrats, avenants, NDA, page du client)
+function SignatureProofBlock({ proof, docLabel = "du contrat", signed = true, compact = false }) {
+  if (!signed) return null;
+  const lines = signatureProofLines(proof, docLabel);
+  const box = { background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:10, padding: compact ? "10px 12px" : "12px 14px", marginTop: compact ? 8 : 14, marginBottom: compact ? 10 : 0, fontFamily:"'DM Sans', sans-serif", textAlign:"left" };
+  return (
+    <div data-testid="signature-proof" style={box}>
+      <div style={{ fontSize:12, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>🔒 Preuve de signature</div>
+      {lines.length ? lines.map((l, i) => (
+        <div key={i} style={{ fontSize:11, color:"#475569", lineHeight:1.55, overflowWrap:"anywhere" }}>{l}</div>
+      )) : (
+        <div style={{ fontSize:11, color:"#64748B", lineHeight:1.55 }}>Signé avant l'ajout des preuves détaillées (adresse IP, navigateur, empreinte) : la date de signature reste enregistrée.</div>
+      )}
+      <div style={{ fontSize:10.5, color:"#64748B", lineHeight:1.5, marginTop:6 }}>{lines.length ? PROOF_LOCK_NOTE : "Depuis la signature, Freeley ne permet plus de modifier ce document."}</div>
+    </div>
+  );
+}
+// Même bloc dans un PDF jsPDF : renvoie la nouvelle position verticale. room(h) : saut de page si besoin.
+const drawSignatureProofPdf = (doc, proof, { x, y, width, docLabel = "du contrat", room = null }) => {
+  const lines = signatureProofLines(proof, docLabel);
+  if (!lines.length) return y;
+  const all = [];
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.2);
+  lines.forEach((l) => doc.splitTextToSize(l, width).forEach((t) => all.push(t)));
+  const note = doc.splitTextToSize(PROOF_LOCK_NOTE, width);
+  const h = 6 + all.length * 3.4 + note.length * 3.2 + 3;
+  if (room) y = room(h, y);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(26, 54, 93);
+  doc.text("Preuve de signature électronique", x, y); y += 4.6;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.2); doc.setTextColor(70, 70, 70);
+  all.forEach((t) => { doc.text(t, x, y); y += 3.4; });
+  doc.setFont("helvetica", "italic"); doc.setFontSize(6.8); doc.setTextColor(120, 120, 120);
+  note.forEach((t) => { doc.text(t, x, y); y += 3.2; });
+  return y + 2;
+};
+
 // Fenêtre de confirmation, affichée par-dessus tout le reste (portail vers le body)
 function EarlyPaymentConfirmModal({ payNotBefore, saving, error, onCancel, onConfirm }) {
   const [checked, setChecked] = useState(false);
@@ -776,22 +839,46 @@ const submitRetractationExercise = async (contractId) => {
 
 // Le client signe à distance : le serveur enregistre la signature, passe le contrat en « signé », puis
 // envoie la confirmation du contrat par email (support durable).
-const submitClientSignature = async (contractId, clientSignature) => {
-  const r = await callRetractionApi({ action: "client-sign", contractId, signature: clientSignature });
-  if (r.ok) return true;
+// Version 232 : la page envoie l'empreinte du texte qu'elle a affiché. Si le prestataire a changé le contrat
+// pendant la lecture, le serveur refuse (« text_changed ») : la page montre la nouvelle version. Le serveur
+// enregistre la preuve (heure, adresse IP, navigateur, empreinte). Ancien chemin direct seulement si le serveur
+// ne répond pas : { ok, reason }.
+const submitClientSignature = async (contractId, clientSignature, shownText) => {
+  const textSha256 = typeof shownText === "string" ? await sha256Hex(shownText) : null;
+  const r = await callRetractionApi({ action: "client-sign", contractId, signature: clientSignature, ...(textSha256 ? { textSha256 } : {}) });
+  if (r.ok) return { ok: true };
   console.error("Signature refusée par le serveur:", r.status, r.data);
-  // Repli : ancien chemin direct
+  if (r.status > 0 && r.status < 500) return { ok: false, reason: r.data.error || "" };
+  // Repli (serveur injoignable) : ancien chemin direct
   const existing = await readContractForUpdate(contractId);
-  if (!existing) return false;
+  if (!existing) return { ok: false };
+  if (existing.status !== "pending_client") return { ok: false, reason: "not_pending" };
   const newContent = { ...existing.content, clientSignature, signedByClientAt: new Date().toISOString() };
   const { error: e2 } = await supabase.rpc("update_contract_content", {
     p_contract_id: contractId,
     p_new_content: JSON.stringify(newContent),
     p_new_status: "signed",
   });
-  if (e2) { console.error(e2); return false; }
+  if (e2) { console.error(e2); return { ok: false }; }
   callRetractionApi({ action: "send-link", contractId });
-  return true;
+  return { ok: true };
+};
+
+// Version 232 : signature en présence (les deux signatures sur l'appareil du freelance), enregistrée par le serveur
+// avec la preuve, puis confirmation envoyée au client. { ok } ; { fallback: true } si le serveur ne répond pas.
+const submitInPersonSignature = async (contractId, payload) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const r = await callRetractionApi({ action: "sign-in-person", contractId, ...payload }, session?.access_token);
+  if (r.ok) return { ok: true };
+  console.error("[Freeley] Signature en présence refusée par le serveur :", r.status, r.data);
+  return { ok: false, fallback: r.status === 0 || r.status >= 500, reason: r.data.error || "" };
+};
+const submitAvenantInPersonSignature = async (contractId, avenantNum, payload) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const r = await callRetractionApi({ action: "avenant-sign-in-person", contractId, avenantNum, ...payload }, session?.access_token);
+  if (r.ok) return { ok: true };
+  console.error("[Freeley] Signature de l'avenant refusée par le serveur :", r.status, r.data);
+  return { ok: false, fallback: r.status === 0 || r.status >= 500, reason: r.data.error || "" };
 };
 
 // Le client (sans compte) charge le NDA à signer via son id public
@@ -802,7 +889,12 @@ const getNdaForSigning = async (ndaId) => {
 };
 
 // Le client signe le NDA : on enregistre sa signature et on passe le statut à "signed"
+// Version 232 : par le serveur, avec la preuve de signature ; l'ancienne fonction sert de secours.
 const submitNdaSignature = async (ndaId, clientSignature) => {
+  const r = await callRetractionApi({ action: "nda-sign", ndaId, signature: clientSignature });
+  if (r.ok) return true;
+  console.error("[Freeley] Signature du NDA refusée par le serveur :", r.status, r.data);
+  if (r.status > 0 && r.status < 500) return false;
   const { error } = await supabase.rpc("sign_nda", { nda_id: ndaId, signature: clientSignature });
   if (error) { console.error("submitNdaSignature error:", error); return false; }
   return true;
@@ -815,7 +907,7 @@ const downloadSignedNdaForClient = async (ndaId) => {
   const { data, error } = await supabase.rpc("get_nda_signed_copy", { p_nda_id: ndaId });
   const n = Array.isArray(data) ? data[0] : data;
   if (error || !n || n.status !== "signed") throw new Error((error && error.message) || "not_signed");
-  downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at);
+  downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at, n.signature_proof || null);
 };
 
 // Le client (sans compte) charge l'avenant précis à signer
@@ -826,7 +918,12 @@ const getAvenantForSigning = async (contractId, avenantNum) => {
 };
 
 // Le client signe l'avenant : seul cet avenant précis est mis à jour
+// Version 232 : par le serveur, avec la preuve de signature ; l'ancienne fonction sert de secours.
 const submitAvenantSignature = async (contractId, avenantNum, clientSignature) => {
+  const r = await callRetractionApi({ action: "avenant-sign", contractId, avenantNum, signature: clientSignature });
+  if (r.ok) return true;
+  console.error("[Freeley] Signature de l'avenant refusée par le serveur :", r.status, r.data);
+  if (r.status > 0 && r.status < 500) return false;
   const { error } = await supabase.rpc("sign_avenant", { p_contract_id: contractId, p_avenant_num: avenantNum, p_client_signature: clientSignature });
   if (error) { console.error("submitAvenantSignature error:", error); return false; }
   return true;
@@ -929,7 +1026,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "231";
+const APP_VERSION = "232";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -3540,7 +3637,7 @@ const downloadSignedContractForClient = async (contractId) => {
     freelanceSignature: c.freelanceSignature || null, clientSignature: c.clientSignature || null,
     signedAt: c.signedByClientAtServer || c.signedByClientAt || null,
     retractationWaivedAt: c.retractationWaivedAtServer || c.retractationWaivedAt || null,
-    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null, clientPetitPro: c.clientPetitPro === true },
+    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null, clientPetitPro: c.clientPetitPro === true, signatureProof: c.signatureProof || null },
     profile: { tvaNumber: tvaFromText },
   });
   doc.save(fileName);
@@ -4089,9 +4186,15 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   // Mention finale
   doc.setFont("helvetica","italic"); doc.setFontSize(7);
   doc.setTextColor(...GREY);
-  doc.text(doc.splitTextToSize(pFreelanceSig && pClientSig
+  const finalLines = doc.splitTextToSize(pFreelanceSig && pClientSig
     ? `Contrat signé par voie électronique, un exemplaire numérique original étant conservé par chaque partie. Droit français applicable. Freeley — ${today}`
-    : `Contrat en attente de signature. Droit français applicable. Freeley — ${today}`, cw), ML, y);
+    : `Contrat en attente de signature. Droit français applicable. Freeley — ${today}`, cw);
+  doc.text(finalLines, ML, y);
+  // Version 232 : preuve de signature enregistrée par le serveur (heure, adresse IP, navigateur, empreinte)
+  if (pFreelanceSig && pClientSig && pExtra.signatureProof) {
+    y += finalLines.length * 3.5 + 5;
+    y = drawSignatureProofPdf(doc, pExtra.signatureProof, { x: ML, y, width: cw, docLabel: "du contrat", room: (h, yy) => { checkY(h); return y; } });
+  }
 
   // ── Annexe : information officielle sur la rétractation + formulaire (particulier, ou petite entreprise
   // signée hors établissement, art. L221-3 C. conso : version 222) ──
@@ -5556,9 +5659,9 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", maxHeight:260, overflowY:"auto", marginBottom:12 }}>
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(n.content)}</pre>
               </div>
-              <NdaSignatureCertificate partieA={n.partie_a} partieB={n.partie_b} freelanceSignature={n.freelance_signature} clientSignature={n.client_signature} signedAt={n.signed_at} createdAt={n.created_at} />
+              <NdaSignatureCertificate partieA={n.partie_a} partieB={n.partie_b} freelanceSignature={n.freelance_signature} clientSignature={n.client_signature} signedAt={n.signed_at} createdAt={n.created_at} proof={n.signature_proof || null} />
               <div style={{display:"flex", gap:8, marginBottom: (n.status === "signed" || ndaSignLinks[n.id]) ? 10 : 0}}>
-                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
+                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at, n.status === "signed" ? (n.signature_proof || null) : null)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
                 <button onClick={()=>deleteNda(n.id)} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:T.body}}>🗑 Supprimer</button>
               </div>
               {n.status !== "signed" && !ndaSignLinks[n.id] && (
@@ -5652,7 +5755,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         historyView={historyView}
         setHistoryView={setHistoryView}
         onBack={() => goToScreen("app")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true })}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null })}
         onDelete={async (id) => { await deleteFromHistory(id); const hist = await getHistory(); setHistory(hist); if (historyView?.id === id) setHistoryView(null); }}
         onDuplicate={async (entry) => {
           const dupForm = { ...(entry.form || {}), missionTitle: (entry.missionTitle || entry.form?.missionTitle || "") + " (copie)" };
@@ -5726,7 +5829,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       <ArchivesPage
         history={history}
         onBack={() => goToScreen("history")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true })}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null })}
         profile={profile}
         authUser={authUser}
         onRestore={async (id) => {
@@ -5824,7 +5927,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         />
       )}
       {showInvoiceModal && (
-        <InvoiceModal form={form} setForm={setForm} profile={profile} setProfile={setProfile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} />
+        <InvoiceModal form={form} setForm={setForm} profile={profile} setProfile={setProfile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} onConnectStripe={handleConnectStripe} connectingStripe={connectingStripe} />
       )}
       {magicFillTarget && (
         <CameraCapture
@@ -6762,7 +6865,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
 /* ══════════════════════════════════════════ AVENANT MODAL ══ */
 // Génère le PDF d'un avenant — partagé entre la fenêtre de création et la liste des avenants déjà sauvegardés
-const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature, logo = null, logoLight = false) => {
+const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature, logo = null, logoLight = false, proof = null) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const { jsPDF } = window.jspdf;
@@ -6810,6 +6913,11 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
       y = Math.max(yA, yB) + 6;
       doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(120,120,120);
       doc.text("Signatures capturées électroniquement et horodatées par Freeley.", ML, y);
+      // Version 232 : preuve de signature de l'avenant
+      if (proof && freelanceSignature && clientSignature) {
+        y += 8;
+        y = drawSignatureProofPdf(doc, proof, { x: ML, y, width: PW - ML * 2, docLabel: "de l'avenant", room: (h, yy) => { if (yy + h > 280) { doc.addPage(); return 20; } return yy; } });
+      }
     }
     doc.save(`Avenant_${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
@@ -6993,16 +7101,21 @@ function renderInvoicePDF({
   // prévient le freelance quand son IBAN manque).
   const hasIban = !!(p.iban && String(p.iban).trim());
   if (hasIban || qrBase64) {
-    const payBoxH = hasIban ? 30 : 26;
+    // Version 232 : la référence du virement (le numéro de la facture) aide à reconnaître le paiement reçu
+    const payLines = hasIban ? [
+      `IBAN : ${p.iban}`,
+      p.bic ? `BIC : ${p.bic}` : null,
+      p.bankName ? `Banque : ${p.bankName}` : null,
+      invoiceNum ? `Référence du virement : ${invoiceNum}` : null,
+    ].filter(Boolean) : [];
+    const payBoxH = hasIban ? Math.max(30, 12 + payLines.length * 6) : 26;
     const ibanBoxW = hasIban ? (qrBase64 ? cw * 0.62 : cw) : 0;
     if (hasIban) {
       doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, ibanBoxW, payBoxH, 2, 2, "F");
       doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
       doc.text("COORDONNÉES DE PAIEMENT", ML + 4, y + 7);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
-      doc.text(`IBAN : ${p.iban}`, ML + 4, y + 14);
-      if (p.bic) doc.text(`BIC : ${p.bic}`, ML + 4, y + 20);
-      if (p.bankName) doc.text(`Banque : ${p.bankName}`, ML + 4, y + 26);
+      payLines.forEach((l, i) => doc.text(l, ML + 4, y + 14 + i * 6));
     }
     if (qrBase64) {
       const qrBoxX = hasIban ? ML + ibanBoxW + 4 : ML;
@@ -7294,12 +7407,20 @@ CONSIGNES :
     if (!clientSigHasStrokes) return;
     setAvenantSignLoading(true);
     const clientSig = clientSigCanvasRef.current.toDataURL("image/png");
-    const ok = await saveAvenantSignatures({
-      freelanceSignature: freelanceSigDataUrl,
-      clientSignature: clientSig,
-      signedByClientAt: new Date().toISOString(),
-      status: "signed",
-    });
+    // Version 232 : enregistré par le serveur avec la preuve de signature ; ancien chemin s'il ne répond pas
+    let ok = false;
+    if (contractId) {
+      const viaServer = await submitAvenantInPersonSignature(contractId, avenantNum, { freelanceSignature: freelanceSigDataUrl, clientSignature: clientSig });
+      ok = viaServer.ok;
+      if (!ok && viaServer.fallback) {
+        ok = await saveAvenantSignatures({
+          freelanceSignature: freelanceSigDataUrl,
+          clientSignature: clientSig,
+          signedByClientAt: new Date().toISOString(),
+          status: "signed",
+        });
+      }
+    }
     setAvenantSignLoading(false);
     if (!ok) { setSaveError(true); return; }
     setClientSigDataUrl(clientSig);
@@ -7703,32 +7824,33 @@ CONSIGNES :
               ><span>⬇</span> PDF</button>
             </div>
 
-            {/* Rappel visible du statut Stripe Connect */}
-            {effectiveAjustement > 0 && !stripeConnectReady && (
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8, background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-                <div style={{ fontFamily:T.body, fontSize:11.5, color:"#92400E" }}>💳 Stripe pas encore connecté</div>
-                <button onClick={onConnectStripe} disabled={connectingStripe} style={{ padding:"6px 12px", background: connectingStripe ? "#D1D5DB" : "#635BFF", border:"none", borderRadius:6, cursor: connectingStripe ? "wait" : "pointer", fontFamily:T.body, fontSize:11, fontWeight:700, color:"#fff" }}>{connectingStripe ? "…" : "Connecter"}</button>
-              </div>
-            )}
-
-            {/* Lien de paiement Stripe pour l'ajustement de prix, si applicable */}
+            {/* Ajustement de prix : le client paie par virement ou par carte (version 232 : présentés à égalité) */}
             {effectiveAjustement > 0 && (
               <div style={{ background:"#FFFBEB", border:"1.5px solid #FDE68A", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
-                <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:8 }}>
+                <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:10 }}>
                   💰 Cet avenant ajoute {effectiveAjustement} € {contractPricing(form, profile).enteredUnit} au budget
                 </div>
-                {!avenantPaymentLink ? (
-                  <button
-                    onClick={handleGenerateAvenantPaymentLink}
-                    disabled={avenantPaymentLoading}
-                    style={{ width:"100%", padding:"10px", background: avenantPaymentLoading ? C.creamDD : C.gold, color: avenantPaymentLoading ? C.textL : C.navyD, border:"none", borderRadius:8, cursor: avenantPaymentLoading ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700 }}
-                  >{avenantPaymentLoading ? "Génération…" : "💳 Générer le lien de paiement"}</button>
-                ) : (
-                  <div style={{ display:"flex", gap:8 }}>
-                    <input readOnly value={avenantPaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"8px 10px", border:"1px solid #FDE68A", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#92400E", background:"#fff" }} />
-                    <button onClick={() => { navigator.clipboard.writeText(avenantPaymentLink); setAvenantPaymentCopied(true); setTimeout(()=>setAvenantPaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"8px 14px", background:"#92400E", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{avenantPaymentCopied ? "Copié !" : "Copier"}</button>
-                  </div>
-                )}
+                <PaymentWaysBox
+                  title={null}
+                  profile={profile}
+                  stripeConnectReady={stripeConnectReady}
+                  onConnectStripe={onConnectStripe}
+                  connectingStripe={connectingStripe}
+                  onAddIban={onGoToProfileTva}
+                  transferNote="Ton IBAN est indiqué sur la facture de l'avenant (dans Mes contrats)."
+                  cardAction={!avenantPaymentLink ? (
+                    <button
+                      onClick={handleGenerateAvenantPaymentLink}
+                      disabled={avenantPaymentLoading}
+                      style={{ width:"100%", padding:"10px", background: avenantPaymentLoading ? C.creamDD : C.gold, color: avenantPaymentLoading ? C.textL : C.navyD, border:"none", borderRadius:8, cursor: avenantPaymentLoading ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700 }}
+                    >{avenantPaymentLoading ? "Génération…" : "💳 Générer le lien de paiement"}</button>
+                  ) : (
+                    <div style={{ display:"flex", gap:8 }}>
+                      <input readOnly value={avenantPaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, minWidth:0, padding:"8px 10px", border:"1px solid #FDE68A", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#92400E", background:"#fff" }} />
+                      <button onClick={() => { navigator.clipboard.writeText(avenantPaymentLink); setAvenantPaymentCopied(true); setTimeout(()=>setAvenantPaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"8px 14px", background:"#92400E", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{avenantPaymentCopied ? "Copié !" : "Copier"}</button>
+                    </div>
+                  )}
+                />
               </div>
             )}
 
@@ -10200,7 +10322,7 @@ const fmtSignedAtFr = (iso) => {
 // Génère le PDF d'un NDA — partagé entre la fenêtre de création, la page "Mes NDA" et la page de signature de la
 // Partie B. Version 223 : date du NDA en haut (et non celle du téléchargement), titre une seule fois, titres des
 // articles en gras, pages numérotées, signatures datées, et « En attente de signature » tant que la Partie B n'a pas signé.
-const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSignature, clientSignature, signedAt, createdAt) => {
+const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSignature, clientSignature, signedAt, createdAt, proof = null) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   if (!ndaText) { alert("Aucun NDA à télécharger."); return; }
   const { jsPDF } = window.jspdf;
@@ -10290,6 +10412,11 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
     y = Math.max(yA, yB) + 6;
     doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...GREY);
     doc.text("Signatures capturées électroniquement et horodatées par Freeley.", ML, y);
+    // Version 232 : preuve de signature de la Partie B
+    if (proof && clientSignature) {
+      y += 8;
+      y = drawSignatureProofPdf(doc, proof, { x: ML, y, width: cw, docLabel: "du NDA", room: (h, yy) => { if (yy + h > BOTTOM) { doc.addPage(); return 20; } return yy; } });
+    }
   }
 
   // Numéro de page en bas de chaque page
@@ -10304,7 +10431,7 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
 };
 
 // Affiche les signatures directement à l'écran (pas seulement dans le PDF téléchargé) — partagé entre la fenêtre de création et la page "Mes NDA"
-function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientSignature, signedAt, createdAt }) {
+function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientSignature, signedAt, createdAt, proof = null }) {
   const whenA = fmtSignedAtFr(createdAt);
   const whenB = fmtSignedAtFr(signedAt);
   if (!freelanceSignature && !clientSignature) return null;
@@ -10334,6 +10461,8 @@ function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientS
           )}
         </div>
       </div>
+      {/* Version 232 : preuve de signature de la Partie B */}
+      {clientSignature && proof && <SignatureProofBlock proof={proof} docLabel="du NDA" compact />}
     </div>
   );
 }
@@ -11131,7 +11260,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     if (stripeLinkGenerating || !total || total <= 0) return;
     if (!stripeConnectReady || !stripeConnectAccountId) {
       if (!silent) {
-        if (window.confirm("⚠️ Pour proposer le paiement par carte, connecte d'abord ton compte Stripe (Profil → Facturation). Sans ça, l'argent de ton client n'arriverait pas chez toi.\n\nTon message reste utilisable : ton client peut payer par virement.\n\nOuvrir ton profil maintenant ?")) {
+        if (window.confirm("Pour proposer aussi le paiement par carte, connecte d'abord ton compte Stripe (Profil → Facturation) : l'argent de ton client arrivera directement chez toi.\n\nTon message reste utilisable tel quel : ton client peut payer par virement.\n\nOuvrir ton profil maintenant ?")) {
           if (onGoToProfileTva) onGoToProfileTva();
         }
       }
@@ -11209,6 +11338,21 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         doc.text(l, ML, y); y += 5.4;
       });
 
+      // Version 232 : le virement à égalité avec la carte. L'IBAN est ajouté s'il n'est pas déjà écrit dans la lettre
+      const ibanP = String(profile?.iban || "").trim();
+      if (!isSilence && ibanP && !ibanInText(cleanText, ibanP)) {
+        const ibanLines = [`IBAN : ${ibanP}`, profile?.bic ? `BIC : ${profile.bic}` : null, profile?.bankName ? `Banque : ${profile.bankName}` : null].filter(Boolean);
+        if (y > 245) { doc.addPage(); y = 20; }
+        y += 8;
+        const ibanBoxH = 12 + ibanLines.length * 6;
+        doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, cw, ibanBoxH, 2, 2, "F");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
+        doc.text("RÉGLER PAR VIREMENT", ML + 4, y + 8);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60,60,60);
+        ibanLines.forEach((l, i) => doc.text(l, ML + 4, y + 14 + i * 6));
+        y += ibanBoxH;
+      }
+
       // 3. Bloc paiement + QR carte
       if (qrBase64) {
         if (y > 235) { doc.addPage(); y = 20; }
@@ -11244,10 +11388,21 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanLetterText(letter)}</pre>
       </div>
 
-      {/* Paiement du montant dû — non pertinent pour une relance "silence prolongé", aucun montant n'est nécessairement dû */}
+      {/* Paiement du montant dû — non pertinent pour une relance "silence prolongé", aucun montant n'est nécessairement dû.
+          Version 232 : le virement est rappelé à égalité avec la carte. */}
+      {!isSilence && (
+        <div data-testid="recouvrement-virement" style={{ display:"flex", gap:8, alignItems:"flex-start", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"10px 14px", marginBottom:10, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.55 }}>
+          <span>🏦</span>
+          <div><strong>Virement bancaire (gratuit).</strong> {!String(profile?.iban || "").trim()
+            ? "Ajoute ton IBAN dans ton profil (Facturation) pour que ton client puisse payer par virement."
+            : ibanInText(letter, profile.iban)
+              ? "Ton IBAN est écrit dans la lettre : ton client peut payer par virement."
+              : "Ton IBAN sera ajouté à la fin de l'email et du PDF : ton client peut payer par virement."}</div>
+        </div>
+      )}
       {!isSilence && (
       <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
-        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Faire régler {isPreventive ? "" : "le montant total "}({total ? total.toFixed(2) : "0.00"} €) par carte</div>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Carte bancaire (Stripe) : faire régler {isPreventive ? "" : "le montant total "}({total ? total.toFixed(2) : "0.00"} €) par carte</div>
         <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:10 }}>
           {isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien correspond au montant total réclamé dans la lettre : le client règle tout en un clic."}
         </div>
@@ -11320,7 +11475,10 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   const isPrev = sendModal.type === "preventive";
                   const isSilenceSend = sendModal.type === "silence";
                   const subject = isSilenceSend ? `Petit point sur la mission — ${sendModal.clientName}` : isPrev ? `Rappel avant échéance — ${sendModal.clientName}` : `Mise en demeure de paiement — ${sendModal.clientName}`;
-                  const body = (sendModal.letter || "") + (!isSilenceSend && stripeLinkUrl ? `\n\n---\nRéglez ${isPrev ? "" : "immédiatement "}par carte via ce lien sécurisé :\n${stripeLinkUrl}` : "");
+                  // Version 232 : l'IBAN est ajouté s'il n'est pas déjà écrit dans la lettre, et le lien par carte s'il existe
+                  const ibanAlready = ibanInText(sendModal.letter, profile?.iban);
+                  const payLines = isSilenceSend ? [] : paymentInstructionLines({ profile: ibanAlready ? { ...profile, iban: "" } : profile, ref: "", cardLink: stripeLinkUrl });
+                  const body = (sendModal.letter || "") + (payLines.length ? `\n\n---\n${payLines.join("\n")}` : "");
                   const to = sendModal.clientEmail || "";
                   window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
                   setSendSuccess(sendModal.clientName);
@@ -11344,7 +11502,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   const msg = sendModal.type === "silence"
                     ? `Bonjour ${sendModal.clientName}, je n'ai plus de nouvelles de votre part depuis un moment concernant notre mission en cours. Pourriez-vous me faire un retour quand vous pourrez ? Merci !`
                     : sendModal.type === "preventive"
-                    ? `Bonjour ${sendModal.clientName}, petit rappel amical : votre paiement arrive bientôt à échéance.${stripeLinkUrl ? ` Vous pouvez régler ici : ${stripeLinkUrl}` : ""} Merci !`
+                    ? `Bonjour ${sendModal.clientName}, petit rappel amical : votre paiement arrive bientôt à échéance.${String(profile?.iban || "").trim() && stripeLinkUrl ? ` Vous pouvez régler par virement (IBAN ${String(profile.iban).trim()}) ou par carte ici : ${stripeLinkUrl}` : stripeLinkUrl ? ` Vous pouvez régler ici : ${stripeLinkUrl}` : String(profile?.iban || "").trim() ? ` Vous pouvez régler par virement : IBAN ${String(profile.iban).trim()}.` : ""} Merci !`
                     : `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement.${stripeLinkUrl ? ` Réglez ici : ${stripeLinkUrl}` : ""} Cordialement.`;
                   window.location.href = `sms:${sendModal.clientPhone || ""}?body=${encodeURIComponent(msg)}`;
                   setSendSuccess(sendModal.clientName);
@@ -12607,6 +12765,99 @@ function ContractTimeline({ entry, profile }) {
 }
 
 /* ══════════════════════════════════════════ DEPOSIT GUARD ══ */
+// ── Version 232 : le virement et la carte, présentés à égalité ──
+// Le freelance propose le virement (gratuit), la carte (avec son propre compte Stripe), ou les deux. Aucun des deux
+// n'est obligatoire : on prévient, on ne bloque pas.
+// Frais de Stripe vérifiés le 28/10/2026 sur stripe.com/fr/pricing (carte européenne standard).
+const STRIPE_FEES_SHORT = "1,5 % + 0,25 € par paiement avec une carte européenne standard";
+const STRIPE_FEES_LONG = `${STRIPE_FEES_SHORT} (un peu plus pour une carte premium ou étrangère)`;
+// Lien de paiement Freeley qui n'expire pas (api/pay.js). Un lien Stripe direct expire au bout de 24 heures.
+const isPermanentPayLink = (u) => /^https:\/\/www\.freeley\.fr\/api\/pay\?l=[0-9a-f-]{36}$/i.test(String(u || ""));
+// IBAN raccourci pour l'écran du freelance : « FR76 •••• 0185 »
+const shortIban = (iban) => {
+  const s = String(iban || "").replace(/\s+/g, "").toUpperCase();
+  return s.length > 8 ? `${s.slice(0, 4)} •••• ${s.slice(-4)}` : s;
+};
+// L'IBAN est-il déjà écrit dans ce texte (espaces ignorés) ?
+const ibanInText = (text, iban) => {
+  const k = String(iban || "").replace(/\s+/g, "").toUpperCase();
+  return !!k && String(text || "").replace(/\s+/g, "").toUpperCase().includes(k);
+};
+// Lignes « comment payer » des relances envoyées au client (vouvoiement). ref : numéro de facture ou de contrat.
+const paymentInstructionLines = ({ profile, ref, cardLink }) => {
+  const iban = String(profile?.iban || "").trim();
+  const bic = String(profile?.bic || "").trim();
+  const transfer = iban ? `par virement : IBAN ${iban}${bic ? ` (BIC ${bic})` : ""}${ref ? `, en indiquant la référence ${ref}` : ""}` : "";
+  const card = cardLink ? `par carte bancaire, avec ce lien sécurisé : ${cardLink}` : "";
+  if (transfer && card) return ["Pour régler :", `- ${transfer} ;`, `- ou ${card}`];
+  if (transfer) return [`Pour régler ${transfer}.`];
+  if (card) return [`Vous pouvez régler ${card}`];
+  return [];
+};
+
+// Code QR d'un lien de paiement par carte (fabriqué dans le navigateur depuis la version 231)
+function PayLinkQr({ url }) {
+  const src = url ? qrDataUrl(url) : null;
+  if (!src) return null;
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:12, background:"#F8F6F0", border:"1px solid #E8E0D0", borderRadius:10, padding:"10px 12px", textAlign:"left" }}>
+      <img src={src} alt="QR code de paiement" width={110} height={110} style={{ borderRadius:6, background:"#fff", flexShrink:0, border:`1px solid ${C.border}` }} />
+      <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, lineHeight:1.5 }}>
+        <strong style={{ color:C.navy }}>Scannable ou partageable</strong> — en face à face ou à distance.{isPermanentPayLink(url) ? " Ce lien n'expire pas : ton client peut payer quand il veut." : ""}
+      </div>
+    </div>
+  );
+}
+
+// Les deux façons d'être payé, côte à côte (l'une sous l'autre sur un téléphone). transferAction et cardAction :
+// boutons propres à chaque écran (marquer comme reçu, copier le lien…). cardAction n'apparaît qu'avec Stripe connecté.
+function PaymentWaysBox({ profile, stripeConnectReady, onConnectStripe, connectingStripe, onAddIban, transferNote, transferRef, transferAction, cardAction, title = "COMMENT TON CLIENT PEUT PAYER" }) {
+  const iban = String(profile?.iban || "").trim();
+  const tile = { flex:"1 1 240px", minWidth:0, background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:9, boxSizing:"border-box", textAlign:"left" };
+  const head = { display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 };
+  const name = { fontFamily:T.body, fontSize:13.5, fontWeight:800, color:C.navy };
+  const badge = (bg, color) => ({ fontFamily:T.body, fontSize:10, fontWeight:800, letterSpacing:"0.04em", padding:"3px 9px", borderRadius:20, background:bg, color, whiteSpace:"nowrap" });
+  const text = { fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.55 };
+  const small = { fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5 };
+  return (
+    <div data-testid="payment-ways" style={{ width:"100%" }}>
+      {title && <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.15em", color:C.gold, fontWeight:700, marginBottom:8, textAlign:"left" }}>{title}</div>}
+      <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
+        <div data-testid="payment-way-transfer" style={tile}>
+          <div style={head}><span style={name}>🏦 Virement bancaire</span><span style={badge("#DCFCE7", "#166534")}>Gratuit</span></div>
+          {iban ? (
+            <>
+              <div style={text}>{transferNote || "Ton IBAN est indiqué sur la facture."}</div>
+              <div style={small}>IBAN {shortIban(iban)}{transferRef ? ` · Référence ${transferRef}` : ""}</div>
+            </>
+          ) : (
+            <>
+              <div style={text}>Ton IBAN n'est pas encore renseigné : sans lui, ton client ne sait pas où faire le virement.</div>
+              {onAddIban && <button onClick={onAddIban} style={{ alignSelf:"flex-start", padding:"7px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:C.navy }}>Ajouter mon IBAN</button>}
+            </>
+          )}
+          {transferAction}
+        </div>
+        <div data-testid="payment-way-card" style={tile}>
+          <div style={head}><span style={name}>💳 Carte bancaire</span><span style={badge("#EEF2FF", "#4338CA")}>Stripe</span></div>
+          <div style={small}>Frais de Stripe : {STRIPE_FEES_SHORT}. Freeley ne prend aucune commission.</div>
+          {stripeConnectReady ? (
+            <>
+              <div style={{ ...text, color:"#166534" }}>✓ Stripe connecté : l'argent arrive directement chez toi.</div>
+              {cardAction}
+            </>
+          ) : (
+            <>
+              <div style={text}>Stripe pas encore connecté : connecte ton compte pour proposer la carte.</div>
+              {onConnectStripe && <button onClick={onConnectStripe} disabled={connectingStripe} style={{ alignSelf:"flex-start", padding:"8px 14px", background: connectingStripe ? "#D1D5DB" : "#635BFF", border:"none", borderRadius:8, cursor: connectingStripe ? "wait" : "pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff", whiteSpace:"nowrap" }}>{connectingStripe ? "Redirection…" : "Connecter maintenant"}</button>}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authUser, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe }) {
   const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) : 0;
   // Utilise le vrai pourcentage d'acompte choisi sur ce contrat — jamais un taux fixe supposé
@@ -12645,7 +12896,23 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   const ibanMissingForInvoice = !String(profile?.iban || "").trim();
   const invoiceWarning = invoiceMissing.length
     ? `Il manque ${invoiceMissing.join(" et ")} sur tes factures. ${invoiceMissing.length > 1 ? "Ce sont des mentions obligatoires." : "C'est une mention obligatoire."}${ibanMissingForInvoice ? " Ton IBAN manque aussi : sans lui, la facture n'indique pas à ton client où faire le virement." : ""}`
-    : ibanMissingForInvoice ? "Ton IBAN n'est pas renseigné : la facture n'indiquera pas à ton client où faire le virement." : "";
+    : ""; // Version 232 : quand seul l'IBAN manque, la case « Virement bancaire » le dit (avec « Ajouter mon IBAN »)
+  // Version 232 : référence du virement = numéro de la facture (s'il est déjà attribué), sinon numéro du contrat
+  const contractNumRef = (String(entry?.contract || "").match(/CP-\d{4}-\d{3,5}/) || [])[0] || "";
+  const acompteRef = entry?.acompteInvoiceNumber || contractNumRef;
+  const soldeRef = entry?.soldeInvoiceNumber || contractNumRef;
+  // Relit le numéro de facture dans la base : il a pu être attribué depuis l'ouverture de la fiche
+  const freshRef = async (key, fallback) => {
+    if (!entry?.id) return fallback;
+    try {
+      const { data } = await supabase.from("contracts").select("content").eq("id", entry.id).single();
+      return (data && parseContent(data.content)[key]) || fallback;
+    } catch (e) { return fallback; }
+  };
+  const hasIbanNow = !ibanMissingForInvoice;
+  // Ni IBAN ni Stripe : la relance ne dirait pas au client comment payer. On prévient, sans bloquer.
+  const confirmNoPayWay = () => hasIbanNow || stripeConnectReady || window.confirm("Ton IBAN n'est pas renseigné et Stripe n'est pas connecté : ta relance ne dira pas à ton client comment te payer.\n\nTu peux ajouter ton IBAN dans ton profil (Facturation).\n\nEnvoyer la relance quand même ?");
+  const markPaidBtnStyle = { padding:"10px 14px", background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534" };
 
   const [linkCopied, setLinkCopied] = useState(false);
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
@@ -12723,24 +12990,29 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     }
   };
 
+  // Version 232 : la relance du solde marche aussi sans Stripe. Elle donne l'IBAN avec la référence de la facture, et
+  // le lien de paiement par carte si Stripe est connecté.
   const handleSendSoldeRelance = async () => {
     const email = entry?.form?.clientEmail;
     if (!email) { alert("Aucun email client renseigné sur ce contrat."); return; }
-    let url = soldeStripeLinkUrl;
-    try {
-      if (!url) url = await ensureSoldePaymentLink();
-    } catch(e) {
-      if (e.message === "STRIPE_NOT_CONNECTED") {
-        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi.");
-        if (onGoToProfileTva) onGoToProfileTva();
-      } else {
-        alert("Erreur lors de la création du lien de paiement.");
-      }
-      return;
-    }
+    if (!confirmNoPayWay()) return;
+    let linkError = null;
+    const [url, ref] = await Promise.all([
+      stripeConnectReady ? (soldeStripeLinkUrl ? Promise.resolve(soldeStripeLinkUrl) : ensureSoldePaymentLink().catch((e) => { linkError = e; return ""; })) : Promise.resolve(""),
+      freshRef("soldeInvoiceNumber", soldeRef),
+    ]);
+    // Sans IBAN, le lien par carte est le seul moyen de payer donné : s'il n'a pas pu être créé, on ne part pas
+    if (linkError && !hasIbanNow) { alert("Erreur lors de la création du lien de paiement : " + (linkError.message || "réessaie.")); return; }
     const subject = `Solde à régler — ${entry?.missionTitle || "votre mission"}`;
-    const body = `Bonjour${entry?.clientName ? " " + entry.clientName : ""},\n\nL'acompte a bien été reçu, merci ! Il reste le solde de ${fmtDue(soldeDue)} €${dueUnit} à régler pour cette mission.\n\nLien de paiement : ${url}\n\nMerci,\n${entry?.form?.freelanceName || ""}`;
-    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const lines = [
+      `Bonjour${entry?.clientName ? " " + entry.clientName : ""},`,
+      ``,
+      `L'acompte a bien été reçu, merci ! Il reste le solde de ${fmtDue(soldeDue)} €${dueUnit} à régler pour cette mission.`,
+    ];
+    const pay = paymentInstructionLines({ profile, ref, cardLink: url });
+    if (pay.length) lines.push(``, ...pay);
+    lines.push(``, `Merci,`, entry?.form?.freelanceName || "");
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`;
     setSoldeRelanceSent(true);
     setTimeout(() => setSoldeRelanceSent(false), 4000);
   };
@@ -12790,27 +13062,30 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     }
   };
 
-  // Envoie une vraie relance par email (ouvre le client mail avec le lien de paiement inclus)
+  // Envoie une vraie relance par email (ouvre la messagerie). Version 232 : marche aussi sans Stripe. Elle donne l'IBAN
+  // avec la référence de la facture, et le lien de paiement par carte si Stripe est connecté.
   const handleRelance = async () => {
     const email = entry?.form?.clientEmail;
     if (!email) { alert("Aucun email client renseigné sur ce contrat — impossible d'envoyer une relance."); return; }
-    if (!stripeConnectReady) {
-      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi.");
-      if (onGoToProfileTva) onGoToProfileTva();
-      return;
-    }
+    if (!confirmNoPayWay()) return;
     setRelanceSending(true);
-    let link = stripeLinkUrl;
-    try { link = await ensurePaymentLink(); } catch(e) { /* on envoie quand même la relance, sans lien si Stripe échoue */ }
+    const [link, ref] = await Promise.all([
+      stripeConnectReady ? ensurePaymentLink().catch(() => "") : Promise.resolve(""), // sans lien si Stripe échoue
+      freshRef("acompteInvoiceNumber", acompteRef),
+    ]);
     setRelanceSending(false);
     const subject = `Rappel — ${paymentWordCap} en attente pour "${entry?.missionTitle || "votre mission"}"`;
     const lines = [
       `Bonjour${entry?.clientName ? " " + entry.clientName : ""},`,
       ``,
-      `Petit rappel concernant ${paymentWordArticleLe} de ${fmtDue(depositDue)} €${dueUnit} pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
+      payAfterDelivery
+        ? `Petit rappel concernant ${paymentWordArticleLe} de ${fmtDue(depositDue)} €${dueUnit} pour la mission "${entry?.missionTitle || ""}".`
+        : `Petit rappel concernant ${paymentWordArticleLe} de ${fmtDue(depositDue)} €${dueUnit} pour le démarrage de la mission "${entry?.missionTitle || ""}".`,
     ];
-    if (link) lines.push(``, `Vous pouvez régler directement via ce lien sécurisé : ${link}`);
+    const pay = paymentInstructionLines({ profile, ref, cardLink: link });
+    if (pay.length) lines.push(``, ...pay);
     lines.push(``, `Merci et à bientôt,`);
+    if (entry?.form?.freelanceName) lines.push(entry.form.freelanceName);
     window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`;
     setRelanceSent(true);
     setTimeout(() => setRelanceSent(false), 3500);
@@ -12837,32 +13112,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
         </div>
       )}
 
-      {/* Rappel visible du statut Stripe Connect, où qu'on soit dans l'app */}
-      {!stripeConnectReady && (
-        <div style={{
-          display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10,
-          background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:12,
-          padding:"12px 16px", marginBottom:14,
-        }}>
-          <div style={{ fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.5 }}>
-            💳 <strong>Stripe pas encore connecté.</strong> Tes clients ne peuvent pas encore te payer par carte. Le virement reste possible.
-          </div>
-          <button
-            onClick={onConnectStripe}
-            disabled={connectingStripe}
-            style={{
-              padding:"8px 14px", background: connectingStripe ? "#D1D5DB" : "#635BFF",
-              border:"none", borderRadius:8, cursor: connectingStripe ? "wait" : "pointer",
-              fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff", whiteSpace:"nowrap",
-            }}
-          >{connectingStripe ? "Redirection…" : "Connecter maintenant"}</button>
-        </div>
-      )}
-      {stripeConnectReady && (
-        <div style={{ display:"flex", alignItems:"center", gap:8, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, padding:"9px 16px", marginBottom:14, fontFamily:T.body, fontSize:12, color:"#166534" }}>
-          <span>✓</span> Stripe connecté — l'argent de tes clients arrive directement chez toi.
-        </div>
-      )}
+      {/* Version 232 : plus de bandeau Stripe à part. Le virement et la carte sont présentés à égalité dans la zone
+          de paiement, avec le bouton « Connecter maintenant » quand Stripe n'est pas encore connecté. */}
 
       {/* ── BANNIÈRE PRINCIPALE ── */}
       <div style={{
@@ -13020,19 +13271,35 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               <>
                 <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:2, textTransform:"uppercase", letterSpacing:"0.05em" }}>Solde restant à encaisser</div>
                 <div style={{ fontFamily:T.display, fontSize:22, fontWeight:800, color:"#92400E", marginBottom:12 }}>{fmtDue(soldeDue)} €{dueUnit}</div>
+                {/* Version 232 : le virement et la carte, à égalité ; la relance marche aussi sans Stripe */}
+                <div style={{ marginBottom:12 }}>
+                  <PaymentWaysBox
+                    title={null}
+                    profile={profile}
+                    stripeConnectReady={stripeConnectReady}
+                    onConnectStripe={onConnectStripe}
+                    connectingStripe={connectingStripe}
+                    onAddIban={onGoToProfileTva}
+                    transferNote="Ton IBAN est indiqué sur la facture du solde."
+                    transferRef={soldeRef}
+                    transferAction={<>
+                      <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5 }}>Quand le virement arrive sur ton compte :</div>
+                      <button data-testid="mark-solde-paid" onClick={() => onMarkSoldePaid && onMarkSoldePaid()} style={markPaidBtnStyle}>✓ Marquer le solde comme reçu</button>
+                    </>}
+                    cardAction={<>
+                      <button onClick={handleCopySoldeLink} disabled={soldeLinkGenerating} style={{
+                        padding:"10px 14px", background: soldeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "linear-gradient(135deg, #1B2E4B 0%, #2A4167 100%)", border:"none", borderRadius:10,
+                        cursor: soldeLinkGenerating ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#fff", opacity: soldeLinkGenerating ? 0.7 : 1,
+                      }}>{soldeLinkGenerating ? "Génération…" : soldeLinkCopied ? "✓ Copié !" : "💳 Copier le lien de paiement"}</button>
+                      {soldeStripeLinkUrl && <PayLinkQr url={soldeStripeLinkUrl} />}
+                    </>}
+                  />
+                </div>
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                  <button onClick={handleCopySoldeLink} disabled={soldeLinkGenerating} style={{
-                    padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8,
-                    cursor: soldeLinkGenerating ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E",
-                  }}>{soldeLinkGenerating ? "Génération…" : soldeLinkCopied ? "✓ Copié !" : "💳 Copier le lien de paiement"}</button>
                   <button onClick={handleSendSoldeRelance} style={{
                     padding:"9px 14px", background:"#92400E", border:"none", borderRadius:8,
                     cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#fff",
                   }}>{soldeRelanceSent ? "✓ Envoyé !" : "✉️ Relancer pour le solde"}</button>
-                  <button onClick={() => onMarkSoldePaid && onMarkSoldePaid()} style={{
-                    padding:"9px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8,
-                    cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534",
-                  }}>✓ Marquer le solde comme reçu</button>
                   <button
                     onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form })}
                     style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
@@ -13072,39 +13339,55 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 )}
               </div>
             )}
-            {/* Copier lien paiement — sans Stripe, on le dit tout de suite, avant la fenêtre des 7 jours
-                (version 220 : sinon la réponse « sous ta responsabilité » était enregistrée pour rien) */}
-            <button
-              onClick={stripeConnectReady ? early.guard("lien-carte", handleCopyLink) : handleCopyLink}
-              disabled={linkGenerating}
-              style={{
-                flex: 1, minWidth: 200,
-                display:"flex", alignItems:"center", justifyContent:"center", gap:9,
-                padding:"13px 18px",
-                background: linkCopied
-                  ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)"
-                  : "linear-gradient(135deg, #1B2E4B 0%, #2A4167 100%)",
-                color: "#fff", border:"none", borderRadius:10, cursor: linkGenerating ? "wait" : "pointer",
-                fontFamily:T.body, fontSize:13, fontWeight:700,
-                boxShadow: linkCopied ? "0 5px 18px #15803D35" : "0 5px 18px #1B2E4B35",
-                transition:"all 0.25s",
-                opacity: linkGenerating ? 0.7 : 1,
-              }}
-              onMouseOver={e=>{ if(!linkCopied){ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 24px #1B2E4B45"; }}}
-              onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow=linkCopied?"0 5px 18px #15803D35":"0 5px 18px #1B2E4B35"; }}
-            >
-              {linkGenerating ? (
-                <><span>⏳</span> Génération du lien…</>
-              ) : linkCopied ? (
-                <><span>✅</span> Lien copié !</>
-              ) : (
-                <><span>💳</span> Copier le lien de paiement (Stripe)</>
-              )}
-            </button>
+            {/* Version 232 : le virement et la carte, présentés à égalité. Le bouton du lien par carte n'existe qu'avec
+                Stripe connecté : Stripe est donc toujours vérifié avant la fenêtre des 7 jours (version 220). */}
+            <div style={{ flexBasis:"100%" }}>
+              <PaymentWaysBox
+                profile={profile}
+                stripeConnectReady={stripeConnectReady}
+                onConnectStripe={onConnectStripe}
+                connectingStripe={connectingStripe}
+                onAddIban={onGoToProfileTva}
+                transferRef={acompteRef}
+                transferAction={onMarkPaid ? <>
+                  <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5 }}>Quand le virement arrive sur ton compte :</div>
+                  <button data-testid="mark-paid-transfer" onClick={onMarkPaid} style={markPaidBtnStyle}>✓ Marquer {paymentWordArticleLe} comme reçu</button>
+                </> : null}
+                cardAction={<>
+                  <button
+                    onClick={early.guard("lien-carte", handleCopyLink)}
+                    disabled={linkGenerating}
+                    style={{
+                      display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                      padding:"11px 14px",
+                      background: linkCopied
+                        ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)"
+                        : "linear-gradient(135deg, #1B2E4B 0%, #2A4167 100%)",
+                      color:"#fff", border:"none", borderRadius:10, cursor: linkGenerating ? "wait" : "pointer",
+                      fontFamily:T.body, fontSize:12.5, fontWeight:700,
+                      boxShadow: linkCopied ? "0 5px 18px #15803D35" : "0 5px 18px #1B2E4B35",
+                      transition:"all 0.25s",
+                      opacity: linkGenerating ? 0.7 : 1,
+                    }}
+                  >
+                    {linkGenerating ? (
+                      <><span>⏳</span> Génération du lien…</>
+                    ) : linkCopied ? (
+                      <><span>✅</span> Lien copié !</>
+                    ) : (
+                      <><span>💳</span> Copier le lien de paiement (Stripe)</>
+                    )}
+                  </button>
+                  {stripeLinkUrl && <PayLinkQr url={stripeLinkUrl} />}
+                </>}
+              />
+            </div>
 
-            {/* Relancer le client (la relance demande aussi Stripe : même ordre de vérification) */}
+            {/* Relancer le client par email : l'IBAN avec la référence de la facture, et le lien par carte si Stripe
+                est connecté. Version 232 : marche aussi sans Stripe ; passe toujours par la fenêtre des 7 jours. */}
             <button
-              onClick={stripeConnectReady ? early.guard("relance", handleRelance) : handleRelance}
+              onClick={early.guard("relance", handleRelance)}
+              disabled={relanceSending}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -13114,7 +13397,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   : "linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%)",
                 color: relanceSent ? "#fff" : "#9A3412",
                 border: `1.5px solid ${relanceSent ? "#7C3AED" : "#FED7AA"}`,
-                borderRadius:10, cursor:"pointer",
+                borderRadius:10, cursor: relanceSending ? "wait" : "pointer",
                 fontFamily:T.body, fontSize:13, fontWeight:700,
                 boxShadow: relanceSent ? "0 5px 18px #7C3AED35" : "none",
                 transition:"all 0.25s",
@@ -13122,7 +13405,9 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               onMouseOver={e=>{ if(!relanceSent){ e.currentTarget.style.background="linear-gradient(135deg, #FFEDD5 0%, #FED7AA 100%)"; e.currentTarget.style.transform="translateY(-1px)"; }}}
               onMouseOut={e=>{ if(!relanceSent){ e.currentTarget.style.background="linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%)"; e.currentTarget.style.transform="translateY(0)"; }}}
             >
-              {relanceSent ? (
+              {relanceSending ? (
+                <><span>⏳</span> Préparation de la relance…</>
+              ) : relanceSent ? (
                 <><span>✅</span> Relance envoyée !</>
               ) : (
                 <><span>✉️</span> Relancer automatiquement le client</>
@@ -13153,49 +13438,9 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
               />
             </div>
-
-            {/* QR code réel — utile en présentiel, le client scanne pour payer */}
-            {stripeLinkUrl && qrDataUrl(stripeLinkUrl) && (
-              <div style={{ width:"100%", marginTop:4, display:"flex", alignItems:"center", gap:12, background:"#F8F6F0", border:"1px solid #E8E0D0", borderRadius:10, padding:"10px 14px" }}>
-                <img
-                  src={qrDataUrl(stripeLinkUrl)}
-                  alt="QR code de paiement"
-                  width={120} height={120}
-                  style={{ borderRadius:6, background:"#fff", flexShrink:0, border:`1px solid ${C.border}` }}
-                />
-                <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, lineHeight:1.5 }}>
-                  <strong style={{ color:C.navy }}>Scannable ou partageable</strong> — en face à face ou à distance, ton client règle en un instant.
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
-
-      {/* ── Marquer comme reçu — action réelle, synchronisée avec le Suivi du paiement ── */}
-      {!paid && onMarkPaid && (
-        <div style={{ display:"flex", justifyContent:"flex-end", marginTop:8 }}>
-          <button
-            onClick={onMarkPaid}
-            style={{
-              display:"flex", alignItems:"center", gap:6,
-              padding:"7px 14px",
-              background: "#F8F7F5",
-              border:`1px solid ${C.borderL}`,
-              borderRadius:20, cursor:"pointer",
-              fontFamily:T.body, fontSize:11, fontWeight:600,
-              color: C.textL,
-              transition:"all 0.3s",
-              boxShadow:"none",
-            }}
-            onMouseOver={e=>{ e.currentTarget.style.background="#EDE9DF"; e.currentTarget.style.borderColor=C.border; e.currentTarget.style.color=C.textM; }}
-            onMouseOut={e=>{ e.currentTarget.style.background="#F8F7F5"; e.currentTarget.style.borderColor=C.borderL; e.currentTarget.style.color=C.textL; }}
-          >
-            <span style={{ fontSize:12 }}>✓</span>
-            Marquer le {paymentWord} comme reçu
-          </button>
-        </div>
-      )}
 
       {/* Toast relance */}
       {relanceSent && (
@@ -13866,7 +14111,48 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
-  // Marque manuellement le paiement de l'avenant comme reçu (pas de webhook Stripe : pas de détection automatique)
+  // Version 232 : lien de paiement par carte d'un avenant, qui n'expire plus (un ancien lien Stripe expirait en 24 h).
+  // Il est gardé sur l'avenant, pour le retrouver ici.
+  const [avenantPayLoadingNum, setAvenantPayLoadingNum] = useState(null);
+  const createAvenantPayLink = async (av) => {
+    if (avenantPayLoadingNum != null) return;
+    setAvenantPayLoadingNum(av.num);
+    try {
+      const res = await fetch("/api/create-payment", {
+        method: "POST",
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          ...STRIPE_RETURN_URLS,
+          amount: withTva(av.ajustementMontant, profile),
+          description: `Avenant n°${av.num} — ${historyView.missionTitle || "mission"}`,
+          customerEmail: historyView.form?.clientEmail || undefined,
+          metadata: { contractId: historyView.id, paymentType: "avenant", avenantNum: String(av.num) },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Erreur Stripe");
+      navigator.clipboard.writeText(data.url).catch(() => {});
+      const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", historyView.id).single();
+      const currentContent = existing ? parseContent(existing.content) : {};
+      const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : (historyView.avenants || []);
+      const idx = avenants.findIndex(a => a.num === av.num);
+      if (idx !== -1) avenants[idx] = { ...avenants[idx], paymentLink: data.url };
+      if (existing) {
+        await supabase.rpc("update_contract_content", {
+          p_contract_id: historyView.id,
+          p_new_content: JSON.stringify({ ...currentContent, avenants }),
+          p_new_status: existing.status,
+        });
+      }
+      setHistoryView({ ...historyView, avenants });
+    } catch(e) {
+      alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
+    } finally {
+      setAvenantPayLoadingNum(null);
+    }
+  };
+
+  // Marque manuellement le paiement de l'avenant comme reçu (virement, ou carte si le webhook n'est pas encore passé)
   const markAvenantPaid = async (av) => {
     try {
       const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", historyView.id).single();
@@ -14086,6 +14372,8 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                 >{o.label}</button>
               ))}
             </div>
+            {/* Version 232 : la carte est détectée toute seule ; un virement se marque à la main */}
+            {st !== "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, marginTop:10, lineHeight:1.5 }}>{stripeConnectReady ? "Un paiement par carte passe tout seul en « Payé ». Pour un virement, touche « ✓ Payé » quand l'argent arrive sur ton compte." : "Quand le virement arrive sur ton compte, touche « ✓ Payé »."}</div>}
             {st === "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#059669", marginTop:10 }}>Paiement encaissé — mission réglée. 🎉</div>}
             {st === "late" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#DC2626", marginTop:10 }}>Pense à relancer le client (module Recouvrement disponible).</div>}
           </div>
@@ -14104,7 +14392,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             <div style={{ fontSize:32, marginBottom:12, textAlign:"center" }}>⚠️</div>
             <div style={{ fontFamily:T.display, fontSize:21, color:C.navy, marginBottom:10, textAlign:"center" }}>Supprimer ce contrat ?</div>
             <p style={{ fontFamily:T.body, fontSize:12, color:"#7A4A4A", marginBottom:28, lineHeight:1.7, textAlign:"center", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"10px 14px" }}>
-              Attention, cette action effacera définitivement ce document de votre espace et annulera son scellé numérique.
+              Le contrat quittera ta liste et ira dans tes Archives : tu pourras le retrouver et le restaurer à tout moment. Un contrat signé n'est jamais effacé, et sa preuve de signature est conservée.
             </p>
             <div style={{ display:"flex", gap:10 }}>
               <button onClick={() => setConfirmDelete(null)} style={{
@@ -14122,7 +14410,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
               }}
                 onMouseOver={e=>{ e.currentTarget.style.background="#A93226"; e.currentTarget.style.transform="translateY(-1px)"; }}
                 onMouseOut={e=>{ e.currentTarget.style.background="#C0392B"; e.currentTarget.style.transform="translateY(0)"; }}
-              >🗑️ Supprimer définitivement</button>
+              >🗑️ Supprimer</button>
             </div>
           </div>
         </div>
@@ -14228,6 +14516,8 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
         <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} signedByFreelanceAt={historyView.signedByFreelanceAt} retractationWaivedAt={historyView.retractationWaivedAt} consumerLike={isConsumerLikeContract(historyView.form, historyView)} />
+        {/* Version 232 : preuve de signature et verrouillage du contrat signé */}
+        <SignatureProofBlock proof={historyView.signatureProof} signed={historyView.signatureStatus === "signed" && !historyView.isStandaloneInvoice} />
       </div>
 
       {/* Liste des avenants déjà créés sur ce contrat */}
@@ -14268,6 +14558,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                     </div>
                   )}
 
+                  {/* Version 232 : preuve de signature de l'avenant (signé avec cette version ou après) */}
+                  {av.status === "signed" && av.signatureProof && <SignatureProofBlock proof={av.signatureProof} docLabel="de l'avenant" compact />}
+
                   {/* Relance si en attente de signature */}
                   {av.status === "pending_signature" && (
                     <div style={{ background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
@@ -14286,7 +14579,8 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                         <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color: av.paymentReceived ? "#166534" : "#92400E" }}>💰 + {av.ajustementMontant} € {contractPricing(historyView.form, profile).enteredUnit}</div>
                         {av.paymentReceived && <span style={{ fontFamily:T.body, fontSize:11, fontWeight:700, color:"#166534" }}>✓ Payé</span>}
                       </div>
-                      {av.paymentLink && !av.paymentReceived && (
+                      {/* Version 232 : seul un lien Freeley qui n'expire pas est montré (un ancien lien Stripe ne marche plus après 24 h) */}
+                      {isPermanentPayLink(av.paymentLink) && !av.paymentReceived && (
                         <div style={{ display:"flex", gap:6, marginBottom:8 }}>
                           <input readOnly value={av.paymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"6px 8px", border:"1px solid #FDE68A", borderRadius:6, fontFamily:T.body, fontSize:10.5, color:"#92400E", background:"#fff" }} />
                           <button onClick={() => navigator.clipboard.writeText(av.paymentLink)} style={{ flexShrink:0, padding:"6px 10px", background:"#92400E", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700 }}>Copier</button>
@@ -14303,6 +14597,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                           clientCompany={historyView.form?.clientCompany} clientAddress={historyView.form?.clientAddress} clientSiret={historyView.form?.clientSiret}
                           clientEmail={historyView.form?.clientEmail} typeClient={historyView.form?.typeClient} authUser={authUser}
                         />
+                        {!av.paymentReceived && stripeConnectReady && !isPermanentPayLink(av.paymentLink) && (
+                          <button onClick={() => createAvenantPayLink(av)} disabled={avenantPayLoadingNum != null} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #FDE68A", borderRadius:6, cursor: avenantPayLoadingNum != null ? "wait" : "pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E" }}>{avenantPayLoadingNum === av.num ? "Génération…" : "💳 Lien de paiement par carte"}</button>
+                        )}
                         {!av.paymentReceived && (
                           <button onClick={() => markAvenantPaid(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #86EFAC", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534" }}>✓ Marquer comme reçu</button>
                         )}
@@ -14310,7 +14607,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                     </div>
                   )}
 
-                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature, historyView.form?.freelanceLogo, !!historyView.form?.freelanceLogoLight)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
+                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature, historyView.form?.freelanceLogo, !!historyView.form?.freelanceLogoLight, av.status === "signed" ? (av.signatureProof || null) : null)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
                 </div>
               </details>
             );
@@ -14702,7 +14999,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             <div style={{ fontSize:32, marginBottom:12, textAlign:"center" }}>⚠️</div>
             <div style={{ fontFamily:T.display, fontSize:21, color:C.navy, marginBottom:10, textAlign:"center" }}>Supprimer ce contrat ?</div>
             <p style={{ fontFamily:T.body, fontSize:12, color:"#7A4A4A", marginBottom:28, lineHeight:1.7, textAlign:"center", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"10px 14px" }}>
-              Attention, cette action effacera définitivement ce document de votre espace et annulera son scellé numérique.
+              Le contrat quittera ta liste et ira dans tes Archives : tu pourras le retrouver et le restaurer à tout moment. Un contrat signé n'est jamais effacé, et sa preuve de signature est conservée.
             </p>
             <div style={{ display:"flex", gap:10 }}>
               <button onClick={() => setConfirmDelete(null)} style={{
@@ -14720,7 +15017,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
               }}
                 onMouseOver={e=>{ e.currentTarget.style.background="#A93226"; e.currentTarget.style.transform="translateY(-1px)"; }}
                 onMouseOut={e=>{ e.currentTarget.style.background="#C0392B"; e.currentTarget.style.transform="translateY(0)"; }}
-              >🗑️ Supprimer définitivement</button>
+              >🗑️ Supprimer</button>
             </div>
           </div>
         </div>
@@ -14974,7 +15271,7 @@ function SendElectronicInvoiceButton({
   );
 }
 
-function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser, contractId, stripeConnectAccountId, stripeConnectReady }) {
+function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser, contractId, stripeConnectAccountId, stripeConnectReady, onConnectStripe, connectingStripe }) {
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [downloaded, setDownloaded] = useState(false);
   const [standaloneEntryId, setStandaloneEntryId] = useState(null);
@@ -15628,7 +15925,7 @@ ${freelanceName}`;
           </div>
         </div>
 
-        {/* ── Zone Paiement ── */}
+        {/* ── Zone Paiement ── Version 232 : le virement et la carte, présentés à égalité */}
         <div style={{ padding:"0 24px 20px" }}>
           <div style={{
             background:"linear-gradient(135deg, #0F1C2D 0%, #1B2E4B 60%, #2A4167 100%)",
@@ -15644,119 +15941,102 @@ ${freelanceName}`;
               pointerEvents:"none",
             }} />
 
-            {/* Title */}
-            <div style={{
-              display:"flex", alignItems:"center", gap:7, marginBottom:14,
-            }}>
-              <span style={{ fontSize:13 }}>🏦</span>
-              <span style={{
-                fontFamily:T.body, fontSize:11, fontWeight:700,
-                letterSpacing:"0.12em", color:"#8BA3C0",
-              }}>PAIEMENT PAR VIREMENT</span>
-            </div>
+            <div style={{ fontFamily:T.body, fontSize:11, fontWeight:700, letterSpacing:"0.12em", color:"#8BA3C0", marginBottom:12 }}>COMMENT TON CLIENT PEUT PAYER</div>
 
-            {/* IBAN éditable — se sauvegarde automatiquement dans le profil */}
-            <div style={{ marginBottom:14, display:"flex", flexDirection:"column", gap:8 }}>
-              <input
-                value={profile?.iban || ""}
-                onChange={e => setProfile && setProfile(p => ({ ...p, iban: e.target.value }))}
-                placeholder="IBAN (ex: FR76 3000 1007 9412 3456 7890 185)"
-                style={{ fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", width:"100%", boxSizing:"border-box" }}
-                onFocus={e=>e.target.style.borderColor="#B8965A"}
-                onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
-              />
-              <div style={{ display:"flex", gap:8 }}>
+            {/* Virement bancaire */}
+            <div data-testid="invoice-way-transfer" style={{ background:"#FFFFFF0D", border:"1px solid #FFFFFF1F", borderRadius:10, padding:"12px", marginBottom:10 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:10 }}>
+                <span style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#fff" }}>🏦 Virement bancaire</span>
+                <span style={{ fontFamily:T.body, fontSize:10, fontWeight:800, padding:"3px 9px", borderRadius:20, background:"#DCFCE7", color:"#166534", whiteSpace:"nowrap" }}>Gratuit</span>
+              </div>
+              {/* IBAN éditable — se sauvegarde automatiquement dans le profil */}
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 <input
-                  value={profile?.bic || ""}
-                  onChange={e => setProfile && setProfile(p => ({ ...p, bic: e.target.value }))}
-                  placeholder="BIC"
-                  style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                  value={profile?.iban || ""}
+                  onChange={e => setProfile && setProfile(p => ({ ...p, iban: e.target.value }))}
+                  placeholder="IBAN (ex: FR76 3000 1007 9412 3456 7890 185)"
+                  style={{ fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", width:"100%", boxSizing:"border-box" }}
                   onFocus={e=>e.target.style.borderColor="#B8965A"}
                   onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
                 />
-                <input
-                  value={profile?.bankName || ""}
-                  onChange={e => setProfile && setProfile(p => ({ ...p, bankName: e.target.value }))}
-                  placeholder="Banque"
-                  style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
-                  onFocus={e=>e.target.style.borderColor="#B8965A"}
-                  onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
-                />
-              </div>
-              {profile?.iban ? (
-                <div style={{ fontFamily:T.body, fontSize:9.5, color:"#8BA3C0" }}>✓ Sauvegardé automatiquement dans ton profil</div>
-              ) : (
-                <div style={{ fontFamily:T.body, fontSize:10.5, color:C.goldL, lineHeight:1.5 }}>⚠️ Sans IBAN, la facture n'indiquera pas à ton client où faire le virement. Il est enregistré dans ton profil dès que tu le tapes.</div>
-              )}
-            </div>
-
-            {/* Content row */}
-            <div style={{ display:"flex", alignItems:"flex-start", gap:14 }}>
-              <div style={{
-                background:C.white, borderRadius:8, padding:12,
-                flexShrink:0, boxShadow:"0 4px 12px #00000030",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                width:72, height:72, boxSizing:"border-box",
-              }}>
-                <span style={{ fontSize:32 }}>🏦</span>
-              </div>
-
-              {/* Description text */}
-              <div style={{ flex:1 }}>
-                <p style={{
-                  fontFamily:T.body, fontSize:11.5, color:"#C8D8EC",
-                  lineHeight:1.65, margin:0,
-                }}>
-                  {depositPct === 100
-                    ? <>Ton client règle la <span style={{ color:C.goldL, fontWeight:600 }}>totalité</span> par virement bancaire (IBAN ci-dessus) ou par <span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span> via le lien Stripe.</>
-                    : <>Ton client règle l'acompte par virement bancaire (IBAN ci-dessus) ou par <span style={{ color:C.goldL, fontWeight:600 }}>carte bancaire</span> via le lien Stripe.</>
-                  }
-                  {!stripeConnectReady && <> Pour le paiement par carte, connecte d'abord ton compte Stripe (Profil → Facturation) : l'argent arrivera directement chez toi.</>}
-                </p>
-                {/* Bouton lien Stripe */}
-                <button
-                  onClick={handleGenerateStripeLink}
-                  disabled={stripeLinkGenerating}
-                  style={{
-                    marginTop:12, width:"100%", padding:"11px 16px",
-                    background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.gold,
-                    color: stripeLinkCopied ? "#fff" : C.navyD,
-                    border:"none", borderRadius:9, cursor: stripeLinkGenerating ? "wait" : "pointer",
-                    fontFamily:T.body, fontSize:12.5, fontWeight:700,
-                    display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                    opacity: stripeLinkGenerating ? 0.7 : 1, transition:"all .2s",
-                  }}
-                >
-                  {stripeLinkGenerating ? "⏳ Génération…" : stripeLinkCopied ? "✅ Lien copié !" : "💳 Copier le lien de paiement par carte"}
-                </button>
-                {/* QR code réel — utile en présentiel, le client scanne pour payer */}
-                {stripeLinkUrl && qrDataUrl(stripeLinkUrl) && (
-                  <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:12, background:"#FFFFFF0A", border:"1px solid #FFFFFF18", borderRadius:9, padding:"10px 12px" }}>
-                    <img
-                      src={qrDataUrl(stripeLinkUrl)}
-                      alt="QR code de paiement"
-                      width={120} height={120}
-                      style={{ borderRadius:6, background:"#fff", flexShrink:0 }}
-                    />
-                    <div style={{ fontFamily:T.body, fontSize:10.5, color:"#8BA3C0", lineHeight:1.5 }}>
-                      <strong style={{ color:C.goldL }}>Scannable ou partageable</strong> — en face à face ou à distance, ton client règle en un instant.
-                    </div>
-                  </div>
-                )}
-                {/* Badges */}
-                <div style={{ display:"flex", gap:6, marginTop:10, flexWrap:"wrap" }}>
-                  {["🔒 Sécurisé", "🏦 Virement IBAN", "💳 Carte via Stripe"].map(badge => (
-                    <span key={badge} style={{
-                      fontFamily:T.body, fontSize:9.5, fontWeight:600,
-                      padding:"3px 8px",
-                      background:"#FFFFFF14",
-                      border:"1px solid #FFFFFF18",
-                      borderRadius:20, color:"#8BA3C0",
-                      letterSpacing:"0.03em",
-                    }}>{badge}</span>
-                  ))}
+                <div style={{ display:"flex", gap:8 }}>
+                  <input
+                    value={profile?.bic || ""}
+                    onChange={e => setProfile && setProfile(p => ({ ...p, bic: e.target.value }))}
+                    placeholder="BIC"
+                    style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                    onFocus={e=>e.target.style.borderColor="#B8965A"}
+                    onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
+                  />
+                  <input
+                    value={profile?.bankName || ""}
+                    onChange={e => setProfile && setProfile(p => ({ ...p, bankName: e.target.value }))}
+                    placeholder="Banque"
+                    style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                    onFocus={e=>e.target.style.borderColor="#B8965A"}
+                    onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
+                  />
                 </div>
+                {profile?.iban ? (
+                  <div style={{ fontFamily:T.body, fontSize:9.5, color:"#8BA3C0" }}>✓ Sauvegardé automatiquement dans ton profil. Ton IBAN et la référence du virement (le numéro de la facture) seront écrits sur la facture.</div>
+                ) : (
+                  <div style={{ fontFamily:T.body, fontSize:10.5, color:C.goldL, lineHeight:1.5 }}>⚠️ Sans IBAN, la facture n'indiquera pas à ton client où faire le virement. Il est enregistré dans ton profil dès que tu le tapes.</div>
+                )}
               </div>
+            </div>
+
+            {/* Carte bancaire (Stripe) */}
+            <div data-testid="invoice-way-card" style={{ background:"#FFFFFF0D", border:"1px solid #FFFFFF1F", borderRadius:10, padding:"12px" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:8 }}>
+                <span style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#fff" }}>💳 Carte bancaire</span>
+                <span style={{ fontFamily:T.body, fontSize:10, fontWeight:800, padding:"3px 9px", borderRadius:20, background:"#EEF2FF", color:"#4338CA", whiteSpace:"nowrap" }}>Stripe</span>
+              </div>
+              <div style={{ fontFamily:T.body, fontSize:10.5, color:"#8BA3C0", lineHeight:1.5, marginBottom:10 }}>Frais de Stripe : {STRIPE_FEES_SHORT}. Freeley ne prend aucune commission.</div>
+              {stripeConnectReady && stripeConnectAccountId ? (
+                <>
+                  {/* Bouton lien Stripe */}
+                  <button
+                    onClick={handleGenerateStripeLink}
+                    disabled={stripeLinkGenerating}
+                    style={{
+                      width:"100%", padding:"11px 16px",
+                      background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.gold,
+                      color: stripeLinkCopied ? "#fff" : C.navyD,
+                      border:"none", borderRadius:9, cursor: stripeLinkGenerating ? "wait" : "pointer",
+                      fontFamily:T.body, fontSize:12.5, fontWeight:700,
+                      display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                      opacity: stripeLinkGenerating ? 0.7 : 1, transition:"all .2s",
+                    }}
+                  >
+                    {stripeLinkGenerating ? "⏳ Génération…" : stripeLinkCopied ? "✅ Lien copié !" : "💳 Copier le lien de paiement par carte"}
+                  </button>
+                  {/* QR code réel — utile en présentiel, le client scanne pour payer */}
+                  {stripeLinkUrl && qrDataUrl(stripeLinkUrl) && (
+                    <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:12, background:"#FFFFFF0A", border:"1px solid #FFFFFF18", borderRadius:9, padding:"10px 12px" }}>
+                      <img
+                        src={qrDataUrl(stripeLinkUrl)}
+                        alt="QR code de paiement"
+                        width={120} height={120}
+                        style={{ borderRadius:6, background:"#fff", flexShrink:0 }}
+                      />
+                      <div style={{ fontFamily:T.body, fontSize:10.5, color:"#8BA3C0", lineHeight:1.5 }}>
+                        <strong style={{ color:C.goldL }}>Scannable ou partageable</strong> — en face à face ou à distance.{isPermanentPayLink(stripeLinkUrl) ? " Ce lien n'expire pas : il est aussi sur la facture." : ""}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div style={{ fontFamily:T.body, fontSize:11.5, color:"#C8D8EC", lineHeight:1.6, marginBottom:10 }}>Pour le paiement par carte, connecte d'abord ton compte Stripe : l'argent de ton client arrivera directement chez toi.</div>
+                  {(onConnectStripe || onGoToProfileTva) && (
+                    <button
+                      onClick={onConnectStripe || onGoToProfileTva}
+                      disabled={!!connectingStripe}
+                      style={{ padding:"9px 14px", background: connectingStripe ? "#D1D5DB" : "#635BFF", border:"none", borderRadius:8, cursor: connectingStripe ? "wait" : "pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff" }}
+                    >{connectingStripe ? "Redirection…" : "Connecter maintenant"}</button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -17057,6 +17337,14 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
         try {
           const freelanceSig = freelanceSigCapture; // capturée à l'étape précédente, le canevas n'existe plus ici
           const clientSig = clientCanvasRef.current?.toDataURL("image/png") || null;
+          // Version 232 : le serveur enregistre les deux signatures, le lieu, son heure et la preuve (adresse IP,
+          // navigateur, empreinte du texte), puis envoie la confirmation au client. Ancien chemin seulement s'il ne répond pas.
+          const viaServer = await submitInPersonSignature(contractId, {
+            freelanceSignature: freelanceSig, clientSignature: clientSig,
+            signedByFreelanceAt: freelanceSignedAt || null, signContext: signContext(),
+          });
+          if (viaServer.ok) return;
+          if (!viaServer.fallback) throw new Error(viaServer.reason || "signature refusée");
           const { data: existing, error: e1 } = await supabase.from("contracts").select("content").eq("id", contractId).single();
           if (e1) throw e1;
           const newContent = {
@@ -17434,7 +17722,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 }}>
                   <span style={{ fontSize:16, flexShrink:0 }}>🛡️</span>
                   <div style={{ fontFamily:T.body, fontSize:10.5, color:"#4338CA", lineHeight:1.55, fontWeight:500 }}>
-                    Signature horodatée par Freeley.{form.clientEmail ? " Vous recevrez une copie du contrat par email." : ""}
+                    Signature horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de cet appareil, comme preuve.{form.clientEmail ? " Vous recevrez une copie du contrat par email." : ""}
                   </div>
                 </div>
 
@@ -17593,7 +17881,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 </div>
               )}
 
-              {/* Acompte card */}
+              {/* Acompte card (version 232 : les façons de payer sont présentées juste en dessous, à égalité) */}
               <div style={{
                 background:"#F0FDF4", border:"1.5px solid #86EFAC",
                 borderRadius:12, padding:"16px 20px", marginBottom:20,
@@ -17614,14 +17902,6 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       : `${acomptePct}% du total · ${Number(form.price||0).toLocaleString("fr-FR")} € ${contractPricing(form, profile).enteredUnit}`
                     }
                   </div>
-                </div>
-                <div style={{ textAlign:"center", maxWidth:120 }}>
-                  <div style={{
-                    width:48, height:48, borderRadius:10, margin:"0 auto",
-                    background:"#DCFCE7", border:"1.5px solid #86EFAC",
-                    display:"flex", alignItems:"center", justifyContent:"center", fontSize:24,
-                  }}>🏦</div>
-                  <div style={{ fontFamily:T.body, fontSize:9, color:"#166534", marginTop:4, fontWeight:600, lineHeight:1.4 }}>{hasIban ? "Par virement — IBAN sur la facture" : "Par virement — ajoute ton IBAN dans ton profil"}</div>
                 </div>
               </div>
 
@@ -17647,40 +17927,38 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 {isComptant ? "Télécharger la facture (PDF)" : "Télécharger la facture d'acompte (PDF)"}
               </button>}
 
-              {/* Rappel visible du statut Stripe Connect */}
-              {!stripeConnectReady && (
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8, background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-                  <div style={{ fontFamily:T.body, fontSize:11.5, color:"#92400E" }}>💳 Stripe pas encore connecté</div>
-                  <button onClick={onConnectStripe} disabled={connectingStripe} style={{ padding:"6px 12px", background: connectingStripe ? "#D1D5DB" : "#635BFF", border:"none", borderRadius:6, cursor: connectingStripe ? "wait" : "pointer", fontFamily:T.body, fontSize:11, fontWeight:700, color:"#fff" }}>{connectingStripe ? "…" : "Connecter"}</button>
-                </div>
-              )}
-
-              {/* Lien de paiement réel — seulement avec Stripe connecté (sinon le cadre au-dessus propose de le connecter).
-                  Stripe est vérifié AVANT la fenêtre des 7 jours : on n'enregistre pas une réponse pour rien. */}
+              {/* Version 232 : le virement et la carte, présentés à égalité (plus de cadre « Stripe » à part). Le bouton du
+                  lien par carte n'existe qu'avec Stripe connecté : Stripe est vérifié AVANT la fenêtre des 7 jours. */}
               <div style={{ marginBottom:20 }}>
-                {!stripeConnectReady && !tactilePaymentLink ? null : !tactilePaymentLink ? (
-                  <button
-                    onClick={stripeConnectReady ? early.guard("lien-carte", handleGetTactilePaymentLink) : handleGetTactilePaymentLink}
-                    disabled={tactilePaymentLoading}
-                    style={{
-                      width:"100%", padding:"12px", borderRadius:10, border:"none",
-                      background: tactilePaymentLoading ? C.creamDD : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
-                      color: tactilePaymentLoading ? C.textL : "#fff",
-                      cursor: tactilePaymentLoading ? "wait" : "pointer",
-                      fontFamily:T.body, fontSize:13, fontWeight:700,
-                    }}
-                  >{tactilePaymentLoading ? "Génération du lien…" : "💳 Générer le lien de paiement par carte"}</button>
-                ) : (
-                  <div style={{ display:"flex", gap:8 }}>
-                    <input readOnly value={tactilePaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"9px 10px", border:"1px solid #86EFAC", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#166534", background:"#F0FDF4" }} />
-                    <button onClick={() => { navigator.clipboard.writeText(tactilePaymentLink); setTactilePaymentCopied(true); setTimeout(()=>setTactilePaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{tactilePaymentCopied ? "Copié !" : "Copier"}</button>
-                  </div>
-                )}
-                <div style={{ fontFamily:T.body, fontSize: stripeConnectReady ? 10 : 11.5, color:C.textL, marginTop: stripeConnectReady ? 6 : 0, textAlign:"center", lineHeight:1.5 }}>
-                  {stripeConnectReady
-                    ? (hasIban ? "Carte bancaire (Stripe) — ou par virement avec l'IBAN sur la facture" : "Carte bancaire (Stripe) — ou par virement")
-                    : (hasIban ? "Sans Stripe, ton client paie par virement, avec l'IBAN indiqué sur la facture." : "Sans Stripe, ton client paie par virement. Ajoute ton IBAN dans ton profil pour qu'il figure sur la facture.")}
-                </div>
+                <PaymentWaysBox
+                  profile={profile}
+                  stripeConnectReady={stripeConnectReady}
+                  onConnectStripe={onConnectStripe}
+                  connectingStripe={connectingStripe}
+                  onAddIban={onGoToProfileTva}
+                  transferAction={<div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5 }}>{payAfterDelivery ? "Ton client paiera à réception de ta facture de fin de mission." : "Quand le virement arrive, marque-le comme reçu dans Mes contrats."}</div>}
+                  cardAction={!tactilePaymentLink ? (
+                    <button
+                      onClick={early.guard("lien-carte", handleGetTactilePaymentLink)}
+                      disabled={tactilePaymentLoading}
+                      style={{
+                        width:"100%", padding:"12px", borderRadius:10, border:"none",
+                        background: tactilePaymentLoading ? C.creamDD : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
+                        color: tactilePaymentLoading ? C.textL : "#fff",
+                        cursor: tactilePaymentLoading ? "wait" : "pointer",
+                        fontFamily:T.body, fontSize:13, fontWeight:700,
+                      }}
+                    >{tactilePaymentLoading ? "Génération du lien…" : "💳 Générer le lien de paiement par carte"}</button>
+                  ) : (
+                    <>
+                      <div style={{ display:"flex", gap:8 }}>
+                        <input readOnly value={tactilePaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, minWidth:0, padding:"9px 10px", border:"1px solid #86EFAC", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#166534", background:"#F0FDF4" }} />
+                        <button onClick={() => { navigator.clipboard.writeText(tactilePaymentLink); setTactilePaymentCopied(true); setTimeout(()=>setTactilePaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{tactilePaymentCopied ? "Copié !" : "Copier"}</button>
+                      </div>
+                      <PayLinkQr url={tactilePaymentLink} />
+                    </>
+                  )}
+                />
               </div>
 
               {/* Quand la mission peut commencer : d'après le contrat, la case cochée et la règle des 7 jours.
@@ -17790,6 +18068,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           contractId={contractId}
           stripeConnectAccountId={stripeConnectAccountId}
           stripeConnectReady={stripeConnectReady}
+          onConnectStripe={onConnectStripe}
+          connectingStripe={connectingStripe}
         />
       )}
 
@@ -18307,10 +18587,18 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
       {activeSection === "facturation" && (
         <div className="fade-up" style={{ display:"flex", flexDirection:"column", gap:16 }}>
 
-          {/* Coordonnées bancaires */}
+          {/* Version 232 : comment les clients paient — le virement et la carte, présentés à égalité */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"20px 24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>PAIEMENTS DE TES CLIENTS</div>
+            <p style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.6, margin:0 }}>
+              Tes clients peuvent te payer de deux façons : par virement bancaire, gratuit, ou par carte bancaire, avec ton compte Stripe. Tu peux proposer les deux, ou une seule.
+            </p>
+          </div>
+
+          {/* Virement bancaire */}
           <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
-            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>COORDONNÉES BANCAIRES</div>
-            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:14 }}>Ces informations apparaîtront sur tes factures pour que le client sache où te payer.</div>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>🏦 VIREMENT BANCAIRE · GRATUIT</div>
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:14 }}>Ton IBAN apparaît sur tes factures et dans tes relances : ton client sait où te payer. Le virement ne coûte rien.</div>
 
             {onProfileScan && (
               <div style={{ marginBottom:18 }}>
@@ -18354,14 +18642,14 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             </div>
           </div>
 
-          {/* Paiements des clients — Stripe Connect */}
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06", marginTop:24 }}>
-            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>PAIEMENTS DE TES CLIENTS</div>
+          {/* Carte bancaire — Stripe Connect */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>💳 CARTE BANCAIRE · AVEC STRIPE</div>
             <p style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.6, marginBottom:16 }}>
-              Connecte ton propre compte Stripe pour que l'argent que tes clients payent (acompte, solde, avenants) arrive directement sur ton compte à toi — jamais sur celui de Freeley.
+              Connecte ton propre compte Stripe pour que l'argent que tes clients paient par carte (acompte, solde, avenants) arrive directement sur ton compte à toi — jamais sur celui de Freeley.
             </p>
             <p data-testid="stripe-fees-note" style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.6, marginTop:-8, marginBottom:16 }}>
-              Les frais de Stripe sont prélevés par Stripe sur chaque paiement, directement sur ton compte. Freeley ne prend aucune commission. Tes paiements, remboursements et virements se retrouvent sur ton tableau de bord Stripe (dashboard.stripe.com).
+              Les frais de Stripe sont prélevés par Stripe sur chaque paiement, directement sur ton compte : {STRIPE_FEES_LONG}. Freeley ne prend aucune commission. Tes paiements, remboursements et virements se retrouvent sur ton tableau de bord Stripe (dashboard.stripe.com).
             </p>
             {stripeConnectReady ? (
               <div style={{ display:"flex", alignItems:"center", gap:10, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 16px" }}>
@@ -18717,6 +19005,7 @@ function ClientSignaturePage({ contractId }) {
   const [retractationWaiving, setRetractationWaiving] = useState(false);
   const [retractationDoneLocally, setRetractationDoneLocally] = useState(false);
   const [contractReadForGate, setContractReadForGate] = useState(false); // le client a lu le contrat avant l'écran de rétractation
+  const [textChangedNotice, setTextChangedNotice] = useState(false); // version 232 : le prestataire a changé le contrat pendant la lecture
   const [retractConfirming, setRetractConfirming] = useState(false);
   const [retractSubmitting, setRetractSubmitting] = useState(false);
   // Exemplaire signé en PDF, le même que celui du prestataire (version 220)
@@ -18809,10 +19098,22 @@ function ClientSignaturePage({ contractId }) {
     if (!hasStrokes) return;
     setSigning(true);
     const sig = canvasRef.current.toDataURL("image/png");
-    const ok = await submitClientSignature(contractId, sig);
+    // Version 232 : l'empreinte du texte affiché part avec la signature (le client signe ce qu'il a lu)
+    const r = await submitClientSignature(contractId, sig, contractData?.content?.contract || "");
     setSigning(false);
-    if (ok) setDone(true);
-    else setError("Votre signature n'a pas pu être enregistrée. Réessayez dans quelques instants.");
+    if (r.ok) { setDone(true); return; }
+    if (r.reason === "text_changed") {
+      // Le prestataire a modifié le contrat pendant la lecture : on affiche la nouvelle version, à relire et signer
+      const fresh = await getContractForSigning(contractId);
+      if (fresh) {
+        setContractData(fresh);
+        setTextChangedNotice(true);
+        clearCanvas();
+        window.scrollTo(0, 0);
+        return;
+      }
+    }
+    setError("Votre signature n'a pas pu être enregistrée. Réessayez dans quelques instants.");
   };
 
   const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
@@ -18926,6 +19227,7 @@ function ClientSignaturePage({ contractId }) {
             <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
               {contractText || "Contenu du contrat indisponible."}
             </div>
+            {content.signatureProof && <SignatureProofBlock proof={content.signatureProof} />}
           </div>
 
           {signedPdfButton}
@@ -18991,6 +19293,11 @@ function ClientSignaturePage({ contractId }) {
         </div>
 
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+          {textChangedNotice && (
+            <div data-testid="text-changed-notice" style={{ fontSize:12.5, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"10px 12px", marginBottom:12, lineHeight:1.5 }}>
+              Le prestataire vient de modifier le contrat. Voici la nouvelle version : relisez-la, puis signez de nouveau.
+            </div>
+          )}
           <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>CONTRAT À SIGNER</div>
           <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
             {contractText || "Contenu du contrat indisponible."}
@@ -19022,7 +19329,7 @@ function ClientSignaturePage({ contractId }) {
             >{signing ? "Enregistrement…" : "✓ Signer le contrat"}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
-            En signant, vous acceptez les termes de ce contrat. Signature horodatée et conservée conformément au droit français.
+            En signant, vous acceptez les termes de ce contrat. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
           </div>
         </div>
         )}
@@ -19258,7 +19565,7 @@ function NdaSignaturePage({ ndaId }) {
             >{signing ? "Enregistrement…" : "✓ Signer le NDA"}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
-            En signant, vous acceptez les termes de ce NDA. Signature horodatée et conservée conformément au droit français.
+            En signant, vous acceptez les termes de ce NDA. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
           </div>
         </div>
       </div>
@@ -19381,7 +19688,7 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
             >{signing ? "Enregistrement…" : "✓ Signer l'avenant"}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
-            En signant, vous acceptez les termes de cet avenant. Signature horodatée et conservée conformément au droit français.
+            En signant, vous acceptez les termes de cet avenant. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
           </div>
         </div>
       </div>
@@ -19577,8 +19884,8 @@ function PolitiqueConfidentialitePage() {
           <li>Compte : adresse email, nom, et mot de passe ou identifiant de connexion Google.</li>
           <li>Profil : nom, activité, SIRET, adresse, téléphone, numéro de TVA, coordonnées bancaires (IBAN et BIC), logo.</li>
           <li>Documents : contrats, avenants, accords de confidentialité, factures, relances et analyses de contrats, avec les informations qu'ils contiennent sur toi et sur tes clients (nom, email, adresse, détails de mission, montants).</li>
-          <li>Signatures et preuves : image de la signature dessinée, dates et heures de signature, choix exprimés par un client particulier sur son droit de rétractation, et dates d'envoi des emails associés.</li>
-          <li>Paiements : traités par Stripe. Freeley ne stocke aucun numéro de carte bancaire.</li>
+          <li>Signatures et preuves : image de la signature dessinée, dates et heures de signature, adresse IP et navigateur de l'appareil utilisé pour signer, empreinte numérique (SHA-256) du document signé, choix exprimés par un client particulier sur son droit de rétractation, et dates d'envoi des emails associés.</li>
+          <li>Paiements : traités par Stripe. Freeley ne stocke aucun numéro de carte bancaire. Pour chaque lien de paiement par carte, Freeley garde le montant, le libellé, l'email du client s'il est connu et la date du paiement, pour que le lien reste valable et ne puisse pas être payé deux fois.</li>
           <li>Données techniques : journaux de connexion et de fonctionnement produits par nos prestataires d'hébergement.</li>
         </ul>
       </Section>
@@ -19779,8 +20086,11 @@ function CguPage() {
       <Section title="Article 8 — Signature électronique">
         <p>
           Le Service permet de signer des documents au moyen d'une signature électronique simple, au
-          sens du règlement (UE) n° 910/2014 dit « eIDAS », accompagnée d'un horodatage. Il appartient
-          à l'Utilisateur de vérifier que ce niveau de signature convient à l'usage qu'il en fait.
+          sens du règlement (UE) n° 910/2014 dit « eIDAS », accompagnée d'un horodatage. Chaque signature
+          est enregistrée avec une preuve : la date et l'heure du serveur de Freeley, l'adresse IP et le
+          navigateur de l'appareil utilisé, et l'empreinte numérique (SHA-256) du document signé. Une fois
+          signé, un document ne peut plus être modifié dans le Service. Il appartient à l'Utilisateur de
+          vérifier que ce niveau de signature convient à l'usage qu'il en fait.
         </p>
       </Section>
 

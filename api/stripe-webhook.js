@@ -15,6 +15,11 @@
 //   - si l'enregistrement échoue, Freeley répond une erreur : Stripe renvoie alors le message plus tard
 //     (pendant 3 jours), au lieu de le perdre.
 //
+// Version 232 : un paiement fait avec un lien Freeley permanent (api/pay.js) porte le numéro de ce lien (payLinkId).
+// Le lien est alors marqué « payé » : une nouvelle visite affiche « paiement déjà reçu » au lieu d'ouvrir un
+// deuxième paiement. Comme pour les contrats, le paiement doit venir du compte Stripe du freelance à qui appartient
+// le lien.
+//
 // Variables d'environnement : STRIPE_WEBHOOK_SECRET, VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 
 import crypto from "crypto";
@@ -123,6 +128,25 @@ async function recordPayment(event) {
   return { result: column === "solde_status" ? "solde_paid" : "contract_paid" };
 }
 
+// Version 232 : lien permanent payé (table payment_links). Sans gravité si cela échoue : à la visite suivante,
+// api/pay.js vérifie de toute façon auprès de Stripe si le dernier paiement du lien a été payé.
+async function markPaymentLinkPaid(event) {
+  const session = event.data?.object || {};
+  const linkId = String(session.metadata?.payLinkId || "").trim();
+  const account = typeof event.account === "string" ? event.account : "";
+  if (!UUID.test(linkId) || session.payment_status !== "paid" || !account) return "no_link";
+  const { data: link, error: linkError } = await supabase.from("payment_links").select("id, user_id, paid_at").eq("id", linkId).maybeSingle();
+  if (linkError) { console.error("[stripe-webhook] lien permanent illisible", linkError); return "link_error"; }
+  if (!link) return "link_unknown";
+  if (link.paid_at) return "link_already_paid";
+  const { data: profile, error: profileError } = await supabase.from("profiles").select("stripe_connect_account_id").eq("id", link.user_id).maybeSingle();
+  if (profileError) { console.error("[stripe-webhook] lecture du profil impossible (lien)", profileError); return "link_error"; }
+  if (!profile || profile.stripe_connect_account_id !== account) return "link_other_account";
+  const { error } = await supabase.from("payment_links").update({ paid_at: new Date().toISOString() }).eq("id", linkId);
+  if (error) { console.error("[stripe-webhook] lien permanent non marqué payé", error); return "link_error"; }
+  return "link_paid";
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -151,10 +175,15 @@ export default async function handler(req, res) {
   if (!PAID_EVENTS.has(event?.type)) return res.status(200).json({ received: true });
 
   try {
+    let link = "no_link";
+    try { link = await markPaymentLinkPaid(event); } catch (e) { console.error("[stripe-webhook] lien permanent", e); link = "link_error"; }
     const outcome = await recordPayment(event);
     if (outcome.retry) return res.status(500).json({ received: false, error: "Enregistrement impossible pour le moment" });
-    if (String(outcome.result).startsWith("ignored")) console.warn("[stripe-webhook]", outcome.result, event.id);
-    return res.status(200).json({ received: true, result: outcome.result });
+    // Un paiement sans contrat (lettre de recouvrement d'un autre dossier) est normal quand il vient d'un lien Freeley
+    if (String(outcome.result).startsWith("ignored") && !(outcome.result === "ignored_no_contract" && link === "link_paid")) {
+      console.warn("[stripe-webhook]", outcome.result, event.id);
+    }
+    return res.status(200).json({ received: true, result: outcome.result, link });
   } catch (e) {
     console.error("[stripe-webhook] Erreur mise à jour paiement:", e);
     return res.status(500).json({ received: false, error: "Erreur interne" });

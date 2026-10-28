@@ -15,6 +15,13 @@
 //   - si Stripe ne reconnaît plus le compte du profil (par exemple un compte de test après le passage en
 //     production), le profil repasse en « pas encore connecté » et le message dit quoi faire.
 //
+// Version 232 : le lien donné au client n'expire plus. Un lien de paiement Stripe expire au bout de 24 heures, alors
+// qu'une facture ou une relance est souvent payée plusieurs jours après. Le serveur enregistre donc un lien Freeley
+// permanent (table payment_links, script SQL v232) : https://www.freeley.fr/api/pay?l=<numéro>. À chaque visite,
+// api/pay.js reprend le paiement Stripe encore ouvert, ou en crée un nouveau. Le même contrat, pour le même paiement
+// et le même montant, garde le même lien. Sans la table (script SQL pas encore lancé), le lien Stripe est renvoyé
+// comme avant.
+//
 // Variables d'environnement : STRIPE_SECRET_KEY, VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 
 import { createClient } from "@supabase/supabase-js";
@@ -37,6 +44,40 @@ function safeReturnUrl(url, fallback) {
     if (ALLOWED_ORIGIN.test(u.origin)) return u.toString();
   } catch (e) { /* adresse absente ou illisible */ }
   return fallback;
+}
+
+// Version 232 : lien permanent. Reprend le lien pas encore payé du même contrat, pour le même paiement et le même
+// montant (ou, sans contrat, du même montant et du même libellé) ; sinon en crée un. Renvoie son numéro, ou null
+// si la table n'existe pas encore (le client reçoit alors le lien Stripe, comme avant).
+async function findOrCreatePaymentLink({ userId, metadata, amountCents, description, email }) {
+  try {
+    const kind = metadata.contractId ? metadata.paymentType : "other";
+    let q = supabase.from("payment_links").select("id")
+      .eq("user_id", userId).eq("kind", kind).eq("amount_cents", amountCents).is("paid_at", null);
+    q = metadata.contractId ? q.eq("contract_id", metadata.contractId) : q.is("contract_id", null).eq("description", description);
+    if (kind === "avenant") q = q.eq("avenant_num", metadata.avenantNum);
+    const { data: found, error: findError } = await q.order("created_at", { ascending: false }).limit(1);
+    if (findError) throw findError;
+    if (Array.isArray(found) && found[0]?.id) {
+      const { error } = await supabase.from("payment_links").update({ description, customer_email: email || null }).eq("id", found[0].id);
+      if (error) throw error;
+      return found[0].id;
+    }
+    const { data: created, error } = await supabase.from("payment_links").insert({
+      user_id: userId,
+      contract_id: metadata.contractId || null,
+      kind,
+      avenant_num: kind === "avenant" ? metadata.avenantNum : null,
+      amount_cents: amountCents,
+      description,
+      customer_email: email || null,
+    }).select("id").single();
+    if (error) throw error;
+    return created?.id || null;
+  } catch (e) {
+    console.error("[create-payment] lien permanent impossible (script SQL v232 lancé ?)", e);
+    return null;
+  }
 }
 
 async function userFromRequest(req) {
@@ -103,17 +144,24 @@ export default async function handler(req, res) {
       }
     }
 
+    // Version 232 : lien permanent enregistré d'abord, pour que le paiement Stripe porte son numéro (payLinkId)
+    const description = String(body.description || "Paiement Freeley").trim().slice(0, 200) || "Paiement Freeley";
+    const amountCents = Math.round(amount * 100);
+    const rawEmail = String(body.customerEmail || "").trim();
+    const email = rawEmail && rawEmail.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail) ? rawEmail : "";
+    const linkId = await findOrCreatePaymentLink({ userId: user.id, metadata, amountCents, description, email });
+    if (linkId) metadata.payLinkId = linkId;
+
     // Session de paiement Stripe Checkout (montant en centimes)
     const params = new URLSearchParams();
     params.append("mode", "payment");
     params.append("line_items[0][price_data][currency]", "eur");
-    params.append("line_items[0][price_data][product_data][name]", String(body.description || "Paiement Freeley").trim().slice(0, 200) || "Paiement Freeley");
-    params.append("line_items[0][price_data][unit_amount]", String(Math.round(amount * 100)));
+    params.append("line_items[0][price_data][product_data][name]", description);
+    params.append("line_items[0][price_data][unit_amount]", String(amountCents));
     params.append("line_items[0][quantity]", "1");
     params.append("success_url", safeReturnUrl(body.successUrl, `${SITE_URL}/?paiement=succes`));
     params.append("cancel_url", safeReturnUrl(body.cancelUrl, `${SITE_URL}/?paiement=annule`));
-    const email = String(body.customerEmail || "").trim();
-    if (email && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) params.append("customer_email", email);
+    if (email) params.append("customer_email", email);
     Object.entries(metadata).forEach(([key, value]) => params.append(`metadata[${key}]`, String(value)));
 
     const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
@@ -143,6 +191,12 @@ export default async function handler(req, res) {
     if (sessionColumn && data.id) {
       const { error: saveError } = await supabase.from("contracts").update({ [sessionColumn]: data.id }).eq("id", metadata.contractId);
       if (saveError) console.error("[create-payment] numéro du lien non enregistré dans le contrat", saveError);
+    }
+    // Version 232 : le client reçoit le lien permanent ; le paiement Stripe qu'on vient d'ouvrir sert à sa première visite
+    if (linkId && data.id) {
+      const { error: linkError } = await supabase.from("payment_links").update({ last_session_id: data.id }).eq("id", linkId);
+      if (linkError) console.error("[create-payment] lien permanent : paiement Stripe non enregistré", linkError);
+      return res.status(200).json({ url: `${SITE_URL}/api/pay?l=${linkId}`, checkoutUrl: data.url, id: data.id, linkId });
     }
     return res.status(200).json({ url: data.url, id: data.id });
   } catch (err) {

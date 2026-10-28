@@ -16,6 +16,11 @@
 //                           par le serveur (horloge serveur), une seule fois par contrat.
 //   - action: "content-delivered" → (freelance connecté, propriétaire du contrat) contenu numérique fourni
 //                           au client : date et heure du serveur, une seule fois (version 208).
+//   - action: "sign-in-person" → (freelance connecté, propriétaire) les deux signatures faites ensemble sur son
+//                           appareil, enregistrées par le serveur avec la preuve, puis confirmation (version 232).
+//   - action: "avenant-sign" → le client signe un avenant à distance (version 232).
+//   - action: "avenant-sign-in-person" → (freelance connecté) avenant signé ensemble sur son appareil (version 232).
+//   - action: "nda-sign"  → l'autre partie signe un NDA à distance (version 232).
 //
 // Variables d'environnement : VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY.
 // Version 202 : lecture du contrat sans la colonne contract_text (qui n'existe pas), et un email
@@ -44,10 +49,17 @@
 // donne les droits d'un consommateur. Le freelance le déclare à la signature en présence (clientPetitPro) : la case
 // de démarrage, la rétractation en ligne, l'information et le formulaire de l'email de confirmation valent alors pour
 // ce client comme pour un particulier. Noms sans espace en trop dans les emails (« Bonjour Nom, »).
+// Version 232 : preuve de signature. Chaque signature (contrat, avenant, NDA) est enregistrée par le serveur avec
+// une preuve : l'heure du serveur, l'adresse IP et le navigateur de l'appareil qui signe, et l'empreinte SHA-256
+// du texte signé (« signatureProof »). La base refuse qu'une preuve soit écrite par l'application, et verrouille
+// les documents signés (script SQL v232). Signature à distance : si le texte a changé pendant que le client le
+// lisait, la signature est refusée (« text_changed ») et la page lui montre la nouvelle version. Deux signatures
+// envoyées en même temps : seule la première compte. L'email de confirmation reprend la preuve.
 //
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
 
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 
@@ -71,6 +83,44 @@ async function sendMail(msg) {
   const { data, error } = await resend.emails.send(msg);
   if (error) throw new Error(error.message || "Envoi refusé par Resend");
   return data;
+}
+
+// ── Preuve de signature (version 232) ──
+// Empreinte SHA-256 du texte signé, tel qu'il est enregistré : si un seul caractère change, l'empreinte change.
+function sha256Hex(text) {
+  return crypto.createHash("sha256").update(String(text || ""), "utf8").digest("hex");
+}
+// Adresse IP de l'appareil qui signe. Vercel remplace lui-même ces en-têtes (une adresse envoyée par le
+// navigateur est écrasée) : x-vercel-forwarded-for, x-real-ip et x-forwarded-for donnent l'adresse publique.
+function clientIp(req) {
+  const h = (req && req.headers) || {};
+  const first = (v) => String(Array.isArray(v) ? v[0] : (v || "")).split(",")[0].trim();
+  const raw = first(h["x-vercel-forwarded-for"]) || first(h["x-real-ip"]) || first(h["x-forwarded-for"])
+    || String((req && req.socket && req.socket.remoteAddress) || "");
+  const ip = raw.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/, "");
+  return /^[0-9a-fA-F:.]{2,64}$/.test(ip) ? ip : null;
+}
+// Navigateur et appareil, tels que le navigateur les annonce (500 caractères au plus)
+function userAgentOf(req) {
+  const ua = String((req && req.headers && req.headers["user-agent"]) || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return ua ? ua.slice(0, 500) : null;
+}
+// mode : « distance » (lien envoyé au client) ou « presence » (les deux signatures sur l'appareil du freelance)
+function signatureProof(req, text, mode, at) {
+  return { mode, at, ip: clientIp(req), userAgent: userAgentOf(req), textSha256: sha256Hex(text) };
+}
+const isPngSignature = (s) => typeof s === "string" && s.startsWith("data:image/png;base64,") && s.length > 22 && s.length <= 2000000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Lignes de la preuve reprises dans l'email de confirmation
+function proofLinesForEmail(p) {
+  if (!p || !p.at) return null;
+  const when = new Date(p.at).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "medium", timeZone: "Europe/Paris" });
+  return [
+    "PREUVE DE SIGNATURE",
+    `${p.mode === "presence" ? "Signé en présence, sur l'appareil du prestataire" : "Signé à distance"}, le ${when} (heure de Paris, horloge du serveur Freeley).`,
+    p.ip ? `Adresse IP de l'appareil : ${p.ip}` : null,
+    p.textSha256 ? `Empreinte numérique du texte du contrat (SHA-256) : ${p.textSha256}` : null,
+  ].filter(Boolean).join("\n");
 }
 
 // ── Textes officiels (Code de la consommation), repris mot pour mot ──
@@ -179,6 +229,74 @@ async function saveContent(contractId, newContent, status, check) {
   } catch (e) {
     console.error("retraction: relecture impossible", e);
     return false;
+  }
+}
+
+// Version 232 : la signature relue est-elle bien celle qu'on vient d'envoyer ? Comparaison champ par champ
+// (l'ordre des clés peut changer en base).
+function sameSignature(saved, sent) {
+  const a = saved || {}, b = sent || {}, pa = a.signatureProof || {}, pb = b.signatureProof || {};
+  return a.clientSignature === b.clientSignature && a.freelanceSignature === b.freelanceSignature
+    && a.signedByClientAtServer === b.signedByClientAtServer && pa.ip === pb.ip && pa.userAgent === pb.userAgent && pa.at === pb.at;
+}
+
+// Version 232 : enregistre la signature qui termine un contrat (statut « signé »), seulement si le contrat est encore
+// dans l'état attendu : deux signatures envoyées en même temps ne s'écrasent pas, la première compte.
+// onlyIf : "pending_client" (signature à distance) ou "unsigned" (signature en présence : pas encore signé).
+// Renvoie "saved" (enregistrée et relue), "already" (le contrat était déjà signé) ou "failed".
+async function saveSignedContract(contractId, newContent, onlyIf) {
+  let updated = null; // nombre de lignes modifiées ; null si la base a refusé la mise à jour
+  try {
+    let q = supabase.from("contracts").update({ content: JSON.stringify(newContent), status: "signed" }).eq("id", contractId);
+    q = onlyIf === "pending_client" ? q.eq("status", "pending_client") : q.neq("status", "signed");
+    const { data, error } = await q.select("id");
+    if (error) console.error("retraction: signature refusée par la base", error);
+    else updated = Array.isArray(data) ? data.length : 0;
+  } catch (e) { console.error("retraction: signature non enregistrée", e); }
+  try {
+    if (updated === 0) {
+      // Le contrat n'était plus dans l'état attendu : une autre signature est arrivée juste avant
+      const { data: row } = await supabase.from("contracts").select("status").eq("id", contractId).maybeSingle();
+      return row && row.status === "signed" ? "already" : "failed";
+    }
+    if (updated === null) {
+      // Base qui refuse la mise à jour directe : ancienne fonction (sans la condition sur l'état)
+      try {
+        const { error } = await supabase.rpc("update_contract_content", {
+          p_contract_id: contractId,
+          p_new_content: JSON.stringify(newContent),
+          p_new_status: "signed",
+        });
+        if (error) console.error("retraction: échec enregistrement de la signature (fonction)", error);
+      } catch (e) { console.error("retraction: échec enregistrement de la signature (fonction)", e); }
+    }
+    const { data: row } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+    if (!row) return "failed";
+    if (row.status === "signed" && sameSignature(parseContent(row.content), newContent)) return "saved";
+    return row.status === "signed" ? "already" : "failed";
+  } catch (e) {
+    console.error("retraction: relecture impossible", e);
+    return "failed";
+  }
+}
+
+// Même chose pour un avenant, puis relecture. Un avenant déjà signé ne change plus en base (script SQL v232) :
+// une deuxième signature envoyée en même temps est alors reconnue comme « déjà signé ».
+async function saveSignedAvenant(contractId, avenantNum, newContent) {
+  const findAv = (c) => (Array.isArray(c.avenants) ? c.avenants : []).find((a) => a && String(a.num) === String(avenantNum));
+  const sent = findAv(newContent);
+  try {
+    const { error } = await supabase.from("contracts").update({ content: JSON.stringify(newContent) }).eq("id", contractId).select("id");
+    if (error) console.error("retraction: signature d'avenant refusée par la base", error);
+  } catch (e) { console.error("retraction: signature d'avenant non enregistrée", e); }
+  try {
+    const { data: row } = await supabase.from("contracts").select("content").eq("id", contractId).single();
+    const av = row ? findAv(parseContent(row.content)) : null;
+    if (av && av.status === "signed" && sameSignature(av, sent)) return "saved";
+    return av && av.status === "signed" ? "already" : "failed";
+  } catch (e) {
+    console.error("retraction: relecture de l'avenant impossible", e);
+    return "failed";
   }
 }
 
@@ -397,8 +515,10 @@ async function handleClientWaive(contractId, waiverText) {
 }
 
 // ── action: "client-sign" — signature du client à distance, puis confirmation du contrat ──
-async function handleClientSign(contractId, signature) {
-  if (typeof signature !== "string" || !signature.startsWith("data:image/png;base64,") || signature.length > 2000000) {
+// Version 232 : preuve de signature enregistrée en même temps. « textSha256 » : empreinte du texte que la page du
+// client a affiché ; si le prestataire l'a changé entre-temps, la signature est refusée (« text_changed »).
+async function handleClientSign(contractId, signature, req, shownTextSha256) {
+  if (!isPngSignature(signature)) {
     return { status: 400, body: { error: "invalid_signature" } };
   }
   const { data: row, error } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
@@ -406,13 +526,160 @@ async function handleClientSign(contractId, signature) {
   if (row.status === "signed") return { status: 200, body: { ok: true, alreadySigned: true } };
   if (row.status !== "pending_client") return { status: 400, body: { error: "not_pending" } };
   const content = parseContent(row.content);
+  const text = String(content.contract || "");
+  if (typeof shownTextSha256 === "string" && /^[0-9a-f]{64}$/i.test(shownTextSha256) && shownTextSha256.toLowerCase() !== sha256Hex(text)) {
+    return { status: 409, body: { error: "text_changed" } };
+  }
   const nowIso = new Date().toISOString();
-  const saved = await saveContent(contractId, { ...content, clientSignature: signature, signedByClientAt: nowIso, signedByClientAtServer: nowIso }, "signed", "signedByClientAtServer");
-  if (!saved) return { status: 500, body: { error: "save_failed" } };
+  const newContent = {
+    ...content,
+    clientSignature: signature, signedByClientAt: nowIso, signedByClientAtServer: nowIso,
+    signatureProof: signatureProof(req, text, "distance", nowIso),
+  };
+  const outcome = await saveSignedContract(contractId, newContent, "pending_client");
+  if (outcome === "already") return { status: 200, body: { ok: true, alreadySigned: true } };
+  if (outcome !== "saved") return { status: 500, body: { error: "save_failed" } };
   // Confirmation sur support durable (email) — ne bloque jamais la signature si l'envoi échoue
   let confirmation = null;
   try { confirmation = (await handleSendLink(contractId)).body; } catch (e) { console.error("retraction/client-sign: confirmation", e); }
   return { status: 200, body: { ok: true, saved: true, signedAt: nowIso, confirmation } };
+}
+
+// ── action: "sign-in-person" — les deux signatures faites ensemble, sur l'appareil du freelance (version 232) ──
+// Réservé au freelance propriétaire du contrat (jeton vérifié). Le serveur enregistre les deux signatures, le lieu
+// déclaré, l'heure du serveur et la preuve (appareil du freelance), puis envoie la confirmation au client.
+const SIGN_LOCATION_KEYS = ["locaux", "hors_etablissement", "urgence"];
+function cleanSignContext(ctx) {
+  const c = ctx && typeof ctx === "object" ? ctx : {};
+  if (!SIGN_LOCATION_KEYS.includes(c.signatureLocation)) return {};
+  const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : undefined);
+  const out = {
+    signatureLocation: c.signatureLocation,
+    signatureLocationLabel: str(c.signatureLocationLabel, 300),
+    signatureLocationDeclaredAt: str(c.signatureLocationDeclaredAt, 40),
+  };
+  if (typeof c.clientPetitPro === "boolean") {
+    out.clientPetitPro = c.clientPetitPro;
+    out.clientPetitProLabel = str(c.clientPetitProLabel, 300);
+    out.clientPetitProDeclaredAt = str(c.clientPetitProDeclaredAt, 40);
+  }
+  Object.keys(out).forEach((k) => out[k] === undefined && delete out[k]);
+  return out;
+}
+// Heure de l'appareil du freelance quand il a signé : gardée si elle est plausible (dans les 24 dernières heures)
+function plausibleRecentIso(v, nowIso) {
+  const t = new Date(v || "").getTime();
+  const now = new Date(nowIso).getTime();
+  return Number.isFinite(t) && t <= now + 5 * 60000 && t >= now - 24 * 3600000 ? new Date(t).toISOString() : nowIso;
+}
+async function handleSignInPerson(contractId, token, body, req) {
+  const userId = await userIdFromToken(token);
+  if (!userId) return { status: 401, body: { error: "unauthorized" } };
+  if (!isPngSignature(body.freelanceSignature) || !isPngSignature(body.clientSignature)) {
+    return { status: 400, body: { error: "invalid_signature" } };
+  }
+  const { data: row, error } = await supabase.from("contracts").select("content, user_id, status").eq("id", contractId).single();
+  if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
+  if (row.user_id !== userId) return { status: 403, body: { error: "forbidden" } };
+  if (row.status === "signed") return { status: 200, body: { ok: true, alreadySigned: true } };
+  const content = parseContent(row.content);
+  const nowIso = new Date().toISOString();
+  const newContent = {
+    ...content,
+    ...cleanSignContext(body.signContext),
+    freelanceSignature: body.freelanceSignature,
+    clientSignature: body.clientSignature,
+    signedByFreelanceAt: plausibleRecentIso(body.signedByFreelanceAt, nowIso),
+    signedByClientAt: nowIso, signedByClientAtServer: nowIso,
+    signatureProof: signatureProof(req, content.contract, "presence", nowIso),
+  };
+  const outcome = await saveSignedContract(contractId, newContent, "unsigned");
+  if (outcome === "already") return { status: 200, body: { ok: true, alreadySigned: true } };
+  if (outcome !== "saved") return { status: 500, body: { error: "save_failed" } };
+  let confirmation = null;
+  try { confirmation = (await handleSendLink(contractId)).body; } catch (e) { console.error("retraction/sign-in-person: confirmation", e); }
+  return { status: 200, body: { ok: true, saved: true, signedAt: nowIso, confirmation } };
+}
+
+// ── Avenants (version 232) : à distance (le client, sans compte) ou en présence (freelance connecté) ──
+async function readAvenant(contractId, avenantNum) {
+  const num = String(avenantNum ?? "").trim();
+  if (!/^\d{1,4}$/.test(num)) return { result: { status: 400, body: { error: "invalid_avenant" } } };
+  const { data: row, error } = await supabase.from("contracts").select("content, user_id, status").eq("id", contractId).single();
+  if (error || !row) return { result: { status: 404, body: { error: "Contrat introuvable" } } };
+  const content = parseContent(row.content);
+  const avenants = Array.isArray(content.avenants) ? content.avenants.slice() : [];
+  const idx = avenants.findIndex((a) => a && String(a.num) === num);
+  if (idx === -1) return { result: { status: 404, body: { error: "Avenant introuvable" } } };
+  return { row, content, avenants, idx, num };
+}
+async function handleAvenantSign(contractId, avenantNum, signature, req) {
+  if (!isPngSignature(signature)) return { status: 400, body: { error: "invalid_signature" } };
+  const r = await readAvenant(contractId, avenantNum);
+  if (r.result) return r.result;
+  const av = r.avenants[r.idx];
+  if (av.status === "signed") return { status: 200, body: { ok: true, alreadySigned: true } };
+  if (av.status !== "pending_signature") return { status: 400, body: { error: "not_pending" } };
+  const nowIso = new Date().toISOString();
+  r.avenants[r.idx] = {
+    ...av, clientSignature: signature, signedByClientAt: nowIso, signedByClientAtServer: nowIso, status: "signed",
+    signatureProof: signatureProof(req, av.text, "distance", nowIso),
+  };
+  const outcome = await saveSignedAvenant(contractId, r.num, { ...r.content, avenants: r.avenants });
+  if (outcome === "already") return { status: 200, body: { ok: true, alreadySigned: true } };
+  if (outcome !== "saved") return { status: 500, body: { error: "save_failed" } };
+  return { status: 200, body: { ok: true, saved: true, signedAt: nowIso } };
+}
+async function handleAvenantSignInPerson(contractId, avenantNum, token, body, req) {
+  const userId = await userIdFromToken(token);
+  if (!userId) return { status: 401, body: { error: "unauthorized" } };
+  if (!isPngSignature(body.freelanceSignature) || !isPngSignature(body.clientSignature)) {
+    return { status: 400, body: { error: "invalid_signature" } };
+  }
+  const r = await readAvenant(contractId, avenantNum);
+  if (r.result) return r.result;
+  if (r.row.user_id !== userId) return { status: 403, body: { error: "forbidden" } };
+  const av = r.avenants[r.idx];
+  if (av.status === "signed") return { status: 200, body: { ok: true, alreadySigned: true } };
+  const nowIso = new Date().toISOString();
+  r.avenants[r.idx] = {
+    ...av, freelanceSignature: body.freelanceSignature, clientSignature: body.clientSignature,
+    signedByClientAt: nowIso, signedByClientAtServer: nowIso, status: "signed",
+    signatureProof: signatureProof(req, av.text, "presence", nowIso),
+  };
+  const outcome = await saveSignedAvenant(contractId, r.num, { ...r.content, avenants: r.avenants });
+  if (outcome === "already") return { status: 200, body: { ok: true, alreadySigned: true } };
+  if (outcome !== "saved") return { status: 500, body: { error: "save_failed" } };
+  return { status: 200, body: { ok: true, saved: true, signedAt: nowIso } };
+}
+
+// ── action: "nda-sign" — l'autre partie signe un NDA à distance (version 232) ──
+// Même vérification que l'ancienne fonction sign_nda (NDA en attente, signature en image PNG), avec la preuve en plus.
+async function handleNdaSign(ndaId, signature, req) {
+  if (!UUID.test(String(ndaId || ""))) return { status: 400, body: { error: "invalid_id" } };
+  if (!isPngSignature(signature)) return { status: 400, body: { error: "invalid_signature" } };
+  const { data: nda, error } = await supabase.from("ndas").select("id, content, status").eq("id", ndaId).maybeSingle();
+  if (error) { console.error("retraction/nda-sign: lecture impossible", error); return { status: 500, body: { error: "read_failed" } }; }
+  if (!nda) return { status: 404, body: { error: "NDA introuvable" } };
+  if (nda.status === "signed") return { status: 200, body: { ok: true, alreadySigned: true } };
+  if (nda.status !== "pending_signature") return { status: 400, body: { error: "not_pending" } };
+  const nowIso = new Date().toISOString();
+  const text = typeof nda.content === "string" ? nda.content : JSON.stringify(nda.content ?? "");
+  const proof = signatureProof(req, text, "distance", nowIso);
+  const { data: saved, error: saveError } = await supabase.from("ndas")
+    .update({ client_signature: signature, status: "signed", signed_at: nowIso, signature_proof: proof })
+    .eq("id", ndaId).eq("status", "pending_signature").select("id");
+  if (saveError) {
+    // Par exemple : colonne signature_proof pas encore créée (script SQL v232) → l'appli passe par sign_nda
+    console.error("retraction/nda-sign: enregistrement refusé", saveError);
+    return { status: 500, body: { error: "save_failed" } };
+  }
+  if (!Array.isArray(saved) || saved.length === 0) {
+    const { data: again } = await supabase.from("ndas").select("status").eq("id", ndaId).maybeSingle();
+    if (again && again.status === "signed") return { status: 200, body: { ok: true, alreadySigned: true } };
+    return { status: 500, body: { error: "save_failed" } };
+  }
+  return { status: 200, body: { ok: true, saved: true, signedAt: nowIso } };
 }
 
 // ── action: "find" — retrouver un contrat perdu par email, toujours même réponse ──
@@ -529,6 +796,13 @@ async function handleSendLink(contractId) {
     blocks.push(`TEXTE DU CONTRAT\n\n${contractText}`);
   }
 
+  // Version 232 : la preuve de signature, gardée aussi dans la boîte email du client
+  const proofText = proofLinesForEmail(content.signatureProof);
+  if (proofText) {
+    blocks.push("────────────────────────────");
+    blocks.push(proofText);
+  }
+
   blocks.push(`Cordialement,\n${freelanceName}\n(message envoyé par Freeley pour le compte de ${freelanceName})`);
 
   try {
@@ -557,7 +831,7 @@ async function handleSendLink(contractId) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { action, contractId, email, waiverText, signature } = req.body || {};
+  const { action, contractId, email, waiverText, signature, textSha256, avenantNum, ndaId } = req.body || {};
   // Jeton de connexion du freelance, seulement pour ses propres actions (version 208)
   const token = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "").trim();
   let result;
@@ -581,10 +855,22 @@ export default async function handler(req, res) {
     result = await handleClientWaive(contractId, waiverText);
   } else if (action === "client-sign") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
-    result = await handleClientSign(contractId, signature);
+    result = await handleClientSign(contractId, signature, req, textSha256);
   } else if (action === "content-delivered") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
     result = await handleContentDelivered(contractId, token);
+  } else if (action === "sign-in-person") {
+    if (!contractId) return res.status(400).json({ error: "contractId manquant" });
+    result = await handleSignInPerson(contractId, token, req.body || {}, req);
+  } else if (action === "avenant-sign") {
+    if (!contractId) return res.status(400).json({ error: "contractId manquant" });
+    result = await handleAvenantSign(contractId, avenantNum, signature, req);
+  } else if (action === "avenant-sign-in-person") {
+    if (!contractId) return res.status(400).json({ error: "contractId manquant" });
+    result = await handleAvenantSignInPerson(contractId, avenantNum, token, req.body || {}, req);
+  } else if (action === "nda-sign") {
+    if (!ndaId) return res.status(400).json({ error: "ndaId manquant" });
+    result = await handleNdaSign(ndaId, signature, req);
   } else {
     return res.status(400).json({ error: "action inconnue" });
   }
