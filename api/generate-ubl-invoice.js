@@ -75,7 +75,11 @@ function buildUblInvoice(data) {
     typeClient,
   } = data;
 
-  const today = new Date().toISOString().slice(0, 10);
+  // Version 233 : la date d'émission enregistrée avec le numéro de la facture (la même que sur le PDF) ;
+  // sans date valable, celle d'aujourd'hui, comme avant.
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(data.issueDate || "")) && !isNaN(Date.parse(String(data.issueDate)))
+    ? String(data.issueDate)
+    : new Date().toISOString().slice(0, 10);
   const montantNum = Number(montant) || 0;
   const tvaApplicable = !!(tvaNumber && String(tvaNumber).trim());
   const tvaAmount = tvaApplicable ? montantNum * 0.2 : 0;

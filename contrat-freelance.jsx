@@ -269,6 +269,8 @@ const getHistory = async () => {
       signatureProof: content.signatureProof || null, // version 232
       acompteInvoiceNumber: content.acompteInvoiceNumber || null, // version 232 : référence des virements
       soldeInvoiceNumber: content.soldeInvoiceNumber || null,
+      acompteInvoiceDate: content.acompteInvoiceDate || null, // version 233 : date d'émission de la facture
+      soldeInvoiceDate: content.soldeInvoiceDate || null,
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
       paymentStatus: row.payment_status || "pending",
@@ -1026,7 +1028,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "232";
+const APP_VERSION = "233";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -2234,10 +2236,17 @@ const checkContractText = (text, form = {}, profile = {}) => {
     if (!has(/L441-10/)) add("Client professionnel : les pénalités de retard, obligatoires entre professionnels (article L441-10 du Code de commerce), n'apparaissent pas.");
     // Version 222 : petite entreprise signée hors établissement (article L221-3 du Code de la consommation)
     if (!has(/L221-3\b/)) add("Client professionnel : la règle des petites entreprises signées hors de tes locaux (article L221-3 du Code de la consommation) n'apparaît pas.");
+    // Version 233 : clause de dédommagement et « acompte acquis » dans le même contrat se contredisent
+    if (form.clauseDedit && has(/reste(nt)? acquis au Prestataire/)) add("La clause de dédommagement est activée, mais le contrat dit aussi que l'acompte reste acquis au prestataire. Les deux se contredisent : refais le contrat.");
   }
 
   // Assurance annoncée par la clause, mais pas renseignée
   if (form.clauseSecurite && !String(form.freelanceAssurance || "").trim()) add("La clause d'assurance dit que tes assurances sont indiquées dans le contrat, mais ton assurance n'est pas renseignée. Ajoute-la dans ton profil puis refais le contrat, ou décoche la clause.");
+
+  // Version 233 : l'assurance est déjà traitée par la clause de sécurité (article 8) ; un article à part la répéterait
+  if (form.clauseSecurite && /^\s*ARTICLE\s+(?!8\b)\d+\s*[—–-][^\n]*ASSURANCE/im.test(t)) add("Le contrat parle de l'assurance dans un article à part, en plus de la clause d'assurance. Refais le contrat pour éviter le doublon.");
+  // Version 233 : plus de 13 articles, c'est sans doute un sujet traité deux fois
+  if (/ARTICLE\s+(1[4-9]|[2-9]\d)\s*[—–-]/.test(t)) add("Le contrat contient plus de 13 articles. Vérifie qu'aucun sujet n'est traité deux fois, ou refais le contrat.");
 
   // Mot anglais oublié
   if (has(/\b(duly|scope creep|deliverables?|best effort)\b/i)) add("Le contrat contient un mot anglais.");
@@ -6865,7 +6874,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
 /* ══════════════════════════════════════════ AVENANT MODAL ══ */
 // Génère le PDF d'un avenant — partagé entre la fenêtre de création et la liste des avenants déjà sauvegardés
-const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature, logo = null, logoLight = false, proof = null) => {
+const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName, clientName, freelanceSignature, clientSignature, logo = null, logoLight = false, proof = null, returnDoc = false) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const { jsPDF } = window.jspdf;
@@ -6919,8 +6928,9 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
         y = drawSignatureProofPdf(doc, proof, { x: ML, y, width: PW - ML * 2, docLabel: "de l'avenant", room: (h, yy) => { if (yy + h > 280) { doc.addPage(); return 20; } return yy; } });
       }
     }
+    if (returnDoc) return doc; // version 233 : pour le fichier ZIP « Tout télécharger »
     doc.save(`Avenant_${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
-  } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
+  } catch(e) { if (returnDoc) throw e; alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -6933,13 +6943,25 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
 // et une seule logique de numérotation (getOrReserveInvoiceNumber).
 // ═══════════════════════════════════════════════════════════════════════
 
-// Récupère le numéro de facture déjà attribué à cette vente précise (acompte, solde ou avenant),
-// ou en réserve un nouveau si c'est la première fois — jamais un nouveau numéro à chaque re-téléchargement
+// Version 233 : la date d'émission d'une facture est enregistrée avec son numéro, une fois pour toutes.
+// Avant, une facture retéléchargée prenait la date du jour : deux exemplaires du même numéro pouvaient porter deux
+// dates différentes. Les dates sont au format AAAA-MM-JJ, jour de Paris.
+const parisTodayIso = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const isIsoDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+const isoDayFr = (iso) => { const [y, m, d] = String(iso).split("-"); return `${d}/${m}/${y}`; };
+const isoDayPlus = (iso, n) => { const [y, m, d] = String(iso).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + (Number(n) || 0))).toISOString().slice(0, 10); };
+const INVOICE_DATE_KEYS = { acompteInvoiceNumber: "acompteInvoiceDate", soldeInvoiceNumber: "soldeInvoiceDate" };
+
+// Récupère le numéro et la date d'émission de la facture déjà attribuée à cette vente précise (acompte, solde ou
+// avenant), ou en réserve un nouveau si c'est la première fois — jamais un nouveau numéro à chaque re-téléchargement
 // (obligation légale de continuité). `key` vaut "acompteInvoiceNumber", "soldeInvoiceNumber", ou "avenant".
-const getOrReserveInvoiceNumber = async ({ authUser, contractId, key, avenantNum }) => {
+const getOrReserveInvoice = async ({ authUser, contractId, key, avenantNum }) => {
   const year = new Date().getFullYear();
-  let invoiceNum = `FA-${year}-····`;
+  const today = parisTodayIso();
+  const NONE = `FA-${year}-····`;
+  let invoiceNum = NONE, issueDate = null;
   let existingContent = null, existingStatus = null, avenantsArr = null, avenantIdx = -1;
+  const dateKey = INVOICE_DATE_KEYS[key] || null;
 
   if (contractId) {
     try {
@@ -6950,46 +6972,63 @@ const getOrReserveInvoiceNumber = async ({ authUser, contractId, key, avenantNum
         if (key === "avenant") {
           avenantsArr = Array.isArray(existingContent.avenants) ? existingContent.avenants : [];
           avenantIdx = avenantsArr.findIndex(a => String(a.num) === String(avenantNum));
-          if (avenantIdx !== -1 && avenantsArr[avenantIdx].invoiceNumber) invoiceNum = avenantsArr[avenantIdx].invoiceNumber;
+          if (avenantIdx !== -1 && avenantsArr[avenantIdx].invoiceNumber) {
+            invoiceNum = avenantsArr[avenantIdx].invoiceNumber;
+            issueDate = avenantsArr[avenantIdx].invoiceDate || null;
+          }
         } else if (existingContent[key]) {
           invoiceNum = existingContent[key];
+          issueDate = dateKey ? (existingContent[dateKey] || null) : null;
         }
       }
     } catch(e) { console.error("Erreur lecture numéro de facture existant:", e); }
   }
 
-  if (invoiceNum === `FA-${year}-····` && authUser?.id) {
+  // Enregistre le numéro et/ou la date dans le contrat (ou dans la fiche de la facture libre)
+  const store = async (values) => {
+    if (!contractId || !existingContent || !Object.keys(values).length) return;
+    try {
+      if (key === "avenant") {
+        if (!avenantsArr || avenantIdx === -1) return;
+        avenantsArr[avenantIdx] = { ...avenantsArr[avenantIdx], ...values };
+        await supabase.rpc("update_contract_content", {
+          p_contract_id: contractId,
+          p_new_content: JSON.stringify({ ...existingContent, avenants: avenantsArr }),
+          p_new_status: existingStatus,
+        });
+      } else {
+        await supabase.rpc("update_contract_content", {
+          p_contract_id: contractId,
+          p_new_content: JSON.stringify({ ...existingContent, ...values }),
+          p_new_status: existingStatus,
+        });
+      }
+    } catch(e) { console.error("Erreur sauvegarde numéro de facture:", e); }
+  };
+
+  if (invoiceNum === NONE && authUser?.id) {
     const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
     if (error) { console.error("Erreur réservation numéro de facture:", error); }
     else {
       invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
-      if (contractId && existingContent) {
-        try {
-          if (key === "avenant" && avenantsArr && avenantIdx !== -1) {
-            avenantsArr[avenantIdx] = { ...avenantsArr[avenantIdx], invoiceNumber: invoiceNum };
-            await supabase.rpc("update_contract_content", {
-              p_contract_id: contractId,
-              p_new_content: JSON.stringify({ ...existingContent, avenants: avenantsArr }),
-              p_new_status: existingStatus,
-            });
-          } else if (key !== "avenant") {
-            await supabase.rpc("update_contract_content", {
-              p_contract_id: contractId,
-              p_new_content: JSON.stringify({ ...existingContent, [key]: invoiceNum }),
-              p_new_status: existingStatus,
-            });
-          }
-        } catch(e) { console.error("Erreur sauvegarde numéro de facture:", e); }
-      }
+      issueDate = today;
+      await store(key === "avenant" ? { invoiceNumber: invoiceNum, invoiceDate: today } : { [key]: invoiceNum, ...(dateKey ? { [dateKey]: today } : {}) });
     }
+  } else if (invoiceNum !== NONE && !isIsoDay(issueDate)) {
+    // Facture numérotée avant la version 233 : sa date d'émission n'était pas gardée. On retient celle d'aujourd'hui,
+    // une fois pour toutes, pour que les prochains téléchargements gardent la même.
+    issueDate = today;
+    await store(key === "avenant" ? { invoiceDate: today } : (dateKey ? { [dateKey]: today } : {}));
   }
   // Garde-fou légal : une facture doit porter un vrai numéro séquentiel. Si la réservation a échoué,
   // on refuse de produire un document plutôt que d'émettre une facture non conforme.
-  if (invoiceNum === `FA-${year}-····`) {
+  if (invoiceNum === NONE) {
     throw new Error("Impossible de réserver un numéro de facture. Vérifie ta connexion et réessaie — aucune facture n'a été générée.");
   }
-  return invoiceNum;
+  return { invoiceNum, issueDate: isIsoDay(issueDate) ? issueDate : today };
 };
+// Le numéro seul (ancien nom)
+const getOrReserveInvoiceNumber = async (args) => (await getOrReserveInvoice(args)).invoiceNum;
 
 // Dessine et télécharge le PDF d'une facture. Reçoit toutes les infos déjà prêtes — ne gère ni la
 // numérotation ni la récupération du lien de paiement, pour rester simple et réutilisable partout.
@@ -6998,6 +7037,7 @@ function renderInvoicePDF({
   freelanceName, freelanceSiret, freelanceEmail, freelanceAddress,
   clientName, clientCompany, clientAddress, clientEmail, clientSiret,
   profile, typeClient, qrBase64, footNote, filename, dueDays = 0,
+  issueDate = null, returnDoc = false,
 }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
@@ -7005,11 +7045,13 @@ function renderInvoicePDF({
   const PW = 210, ML = 20, MR = 20, cw = PW - ML - MR;
   const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80], GREY = [110, 110, 110];
   const p = profile || {};
-  const today = new Date().toLocaleDateString("fr-FR");
+  // Version 233 : la date d'émission enregistrée avec le numéro (la même à chaque téléchargement)
+  const issueIso = isIsoDay(issueDate) ? issueDate : parisTodayIso();
+  const today = isoDayFr(issueIso);
   // Échéance : à réception, ou N jours après la date de la facture quand le contrat le prévoit (solde, paiement après la mission)
   const days = Number(dueDays) || 0;
   const dueLabel = days > 0
-    ? `${new Date(Date.now() + days * 86400000).toLocaleDateString("fr-FR")} (paiement à ${days} jours)`
+    ? `${isoDayFr(isoDayPlus(issueIso, days))} (paiement à ${days} jours)`
     : `${today} (paiement à réception)`;
   const fmt = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits:2, maximumFractionDigits:2 }).replace(/[\u202F\u00A0]/g, " ");
   let y = 18;
@@ -7146,6 +7188,7 @@ function renderInvoicePDF({
   y += (typeClient === "particulier" ? 10 : 14);
   doc.text("Pas d'escompte pour paiement anticipé.", ML, y);
 
+  if (returnDoc) return doc; // version 233 : pour le fichier ZIP « Tout télécharger »
   doc.save(filename);
 }
 
@@ -7153,9 +7196,9 @@ function renderInvoicePDF({
 const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, freelanceAddress, clientSiret) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
-    const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: "avenant", avenantNum });
+    const { invoiceNum, issueDate } = await getOrReserveInvoice({ authUser, contractId, key: "avenant", avenantNum });
     renderInvoicePDF({
-      invoiceNum, designation: `Avenant n°${avenantNum}`, missionTitle, montant,
+      invoiceNum, issueDate, designation: `Avenant n°${avenantNum}`, missionTitle, montant,
       freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, clientName, clientCompany, clientAddress, clientEmail, clientSiret, typeClient, profile: await profileWithPdfLogo(profile),
       filename: `Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
     });
@@ -7169,11 +7212,11 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const invoiceKey = invoiceType === "solde" ? "soldeInvoiceNumber" : "acompteInvoiceNumber";
-    const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: invoiceKey });
+    const { invoiceNum, issueDate } = await getOrReserveInvoice({ authUser, contractId, key: invoiceKey });
     const spec = extra.form ? contractInvoiceSpec(extra.form, invoiceType === "solde" ? "solde" : "acompte") : null;
     const finalDesignation = spec ? spec.designation : designation;
     renderInvoicePDF({
-      invoiceNum, designation: finalDesignation, missionTitle, montant,
+      invoiceNum, issueDate, designation: finalDesignation, missionTitle, montant,
       freelanceName, freelanceSiret, freelanceEmail, freelanceAddress: extra.form?.freelanceAddress || "",
       clientName, clientCompany, clientAddress, clientEmail, typeClient, profile: await profileWithPdfLogo(profile),
       clientSiret: extra.clientSiret || extra.form?.clientSiret || "",
@@ -7182,6 +7225,200 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
+
+// ── Version 233 : tout télécharger d'un coup ──
+// Un seul fichier ZIP avec tous les documents du freelance : contrats, avenants, factures déjà émises et NDA, plus un
+// petit mode d'emploi. Rien n'est créé ni modifié : seules les factures qui ont déjà un numéro sont reprises, avec
+// leur numéro et leur date d'émission, exactement comme « Télécharger la facture » dans Mes contrats.
+const ZIP_CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+const zipCrc32 = (bytes) => { let c = 0xFFFFFFFF; for (let i = 0; i < bytes.length; i++) c = ZIP_CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+// Fichier ZIP sans compression (les PDF sont déjà compressés), noms de fichiers en UTF-8 (accents)
+const makeZipBlob = (files) => {
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const data = f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data);
+    const crc = zipCrc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true); lh.setUint32(14, crc, true);
+    lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+    parts.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+    ch.setUint16(12, dosTime, true); ch.setUint16(14, dosDate, true); ch.setUint32(16, crc, true);
+    ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true);
+    ch.setUint16(30, 0, true); ch.setUint16(32, 0, true); ch.setUint16(34, 0, true); ch.setUint16(36, 0, true); ch.setUint32(38, 0, true);
+    ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + data.length;
+  }
+  const centralSize = central.reduce((n, p) => n + p.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(4, 0, true); end.setUint16(6, 0, true);
+  end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, centralSize, true); end.setUint32(16, offset, true); end.setUint16(20, 0, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
+};
+const zipPart = (v, fallback = "document") => String(v || "").replace(/[\/\\:*?"<>|\u0000-\u001F]/g, "_").replace(/\s+/g, " ").trim().slice(0, 70) || fallback;
+
+const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
+  await loadJsPDF();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("not_logged_in");
+  const history = await getHistory();
+  let ndas = [];
+  try {
+    const { data } = await supabase.from("ndas").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+    ndas = Array.isArray(data) ? data : [];
+  } catch (e) { ndas = []; }
+  const logoProfile = await profileWithPdfLogo(profile);
+
+  // Facture d'acompte, de solde ou facture libre : mêmes données que « Télécharger la facture » dans Mes contrats
+  const paymentInvoice = (entry, kind, invoiceNum, issueDate, montant) => {
+    const form = entry.form || {};
+    const spec = kind === "facture" ? null : contractInvoiceSpec(form, kind === "solde" ? "solde" : "acompte");
+    return renderInvoicePDF({
+      invoiceNum, issueDate, designation: spec ? spec.designation : "Facture", missionTitle: entry.missionTitle, montant,
+      freelanceName: form.freelanceName, freelanceSiret: form.freelanceSiret, freelanceEmail: form.freelanceEmail,
+      freelanceAddress: kind === "facture" ? "" : (form.freelanceAddress || ""),
+      clientName: entry.clientName, clientCompany: form.clientCompany, clientAddress: form.clientAddress, clientEmail: form.clientEmail,
+      clientSiret: form.clientSiret || "", typeClient: form.typeClient, profile: logoProfile,
+      footNote: spec ? spec.footNote : undefined, dueDays: spec ? spec.dueDays : 0, filename: "", returnDoc: true,
+    });
+  };
+
+  const tasks = [];
+  for (const entry of history) {
+    const form = entry.form || {};
+    const cNum = (String(entry.contract || "").match(/CP-\d{4}-\d{3,5}/) || [])[0] || "";
+    const who = zipPart(entry.clientCompany || form.clientCompany || entry.clientName || form.clientName, "client");
+    const title = zipPart(entry.missionTitle || form.missionTitle, "Mission");
+    if (entry.isStandaloneInvoice) {
+      const num = entry.acompteInvoiceNumber || entry.invoiceNumber;
+      if (num) tasks.push({ name: `Factures/${zipPart(num)} - Facture - ${who}.pdf`, make: () => paymentInvoice(entry, "facture", num, entry.acompteInvoiceDate, Number(entry.price) || 0) });
+      continue;
+    }
+    if (String(entry.contract || "").trim()) {
+      tasks.push({ name: `Contrats/${cNum ? cNum + " - " : ""}${title} - ${who}${entry.deleted ? " (archivé)" : ""}.pdf`, make: () => buildContractPdfDoc({
+        form, contract: entry.contract, freelanceSignature: entry.freelanceSignature, clientSignature: entry.clientSignature,
+        signedAt: entry.signedByClientAt, retractationWaivedAt: entry.retractationWaivedAt,
+        extra: { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null },
+        profile,
+      }).doc });
+    }
+    // Montants : même calcul que les boutons de facture de Mes contrats
+    const pct = form.acomptePourcentage != null && form.acomptePourcentage !== "" ? Number(form.acomptePourcentage) : null;
+    const isComptant = pct === 0 && Number(entry.price) > 0;
+    const hasSolde = !isComptant && pct > 0 && pct < 100;
+    const acompteAmt = isComptant ? Number(entry.price) : (pct ? Math.round(Number(entry.price) * (pct / 100)) || 0 : 0);
+    const soldeAmt = hasSolde ? Math.max(Number(entry.price) - acompteAmt, 0) : 0;
+    if (entry.acompteInvoiceNumber && acompteAmt > 0) {
+      tasks.push({ name: `Factures/${zipPart(entry.acompteInvoiceNumber)} - ${isComptant ? "Paiement" : "Acompte"} - ${who}.pdf`, make: () => paymentInvoice(entry, "acompte", entry.acompteInvoiceNumber, entry.acompteInvoiceDate, acompteAmt) });
+    }
+    if (entry.soldeInvoiceNumber && hasSolde && soldeAmt > 0) {
+      tasks.push({ name: `Factures/${zipPart(entry.soldeInvoiceNumber)} - Solde - ${who}.pdf`, make: () => paymentInvoice(entry, "solde", entry.soldeInvoiceNumber, entry.soldeInvoiceDate, soldeAmt) });
+    }
+    for (const av of (Array.isArray(entry.avenants) ? entry.avenants : [])) {
+      if (!av || av.num == null) continue;
+      if (String(av.text || "").trim()) {
+        tasks.push({ name: `Avenants/${cNum ? cNum + " - " : ""}Avenant ${zipPart(av.num)} - ${title}.pdf`, make: () => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(form), form.clientName, av.freelanceSignature, av.clientSignature, form.freelanceLogo, !!form.freelanceLogoLight, av.status === "signed" ? (av.signatureProof || null) : null, true) });
+      }
+      if (av.invoiceNumber) {
+        tasks.push({ name: `Factures/${zipPart(av.invoiceNumber)} - Avenant ${zipPart(av.num)} - ${who}.pdf`, make: () => renderInvoicePDF({
+          invoiceNum: av.invoiceNumber, issueDate: av.invoiceDate || null, designation: `Avenant n°${av.num}`, missionTitle: entry.missionTitle, montant: av.ajustementMontant,
+          freelanceName: form.freelanceName, freelanceSiret: form.freelanceSiret, freelanceEmail: form.freelanceEmail, freelanceAddress: form.freelanceAddress,
+          clientName: entry.clientName, clientCompany: form.clientCompany, clientAddress: form.clientAddress, clientEmail: form.clientEmail, clientSiret: form.clientSiret,
+          typeClient: form.typeClient, profile: logoProfile, filename: "", returnDoc: true,
+        }) });
+      }
+    }
+  }
+  for (const n of ndas) {
+    if (!String(n.content || "").trim()) continue;
+    const day = n.created_at ? String(n.created_at).slice(0, 10) : "";
+    tasks.push({ name: `NDA/${zipPart(n.nda_ref || day, "NDA")} - ${zipPart(n.partie_b, "partie B")}.pdf`, make: () => downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at, n.status === "signed" ? (n.signature_proof || null) : null, true) });
+  }
+
+  const files = [], failed = [], used = new Set();
+  const uniqueName = (p) => { let q = p, i = 2; while (used.has(q.toLowerCase())) q = p.replace(/\.pdf$/i, ` (${i++}).pdf`); used.add(q.toLowerCase()); return q; };
+  let done = 0;
+  for (const t of tasks) {
+    try {
+      const doc = t.make();
+      if (!doc) throw new Error("document vide");
+      files.push({ name: uniqueName(t.name), data: new Uint8Array(doc.output("arraybuffer")) });
+    } catch (e) { console.error("Document non ajouté au fichier ZIP :", t.name, e); failed.push(t.name); }
+    done++;
+    if (onProgress) onProgress(done, tasks.length);
+    await new Promise(r => setTimeout(r, 0));
+  }
+  const readme = [
+    "Tes documents Freeley",
+    `Téléchargés le ${isoDayFr(parisTodayIso())}.`,
+    "",
+    "Contrats : tes contrats, avec les signatures.",
+    "Avenants : les avenants de tes contrats.",
+    "Factures : les factures déjà émises, avec leur numéro et leur date d'émission.",
+    "NDA : tes accords de confidentialité.",
+    "",
+    "Garde ces documents en lieu sûr. La loi t'oblige à conserver tes factures pendant 10 ans.",
+    ...(failed.length ? ["", "Documents qui n'ont pas pu être ajoutés (réessaie plus tard) :", ...failed] : []),
+  ].join("\r\n");
+  files.push({ name: "LISEZ-MOI.txt", data: new TextEncoder().encode(readme) });
+  const blob = makeZipBlob(files);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Freeley_mes_documents_${parisTodayIso()}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { count: files.length - 1, failed: failed.length };
+};
+
+// Bouton « Tout télécharger » : profil, fenêtre de suppression du compte, Mes contrats
+function DownloadAllDocumentsButton({ profile, compact = false }) {
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [result, setResult] = useState(null);
+  const plural = (n, one, many) => (n > 1 ? many : one);
+  const run = async () => {
+    if (busy) return;
+    setBusy(true); setResult(null); setProgress(null);
+    try {
+      const r = await downloadAllDocumentsZip({ profile, onProgress: (d, t) => setProgress({ d, t }) });
+      if (r.failed) setResult({ kind: "warn", text: `${r.count} ${plural(r.count, "document téléchargé", "documents téléchargés")}. ${r.failed} ${plural(r.failed, "document n'a pas pu être ajouté", "documents n'ont pas pu être ajoutés")} : réessaie plus tard.` });
+      else if (r.count) setResult({ kind: "ok", text: `✓ ${r.count} ${plural(r.count, "document téléchargé", "documents téléchargés")} dans un fichier ZIP.` });
+      else setResult({ kind: "ok", text: "Tu n'as encore aucun contrat ni aucune facture. Le fichier ZIP contient seulement le mode d'emploi." });
+    } catch (e) {
+      console.error("Tout télécharger :", e);
+      setResult({ kind: "error", text: "Le téléchargement a échoué. Vérifie ta connexion et réessaie." });
+    } finally { setBusy(false); setProgress(null); }
+  };
+  const label = busy ? (progress ? `Préparation… ${progress.d} / ${progress.t}` : "Préparation…") : "📦 Tout télécharger (contrats et factures)";
+  const color = result?.kind === "error" ? "#B91C1C" : result?.kind === "warn" ? "#92400E" : "#166534";
+  return (
+    <div data-testid="download-all">
+      <button data-testid="download-all-btn" onClick={run} disabled={busy}
+        style={compact
+          ? { background:"none", border:"none", color:C.textL, fontSize:12, cursor: busy ? "wait" : "pointer", fontFamily:T.body, padding:0, textDecoration:"underline" }
+          : { padding:"10px 16px", background: busy ? C.creamDD : C.navy, border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:700, cursor: busy ? "wait" : "pointer", fontFamily:T.body }}
+      >{label}</button>
+      {result && <div data-testid="download-all-result" style={{ marginTop:8, fontFamily:T.body, fontSize:12, color, lineHeight:1.5 }}>{result.text}</div>}
+    </div>
+  );
+}
 
 function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe, profile }) {
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
@@ -10322,7 +10559,7 @@ const fmtSignedAtFr = (iso) => {
 // Génère le PDF d'un NDA — partagé entre la fenêtre de création, la page "Mes NDA" et la page de signature de la
 // Partie B. Version 223 : date du NDA en haut (et non celle du téléchargement), titre une seule fois, titres des
 // articles en gras, pages numérotées, signatures datées, et « En attente de signature » tant que la Partie B n'a pas signé.
-const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSignature, clientSignature, signedAt, createdAt, proof = null) => {
+const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSignature, clientSignature, signedAt, createdAt, proof = null, returnDoc = false) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   if (!ndaText) { alert("Aucun NDA à télécharger."); return; }
   const { jsPDF } = window.jspdf;
@@ -10427,6 +10664,7 @@ const downloadNdaPDF = (ndaText, ndaRef, partieAName, partieBName, freelanceSign
     doc.text(`${ref ? ref + " · " : ""}Page ${i} / ${total}`, PW - MR, PH - 10, { align: "right" });
   }
 
+  if (returnDoc) return doc; // version 233 : pour le fichier ZIP « Tout télécharger »
   doc.save(`NDA_${(B || "contact").replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}.pdf`);
 };
 
@@ -14741,6 +14979,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             🗄️ Voir les contrats supprimés et factures libres ({history.filter(h => h.deleted || h.isStandaloneInvoice).length})
           </button>
         )}
+        {history.length > 0 && (
+          <div style={{ marginTop:8 }}><DownloadAllDocumentsButton profile={profile} compact /></div>
+        )}
       </div>
 
       {/* Scan results link */}
@@ -15131,7 +15372,7 @@ function SendElectronicInvoiceButton({
     setSending(true);
     setResult(null);
     try {
-      const invoiceNum = await getOrReserveInvoiceNumber({ authUser, contractId, key: invoiceKey, avenantNum });
+      const { invoiceNum, issueDate } = await getOrReserveInvoice({ authUser, contractId, key: invoiceKey, avenantNum });
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch("/api/generate-ubl-invoice", {
         method: "POST",
@@ -15140,7 +15381,7 @@ function SendElectronicInvoiceButton({
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
         },
         body: JSON.stringify({
-          send: true, invoiceNum, designation, missionTitle, montant,
+          send: true, invoiceNum, issueDate, designation, missionTitle, montant,
           freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
           clientName, clientCompany, clientAddress, clientSiret, clientEmail, typeClient,
         }),
@@ -15493,18 +15734,23 @@ ${freelanceName}`;
       //    « Télécharger la facture » dans Mes contrats). Facture libre : réutilise le numéro déjà
       //    attribué dans cette session, sinon en réserve un nouveau.
       const existingId = contractId ? null : standaloneEntryId;
-      let invoiceNum = contractId ? await getOrReserveInvoiceNumber({ authUser, contractId, key: "acompteInvoiceNumber" }) : null;
-      if (contractId) setInvoiceNum(invoiceNum);
+      let invoiceNum = null, issueDate = null; // version 233 : la date d'émission suit le numéro
+      if (contractId) {
+        const r = await getOrReserveInvoice({ authUser, contractId, key: "acompteInvoiceNumber" });
+        invoiceNum = r.invoiceNum; issueDate = r.issueDate;
+        setInvoiceNum(invoiceNum);
+      }
       if (existingId) {
         try {
           const { data: existingRow } = await supabase.from("contracts").select("content").eq("id", existingId).single();
           if (existingRow) {
             const existingParsed = parseContent(existingRow.content);
-            if (existingParsed.acompteInvoiceNumber) invoiceNum = existingParsed.acompteInvoiceNumber;
+            if (existingParsed.acompteInvoiceNumber) { invoiceNum = existingParsed.acompteInvoiceNumber; issueDate = existingParsed.acompteInvoiceDate || null; }
           }
         } catch(e) { console.error("Erreur lecture numéro de facture existant:", e); }
       }
-      if (!invoiceNum) invoiceNum = await reserveInvoiceNumber();
+      if (!invoiceNum) { invoiceNum = await reserveInvoiceNumber(); issueDate = parisTodayIso(); }
+      if (!isIsoDay(issueDate)) issueDate = parisTodayIso();
 
       // 1. Lien de paiement par carte pour le code QR du PDF : seulement si le freelance a connecté son
       //    compte Stripe (l'argent va chez lui). Sinon, pas de code QR : le client paie par virement.
@@ -15526,6 +15772,7 @@ ${freelanceName}`;
 
       renderInvoicePDF({
         invoiceNum,
+        issueDate,
         designation: spec.designation,
         missionTitle: form.missionTitle,
         montant: acompte,
@@ -15556,12 +15803,12 @@ ${freelanceName}`;
               const existingContent = parseContent(existing.content);
               await supabase.rpc("update_contract_content", {
                 p_contract_id: standaloneEntryId,
-                p_new_content: JSON.stringify({ ...existingContent, form, acompteInvoiceNumber: invoiceNum }),
+                p_new_content: JSON.stringify({ ...existingContent, form, acompteInvoiceNumber: invoiceNum, acompteInvoiceDate: existingContent.acompteInvoiceDate || issueDate }),
                 p_new_status: existing.status,
               });
             }
           } else {
-            const saved = await saveToHistory({ isStandaloneInvoice: true, acompteInvoiceNumber: invoiceNum }, form);
+            const saved = await saveToHistory({ isStandaloneInvoice: true, acompteInvoiceNumber: invoiceNum, acompteInvoiceDate: issueDate }, form);
             if (saved?.id) setStandaloneEntryId(saved.id);
           }
         } catch(e) { console.error("Erreur sauvegarde facture libre:", e); }
@@ -18771,7 +19018,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 </div>
                 <div style={{ padding:"12px 14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, marginBottom:14 }}>
                   <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6 }}>
-                    <strong>⚠️ Ne rate pas cette étape :</strong> quand tu ajoutes ton entreprise sur Super PDP (étape 1), on te propose 3 choix pour la réception des factures. Prends bien <strong>"inscrire mon adresse"</strong> (immédiat ou au 01/09/2026) — pas "je ne souhaite pas inscrire pour le moment". Dès le <strong>1er septembre 2026</strong>, tout assujetti à la TVA doit pouvoir <strong>recevoir</strong> des factures électroniques, même les auto-entrepreneurs en franchise. Sans ce choix, tu restes invisible dans l'annuaire officiel, même une fois connecté à Freeley.
+                    <strong>⚠️ Ne rate pas cette étape :</strong> quand tu ajoutes ton entreprise sur Super PDP (étape 1), on te propose 3 choix pour la réception des factures. Prends bien <strong>"inscrire mon adresse"</strong> — pas "je ne souhaite pas inscrire pour le moment". Depuis le <strong>1er septembre 2026</strong>, tout assujetti à la TVA doit pouvoir <strong>recevoir</strong> des factures électroniques, même les auto-entrepreneurs en franchise. Sans ce choix, tu restes invisible dans l'annuaire officiel, même une fois connecté à Freeley.
                   </div>
                 </div>
                 <div style={{ marginBottom:10 }}>
@@ -18859,6 +19106,15 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
 
       {/* Ancienne section Abonnement & Facturation retirée (en attente de refonte) */}
 
+      {/* ── MES DOCUMENTS (version 233) ── */}
+      <div className="fade-up fade-up-2" data-testid="profile-documents" style={{ marginTop:32, background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"20px 24px" }}>
+        <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.15em", color:C.gold, fontWeight:700, marginBottom:8 }}>MES DOCUMENTS</div>
+        <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, lineHeight:1.6, marginBottom:14 }}>
+          Télécharge en une fois tous tes contrats, avenants, factures et NDA, dans un seul fichier ZIP. Garde-le en lieu sûr : la loi t'oblige à conserver tes factures pendant 10 ans.
+        </div>
+        <DownloadAllDocumentsButton profile={profile} />
+      </div>
+
       {/* ── ZONE DE DANGER ── */}
       <div className="fade-up fade-up-2" style={{ marginTop:32 }}>
         {/* Séparateur */}
@@ -18936,6 +19192,11 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                       {deleteError}
                     </div>
                   )}
+                </div>
+                {/* Version 233 : garder ses documents avant de tout effacer */}
+                <div data-testid="delete-download-all" style={{ marginBottom:14, padding:"12px 14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6 }}>
+                  Avant de supprimer votre compte, téléchargez tous vos documents. La loi vous oblige à garder vos factures pendant 10 ans.
+                  <div style={{ marginTop:10 }}><DownloadAllDocumentsButton profile={profile} /></div>
                 </div>
                 <div style={{ display:"flex", gap:12, marginTop:8 }}>
                   <button
