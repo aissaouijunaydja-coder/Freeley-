@@ -81,11 +81,26 @@ const hydrateClientRatings = async (userId) => {
 
 
 
-/* ─── Google Fonts ─── */
-const fontLink = document.createElement("link");
-fontLink.rel = "stylesheet";
-fontLink.href = "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap";
-document.head.appendChild(fontLink);
+/* ─── Polices ─── */
+// Version 236 : DM Sans et Playfair Display sont servies par Freeley lui-même (dossier public/fonts, licence OFL), et
+// plus par Google Fonts : ouvrir Freeley n'envoie plus l'adresse IP du visiteur à Google. Mêmes polices, mêmes graisses
+// qu'avant (fichiers de Google, découpés en « latin » pour le français et « latin-ext » pour les autres langues latines :
+// le navigateur ne télécharge que ce dont la page a besoin).
+const FONT_RANGES = {
+  "latin-ext": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+  latin: "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+};
+const FONT_FACES = [
+  ["DM Sans", "dm-sans", "normal", [300, 400, 500, 600]],
+  ["Playfair Display", "playfair-display", "normal", [400, 600, 700]],
+  ["Playfair Display", "playfair-display", "italic", [400]],
+];
+const fontStyle = document.createElement("style");
+fontStyle.setAttribute("data-freeley-fonts", "236");
+fontStyle.textContent = FONT_FACES.flatMap(([family, file, style, weights]) => weights.flatMap((w) => ["latin-ext", "latin"].map((subset) =>
+  `@font-face { font-family: '${family}'; font-style: ${style}; font-weight: ${w}; font-display: swap; src: url(/fonts/${file}-${subset}-${w}-${style}.woff2) format('woff2'); unicode-range: ${FONT_RANGES[subset]}; }`
+))).join("\n");
+document.head.appendChild(fontStyle);
 
 /* ─── Global styles ─── */
 const globalStyle = document.createElement("style");
@@ -1028,7 +1043,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "234";
+const APP_VERSION = "236";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -3620,16 +3635,30 @@ async function generateLongText(prompt, { maxTokens = 8000, maxAttempts = 3, loo
   return { text: fullText, stopReason };
 }
 
-// Charge jsPDF à la demande : la page du client n'a pas le chargement fait par l'appli du freelance
-const JSPDF_URL = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-const loadJsPDF = () => new Promise((resolve, reject) => {
-  if (window.jspdf) { resolve(window.jspdf); return; }
+// Charge jsPDF à la demande : la page du client n'a pas le chargement fait par l'appli du freelance.
+// Version 235 : jsPDF 4.2.1 (avant : 2.5.1, avec des failles de sécurité connues), servi par Freeley lui-même
+// (fichier public/vendor/jspdf-4.2.1.umd.min.js) au lieu du site cdnjs de Cloudflare : fabriquer un PDF n'envoie plus
+// l'adresse IP du visiteur à un site extérieur. L'ancienne adresse ne sert qu'en secours, si le fichier manquait
+// (même rendu des PDF, vérifié document par document). Un seul chargement, même si deux écrans le demandent ensemble.
+const JSPDF_URL = "/vendor/jspdf-4.2.1.umd.min.js";
+const JSPDF_FALLBACK_URL = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+const loadScriptForJsPDF = (src) => new Promise((resolve, reject) => {
   const s = document.createElement("script");
-  s.src = JSPDF_URL;
-  s.onload = () => (window.jspdf ? resolve(window.jspdf) : reject(new Error("jsPDF indisponible")));
-  s.onerror = () => reject(new Error("jsPDF indisponible"));
+  s.src = src;
+  s.onload = () => (window.jspdf && window.jspdf.jsPDF ? resolve(window.jspdf) : reject(new Error("jsPDF indisponible")));
+  s.onerror = () => { s.remove(); reject(new Error("jsPDF indisponible")); };
   document.head.appendChild(s);
 });
+let jsPDFLoading = null;
+const loadJsPDF = () => {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf);
+  if (!jsPDFLoading) {
+    jsPDFLoading = loadScriptForJsPDF(JSPDF_URL)
+      .catch(() => { console.warn("[Freeley] jsPDF : fichier de Freeley introuvable, adresse de secours"); return loadScriptForJsPDF(JSPDF_FALLBACK_URL); })
+      .catch((e) => { jsPDFLoading = null; throw e; });
+  }
+  return jsPDFLoading;
+};
 
 // PDF signé téléchargé par le client depuis sa page : toujours relu en base, avec les deux signatures.
 // Mêmes données que le PDF du freelance dans « Mes contrats ».
@@ -4660,13 +4689,8 @@ function AppInner() {
       }
     } catch(_) {}
 
-    if (window.jspdf) { setPDFReady(true); }
-    else {
-      const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-      s.onload = () => setPDFReady(true);
-      document.head.appendChild(s);
-    }
+    // Version 235 : même chargeur que partout ailleurs (fichier servi par Freeley)
+    loadJsPDF().then(() => setPDFReady(true)).catch(() => {});
     // Vérifie la session existante (ex: après redirect Google)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
