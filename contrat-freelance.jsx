@@ -1028,7 +1028,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "233";
+const APP_VERSION = "234";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -4322,7 +4322,7 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results","dashboard","cgu","drafts","mes-ndas","archives"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","dashboard","cgu","drafts","mes-ndas","archives","recettes"].includes(saved) ? saved : "app";
   });
   const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
@@ -5715,7 +5715,17 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         onNewContract={() => { goToScreen("app"); startFreshContract(); }}
         onOpenHistory={() => goToScreen("history")}
         onOpenContract={(entry) => { setHistoryView(entry); goToScreen("history"); }}
+        onOpenRecettes={() => goToScreen("recettes")}
       />
+    </Shell>
+  );
+
+  /* ── LIVRE DES RECETTES (version 234) ── */
+  if (screen === "recettes") return (
+    <Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <RecettesPage profile={profile} authUser={authUser} onBack={() => goToScreen("history")} />
     </Shell>
   );
 
@@ -5791,6 +5801,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
           });
         }}
         onGoToArchives={() => goToScreen("archives")}
+        onGoToRecettes={() => goToScreen("recettes")}
         stripeConnectAccountId={stripeConnectAccountId}
         stripeConnectReady={stripeConnectReady}
         onGoToProfile={() => goToScreen("profile")}
@@ -5849,13 +5860,10 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
             setHistory(hist);
           } catch(e) { console.error("Erreur restauration contrat:", e); alert("La restauration a échoué. Réessaie."); }
         }}
-        onMarkPaid={async (id) => {
-          try {
-            const { error } = await supabase.from("contracts").update({ payment_status: "paid" }).eq("id", id);
-            if (error) throw error;
-            const hist = await getHistory();
-            setHistory(hist);
-          } catch(e) { console.error("Erreur marquage facture libre payée:", e); alert("Le marquage a échoué. Réessaie."); }
+        onMarkPaid={async () => {
+          // Version 234 : le paiement est déjà enregistré (fenêtre « Paiement reçu ») ; on recharge la liste
+          const hist = await getHistory();
+          setHistory(hist);
         }}
       />
     </Shell>
@@ -7226,6 +7234,623 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
 };
 
+// ═══════════════════════════════════════════════════════════════════════
+// Version 234 — LIVRE DES RECETTES
+// Toutes les sommes reçues par le freelance, dans l'ordre des dates : date d'encaissement, client, numéro de facture,
+// nature, montant et moyen de paiement (table recettes, script SQL v234). Un paiement par carte (Stripe) s'y ajoute
+// tout seul (serveur) ; un virement, un chèque ou des espèces s'y ajoutent quand le freelance marque le paiement comme
+// reçu (il donne alors la date et le moyen). On peut aussi y ajouter une recette faite hors de Freeley, ou un
+// remboursement. Totaux par mois, par trimestre et par année ; export en tableau (CSV) et en PDF.
+// ═══════════════════════════════════════════════════════════════════════
+const RECETTE_METHODS = [
+  { key: "virement", label: "Virement" },
+  { key: "carte", label: "Carte bancaire" },
+  { key: "cheque", label: "Chèque" },
+  { key: "especes", label: "Espèces" },
+  { key: "autre", label: "Autre" },
+];
+const RECETTE_METHOD_LABEL = { virement: "Virement", carte: "Carte bancaire", cheque: "Chèque", especes: "Espèces", prelevement: "Prélèvement", autre: "Autre" };
+const RECETTE_METHOD_PHRASE = { virement: "par virement", carte: "par carte bancaire", cheque: "par chèque", especes: "en espèces", prelevement: "par prélèvement", autre: "par un autre moyen" };
+const recetteMethodLabel = (r) => `${RECETTE_METHOD_LABEL[r?.method] || "Autre"}${r?.source === "stripe" ? " (Stripe)" : ""}`;
+const MONTHS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+// « 12 octobre 2026 », « 1er mars 2026 » (date AAAA-MM-JJ)
+const isoDayLong = (iso) => { const [y, m, d] = String(iso || "").split("-").map(Number); return y && m && d ? `${d === 1 ? "1er" : d} ${MONTHS_FR[m - 1]} ${y}` : ""; };
+// Jour du téléphone ou de l'ordinateur (AAAA-MM-JJ) : date proposée, et date la plus tardive possible
+const localTodayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+// « 1 250,50 € » : toujours deux décimales, comme dans un livre de comptes
+const fmtCents = (cents) => `${(Number(cents || 0) / 100).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[  ]/g, " ")} €`;
+// Montant écrit par le freelance (« 1250 », « 1 250,50 », « 1250.5 ») en centimes ; null s'il est illisible
+const parseEurosToCents = (text) => {
+  const t = String(text ?? "").replace(/[\s  €]/g, "").replace(",", ".");
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(t)) return null;
+  const cents = Math.round(Number(t) * 100);
+  return cents > 0 ? cents : null;
+};
+const centsToInput = (cents) => { const v = Math.abs(Number(cents) || 0) / 100; return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(".", ","); };
+// Le script SQL v234 n'a pas encore été lancé : fonction ou table inconnue
+const isMissingDbFunction = (error) => !!error && (error.code === "PGRST202" || error.code === "42883" || /could not find the function/i.test(String(error.message || "")));
+const isMissingRecettesTable = (error) => !!error && (error.code === "PGRST205" || error.code === "42P01" || (/recettes/.test(String(error.message || "")) && /does not exist|schema cache/i.test(String(error.message || ""))));
+
+// Ce que le livre note pour un paiement d'un contrat (même libellé que la facture) et le montant que le client paie
+// (TTC si le freelance facture la TVA, comme les liens de paiement). kind : « acompte » (ou paiement comptant),
+// « solde », « avenant », « facture » (facture libre).
+const recetteInfoFor = (entry, kind, profile, avenant = null) => {
+  const form = entry?.form || {};
+  const title = String(entry?.missionTitle || form.missionTitle || "").trim();
+  const client = String(entry?.clientCompany || form.clientCompany || entry?.clientName || form.clientName || "").trim();
+  // Mêmes calculs que le bloc de paiement du contrat (DepositGuard)
+  const rawPrice = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) || 0 : 0;
+  const pct = form.acomptePourcentage != null && form.acomptePourcentage !== "" ? Number(form.acomptePourcentage) : null;
+  const isComptant = pct === 0 && rawPrice > 0;
+  const depositAmt = isComptant ? rawPrice : (pct ? Math.round(rawPrice * (pct / 100)) || 0 : 0);
+  const hasSolde = !isComptant && pct > 0 && pct < 100;
+  let label, amountHT, invoiceNumber;
+  if (kind === "solde") { label = "Solde"; amountHT = hasSolde ? Math.max(rawPrice - depositAmt, 0) : 0; invoiceNumber = entry?.soldeInvoiceNumber; }
+  else if (kind === "avenant") { label = `Avenant n°${avenant?.num}`; amountHT = Number(avenant?.ajustementMontant) || 0; invoiceNumber = avenant?.invoiceNumber; }
+  else if (kind === "facture") { label = "Facture"; amountHT = rawPrice; invoiceNumber = entry?.acompteInvoiceNumber || entry?.invoiceNumber; }
+  else { label = contractInvoiceSpec(form, "acompte").designation; amountHT = hasSolde ? depositAmt : rawPrice; invoiceNumber = entry?.acompteInvoiceNumber; }
+  return {
+    contractId: entry?.id || null,
+    kind,
+    avenantNum: kind === "avenant" ? Number(avenant?.num) : null,
+    label,
+    client,
+    nature: title ? `${label} — ${title}` : label,
+    invoiceNumber: invoiceNumber || null,
+    amount: withTva(amountHT, profile),
+  };
+};
+// Une ligne du livre est-elle celle de ce paiement ?
+const sameRecettePayment = (row, info) => !!row && row.contract_id === info.contractId && row.kind === info.kind
+  && (info.kind !== "avenant" || Number(row.avenant_num) === Number(info.avenantNum));
+// Les paiements marqués « payés » dans Freeley (premier paiement, solde, avenants, factures libres)
+const paidItemsOf = (history, profile) => {
+  const items = [];
+  for (const e of history || []) {
+    if (!e?.id) continue;
+    if (e.paymentStatus === "paid") items.push({ entry: e, info: recetteInfoFor(e, e.isStandaloneInvoice ? "facture" : "acompte", profile) });
+    if (!e.isStandaloneInvoice && e.soldeStatus === "paid") items.push({ entry: e, info: recetteInfoFor(e, "solde", profile) });
+    if (!e.isStandaloneInvoice) {
+      for (const av of Array.isArray(e.avenants) ? e.avenants : []) {
+        if (av && av.status === "signed" && Number(av.ajustementMontant) > 0 && av.paymentReceived) items.push({ entry: e, info: recetteInfoFor(e, "avenant", profile, av) });
+      }
+    }
+  }
+  return items.filter((x) => x.info.amount > 0);
+};
+
+// « Marquer comme reçu » : le statut du contrat et la ligne du livre sont enregistrés ensemble, par une fonction de la
+// base (une écriture directe du navigateur dans un contrat est refusée). Script SQL v234 pas encore lancé : statut
+// seul, comme avant. L'avenant, lui, est noté « payé » dans le contrat par l'application. Renvoie { ok, ledger }.
+async function savePaymentReceived(info, { receivedOn, method, amountCents, note }) {
+  try {
+    const { error } = await supabase.rpc("record_payment_received", {
+      p_contract_id: info.contractId, p_kind: info.kind, p_avenant_num: info.kind === "avenant" ? Number(info.avenantNum) : null,
+      p_received_on: receivedOn, p_amount_cents: amountCents, p_method: method,
+      p_client: info.client || "", p_nature: info.nature || "", p_invoice_number: info.invoiceNumber || null, p_note: note || null,
+    });
+    if (!error) return { ok: true, ledger: true };
+    if (!isMissingDbFunction(error)) { console.error("[livre des recettes] paiement non enregistré", error); return { ok: false }; }
+    if (info.kind === "avenant") return { ok: true, ledger: false };
+    const column = info.kind === "solde" ? "solde_status" : "payment_status";
+    const { error: e2 } = await supabase.from("contracts").update({ [column]: "paid" }).eq("id", info.contractId);
+    if (e2) { console.error("Erreur mise à jour statut paiement:", e2); return { ok: false }; }
+    return { ok: true, ledger: false };
+  } catch (e) { console.error("[livre des recettes] paiement non enregistré", e); return { ok: false }; }
+}
+// Statut « en attente » ou « en retard ». Un paiement qui était « payé » : sa ligne notée à la main est retirée du livre
+// (un paiement par carte y reste : l'argent a bien été reçu).
+async function savePaymentStatus(contractId, column, status, { wasPaid = false, kind = "acompte" } = {}) {
+  try {
+    const { error } = wasPaid
+      ? await supabase.rpc("cancel_payment_received", { p_contract_id: contractId, p_kind: kind, p_avenant_num: null, p_new_status: status })
+      : await supabase.rpc("set_payment_status", { p_contract_id: contractId, p_column: column, p_status: status });
+    if (!error) return { ok: true };
+    if (!isMissingDbFunction(error)) { console.error("Erreur mise à jour statut paiement:", error); return { ok: false }; }
+    const { error: e2 } = await supabase.from("contracts").update({ [column]: status }).eq("id", contractId);
+    if (e2) console.error("Erreur mise à jour statut paiement:", e2);
+    return { ok: !e2 };
+  } catch (e) { console.error("Erreur mise à jour statut paiement:", e); return { ok: false }; }
+}
+// Lignes du livre (toutes les années, dans l'ordre des dates). missing : script SQL v234 pas encore lancé.
+async function loadRecettes({ contractId = null } = {}) {
+  try {
+    let q = supabase.from("recettes").select("*");
+    if (contractId) q = q.eq("contract_id", contractId);
+    const { data, error } = await q.order("received_on", { ascending: true }).order("created_at", { ascending: true });
+    if (error) { const missing = isMissingRecettesTable(error); if (!missing) console.error("[livre des recettes] lecture impossible", error); return { rows: [], missing, error: !missing }; }
+    return { rows: Array.isArray(data) ? data : [], missing: false, error: false };
+  } catch (e) { console.error("[livre des recettes] lecture impossible", e); return { rows: [], missing: false, error: true }; }
+}
+const recettesOfYear = (rows, year) => (rows || []).filter((r) => String(r.received_on || "").slice(0, 4) === String(year));
+// Totaux d'une année : par mois (12), par trimestre (4), année, et remboursements
+const recettesTotals = (rows) => {
+  const months = Array(12).fill(0), quarters = Array(4).fill(0);
+  let total = 0, refunds = 0;
+  for (const r of rows) {
+    const m = Number(String(r.received_on).slice(5, 7)) - 1;
+    const c = Number(r.amount_cents) || 0;
+    if (m >= 0 && m < 12) { months[m] += c; quarters[Math.floor(m / 3)] += c; }
+    total += c;
+    if (c < 0) refunds += c;
+  }
+  return { months, quarters, total, refunds };
+};
+// Même paiement noté deux fois (carte et à la main, par exemple) : on prévient
+const duplicateRecetteKeys = (rows) => {
+  const seen = {}, dup = new Set();
+  for (const r of rows || []) {
+    if (!r.contract_id || String(r.source_key || "").startsWith("libre:") || !["acompte", "solde", "avenant", "facture"].includes(r.kind)) continue;
+    const k = `${r.contract_id}|${r.kind}|${r.kind === "avenant" ? Number(r.avenant_num) : ""}`;
+    if (seen[k]) dup.add(k); else seen[k] = true;
+  }
+  return { has: (r) => dup.has(`${r.contract_id}|${r.kind}|${r.kind === "avenant" ? Number(r.avenant_num) : ""}`), size: dup.size };
+};
+
+// Tableau (CSV) : point-virgule, virgule décimale, accents lisibles dans Excel
+const recettesCsv = (rows) => {
+  const text = (v) => {
+    let s = String(v ?? "").replace(/\r?\n/g, " ");
+    if (/^[=+\-@\t]/.test(s)) s = "'" + s; // jamais lu comme une formule par le tableur
+    return /[";]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const head = ["Date d'encaissement", "Client", "N° de facture", "Nature", "Montant (€)", "Mode de règlement", "Note"].map(text).join(";");
+  const lines = (rows || []).map((r) => [
+    text(isoDayFr(r.received_on)), text(r.client), text(r.invoice_number || ""), text(r.nature),
+    ((Number(r.amount_cents) || 0) / 100).toFixed(2).replace(".", ","), text(recetteMethodLabel(r)), text(r.note || ""),
+  ].join(";"));
+  return "﻿" + [head, ...lines].join("\r\n") + "\r\n";
+};
+const downloadBlobFile = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+};
+
+// PDF du livre d'une année. returnDoc : renvoie le document (fichier ZIP « Tout télécharger »)
+function renderRecettesPDF({ rows, year, profile, returnDoc = false }) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  doc.setProperties({ title: `Livre des recettes ${year}`, creator: `Freeley ${APP_VERSION}` });
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  const ML = 14, MR = W - 14;
+  const legal = profile?.legalStatus || "";
+  const person = [profile?.firstName, profile?.lastName].filter(Boolean).join(" ");
+  const who = !isEntrepreneurIndividuel(legal) && String(profile?.companyName || "").trim() ? String(profile.companyName).trim() : withEI(person, legal);
+  const cols = [
+    { key: "date", label: "Date", x: ML, w: 19 },
+    { key: "client", label: "Client", x: ML + 20, w: 38 },
+    { key: "invoice", label: "N° facture", x: ML + 59, w: 25 },
+    { key: "nature", label: "Nature", x: ML + 85, w: 49 },
+    { key: "mode", label: "Mode de règlement", x: ML + 135, w: 24 },
+  ];
+  const fit = (s, w) => {
+    const lines = doc.splitTextToSize(String(s || "—"), w);
+    return lines.length > 2 ? [lines[0], `${String(lines[1]).replace(/\s*\S?$/, "")}…`] : lines;
+  };
+  let y = 18;
+  const header = (first) => {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(first ? 16 : 11); doc.setTextColor(27, 46, 75);
+    doc.text(first ? `Livre des recettes — ${year}` : `Livre des recettes — ${year} (suite)`, ML, y);
+    y += first ? 7 : 6;
+    if (first) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
+      const idLine = [who, profile?.siret ? `SIRET ${profile.siret}` : ""].filter(Boolean).join(" · ");
+      if (idLine) { doc.text(idLine, ML, y); y += 4.6; }
+      if (String(profile?.address || "").trim()) { doc.text(doc.splitTextToSize(String(profile.address).trim(), MR - ML)[0], ML, y); y += 4.6; }
+      doc.setFontSize(8.5); doc.setTextColor(110, 110, 110);
+      doc.text("Sommes reçues, dans l'ordre des dates. Montants payés par les clients, avant les frais de paiement en ligne.", ML, y);
+      y += 7;
+    }
+    doc.setFillColor(237, 233, 223); doc.rect(ML, y - 4.2, MR - ML, 6.2, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(27, 46, 75);
+    cols.forEach((c) => doc.text(c.label, c.x + 1, y));
+    doc.text("Montant", MR - 1, y, { align: "right" });
+    y += 5;
+    doc.setFont("helvetica", "normal"); doc.setTextColor(30, 30, 30);
+  };
+  const ensure = (h) => { if (y + h > H - 16) { doc.addPage(); y = 18; header(false); } };
+  header(true);
+  const sorted = (rows || []).slice().sort((a, b) => (a.received_on < b.received_on ? -1 : a.received_on > b.received_on ? 1 : String(a.created_at || "") < String(b.created_at || "") ? -1 : 1));
+  if (!sorted.length) {
+    doc.setFontSize(10); doc.text("Aucune recette notée pour cette année.", ML, y + 4);
+  }
+  let month = null, monthTotal = 0;
+  const closeMonth = () => {
+    if (month === null) return;
+    ensure(7);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(27, 46, 75);
+    doc.text(`Total ${MONTHS_FR[month]} ${year}`, cols[4].x + cols[4].w, y, { align: "right" });
+    doc.text(fmtCents(monthTotal), MR - 1, y, { align: "right" });
+    doc.setDrawColor(200, 200, 200); doc.line(ML, y + 1.8, MR, y + 1.8);
+    y += 6.5;
+    doc.setFont("helvetica", "normal"); doc.setTextColor(30, 30, 30);
+  };
+  for (const r of sorted) {
+    const m = Number(String(r.received_on).slice(5, 7)) - 1;
+    if (m !== month) { closeMonth(); month = m; monthTotal = 0; }
+    doc.setFontSize(8.5);
+    const cells = {
+      date: [isoDayFr(r.received_on)], client: fit(r.client, cols[1].w - 2), invoice: fit(r.invoice_number || "—", cols[2].w - 2),
+      nature: fit(r.nature, cols[3].w - 2), mode: fit(recetteMethodLabel(r), cols[4].w - 2),
+    };
+    const nLines = Math.max(...Object.values(cells).map((l) => l.length));
+    const h = nLines * 3.7 + 1.6;
+    ensure(h);
+    cols.forEach((c) => doc.text(cells[c.key], c.x + 1, y));
+    doc.text(fmtCents(r.amount_cents), MR - 1, y, { align: "right" });
+    y += h;
+    monthTotal += Number(r.amount_cents) || 0;
+  }
+  closeMonth();
+  if (sorted.length) {
+    const t = recettesTotals(sorted);
+    ensure(24);
+    y += 2;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(27, 46, 75);
+    doc.text(`Total ${year}`, ML, y);
+    doc.text(fmtCents(t.total), MR - 1, y, { align: "right" });
+    y += 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+    doc.text(t.quarters.map((q, i) => `T${i + 1} : ${fmtCents(q)}`).join("    "), ML, y);
+    y += 5;
+    if (t.refunds < 0) { doc.text(`Dont remboursements : ${fmtCents(t.refunds)}`, ML, y); y += 5; }
+  }
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(130, 130, 130);
+    doc.text(`Livre des recettes ${year}${who ? " — " + who : ""} · édité avec Freeley le ${isoDayFr(parisTodayIso())}`, ML, H - 8);
+    doc.text(`Page ${i} / ${pages}`, MR, H - 8, { align: "right" });
+  }
+  if (returnDoc) return doc;
+  doc.save(`Livre_des_recettes_${year}.pdf`);
+}
+
+// Sous « Suivi du paiement » : ce que le livre des recettes a noté pour ce contrat
+function RecetteNoteLines({ entry, rows, profile, onAdd }) {
+  if (!entry || !Array.isArray(rows)) return null;
+  const items = paidItemsOf([entry], profile).filter((x) => x.info.kind !== "avenant");
+  if (!items.length) return null;
+  return (
+    <div data-testid="recette-notes" style={{ marginTop:10, display:"flex", flexDirection:"column", gap:6 }}>
+      {items.map(({ info }) => {
+        const row = rows.find((r) => sameRecettePayment(r, info));
+        return row ? (
+          <div key={info.kind} data-testid={`recette-noted-${info.kind}`} style={{ fontFamily:T.body, fontSize:11.5, color:"#166534", lineHeight:1.5 }}>
+            📒 {info.label} : reçu le {isoDayLong(row.received_on)}, {RECETTE_METHOD_PHRASE[row.method] || "par un autre moyen"}{row.source === "stripe" ? " (Stripe)" : ""}. C'est noté dans ton livre des recettes.
+          </div>
+        ) : (
+          <div key={info.kind} data-testid={`recette-missing-${info.kind}`} style={{ fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.5 }}>
+            📒 {info.label} : la date où tu l'as reçu n'est pas encore notée dans ton livre des recettes.{" "}
+            <button data-testid={`recette-add-${info.kind}`} onClick={() => onAdd(info.kind)} style={{ background:"none", border:"none", padding:0, color:"#92400E", fontFamily:T.body, fontSize:11.5, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Ajouter la date</button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Fenêtre « Paiement reçu » (date d'encaissement, moyen, montant, note). Mode « libre » ou « remboursement » : une
+// recette faite hors de Freeley, ou une somme rendue à un client (client et nature à écrire).
+function RecetteDialog({ mode = "paiement", info = {}, initial = null, dateRequired = false, saving = false, error = "", onCancel, onConfirm }) {
+  useHideFloatingBubbles();
+  const today = localTodayIso();
+  const libre = mode !== "paiement";
+  const refund = mode === "remboursement";
+  const [date, setDate] = useState(initial?.receivedOn || (dateRequired ? "" : today));
+  const [method, setMethod] = useState(initial?.method && initial.method !== "prelevement" ? initial.method : "virement");
+  const [amount, setAmount] = useState(initial?.amountCents ? centsToInput(initial.amountCents) : (Number(info.amount) > 0 ? centsToInput(Math.round(Number(info.amount) * 100)) : ""));
+  const [client, setClient] = useState(initial?.client ?? info.client ?? "");
+  const [nature, setNature] = useState(initial?.nature ?? info.nature ?? "");
+  const [invoice, setInvoice] = useState(initial?.invoiceNumber ?? info.invoiceNumber ?? "");
+  const [note, setNote] = useState(initial?.note || "");
+  const [localError, setLocalError] = useState("");
+  const submit = () => {
+    if (saving) return;
+    if (!isIsoDay(date)) { setLocalError(refund ? "Choisis la date du remboursement." : "Choisis la date où tu as reçu l'argent."); return; }
+    if (date > today) { setLocalError("La date ne peut pas être dans le futur."); return; }
+    if (date < "2000-01-01") { setLocalError("Cette date est trop ancienne."); return; }
+    // Dans l'ordre des champs de la fenêtre
+    if (libre && !nature.trim()) { setLocalError(refund ? "Écris ce que tu rembourses, par exemple « Remboursement de l'acompte »." : "Écris la nature de la recette, par exemple « Cours particulier »."); return; }
+    const cents = parseEurosToCents(amount);
+    if (!cents) { setLocalError("Écris le montant, par exemple 1250 ou 1250,50."); return; }
+    setLocalError("");
+    onConfirm({ receivedOn: date, method, amountCents: cents, note: note.trim(), client: client.trim(), nature: nature.trim(), invoiceNumber: invoice.trim() });
+  };
+  const label = { fontFamily:T.body, fontSize:11, fontWeight:700, color:C.textM, letterSpacing:"0.04em", marginBottom:5, display:"block" };
+  const input = { width:"100%", boxSizing:"border-box", padding:"10px 12px", border:`1.5px solid ${C.border}`, borderRadius:9, fontFamily:T.body, fontSize:14, color:C.text, background:C.white, outline:"none" };
+  const shownError = localError || error;
+  return createPortal(
+    <div
+      onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget && !saving) onCancel(); }}
+      style={{ position:"fixed", inset:0, zIndex:10050, background:"rgba(10,20,40,0.6)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+    >
+      <div role="dialog" aria-modal="true" data-testid="recette-dialog" style={{ background:C.white, borderRadius:16, width:"100%", maxWidth:440, maxHeight:"90vh", overflowY:"auto", padding:"20px 20px 18px", boxShadow:"0 24px 60px rgba(0,0,0,0.3)", fontFamily:T.body }}>
+        <div style={{ fontSize:16, fontWeight:800, color:C.navy, marginBottom:6, lineHeight:1.4 }}>
+          {refund ? "↩️ Ajouter un remboursement" : libre ? (initial ? "✏️ Modifier la recette" : "➕ Ajouter une recette") : (initial ? "✏️ Modifier le paiement reçu" : "✓ Paiement reçu")}
+        </div>
+        {!libre && (
+          <div data-testid="recette-dialog-what" style={{ fontSize:12.5, color:C.textM, lineHeight:1.5, marginBottom:14 }}>
+            {info.nature}{info.client ? ` · ${info.client}` : ""}{info.invoiceNumber ? ` · facture ${info.invoiceNumber}` : ""}
+          </div>
+        )}
+        {libre && (
+          <div style={{ fontSize:12.5, color:C.textM, lineHeight:1.5, marginBottom:14 }}>
+            {refund ? "Une somme que tu as rendue à un client. Elle est retirée de tes totaux." : "Une somme reçue en dehors de Freeley, sans contrat ni facture faits ici."}
+          </div>
+        )}
+        <div style={{ marginBottom:12 }}>
+          <label style={label} htmlFor="recette-date">{refund ? "DATE DU REMBOURSEMENT" : "DATE D'ENCAISSEMENT"}</label>
+          <input id="recette-date" data-testid="recette-date" type="date" value={date} max={today} min="2000-01-01" onChange={(e) => setDate(e.target.value)} style={input} />
+          {!refund && <div style={{ fontSize:11.5, color:C.textL, marginTop:5, lineHeight:1.5 }}>{dateRequired ? "Regarde ton relevé bancaire : c'est le jour où l'argent est arrivé." : "Le jour où l'argent est arrivé sur ton compte, ou le jour où tu as reçu le chèque ou les espèces."}</div>}
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <span style={label}>{refund ? "RENDU PAR" : "MOYEN DE PAIEMENT"}</span>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+            {RECETTE_METHODS.map((m) => (
+              <button key={m.key} type="button" data-testid={`recette-method-${m.key}`} aria-pressed={method === m.key} onClick={() => setMethod(m.key)}
+                style={{ padding:"8px 12px", borderRadius:20, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight: method === m.key ? 700 : 500,
+                  background: method === m.key ? C.navy : C.white, color: method === m.key ? "#fff" : C.textM, border:`1.5px solid ${method === m.key ? C.navy : C.border}` }}>{m.label}</button>
+            ))}
+          </div>
+        </div>
+        {libre && (
+          <>
+            <div style={{ marginBottom:12 }}>
+              <label style={label} htmlFor="recette-client">CLIENT</label>
+              <input id="recette-client" data-testid="recette-client" value={client} maxLength={200} onChange={(e) => setClient(e.target.value)} placeholder="Nom du client" style={input} />
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <label style={label} htmlFor="recette-nature">{refund ? "CE QUE TU REMBOURSES" : "NATURE"}</label>
+              <input id="recette-nature" data-testid="recette-nature" value={nature} maxLength={300} onChange={(e) => setNature(e.target.value)} placeholder={refund ? "Par exemple : remboursement de l'acompte" : "Par exemple : cours particulier"} style={input} />
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <label style={label} htmlFor="recette-invoice">N° DE FACTURE (FACULTATIF)</label>
+              <input id="recette-invoice" data-testid="recette-invoice" value={invoice} maxLength={40} onChange={(e) => setInvoice(e.target.value)} style={input} />
+            </div>
+          </>
+        )}
+        <div style={{ marginBottom:12 }}>
+          <label style={label} htmlFor="recette-amount">{refund ? "MONTANT REMBOURSÉ (€)" : "MONTANT REÇU (€)"}</label>
+          <input id="recette-amount" data-testid="recette-amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" style={input} />
+          {!libre && Number(info.amount) > 0 && <div style={{ fontSize:11.5, color:C.textL, marginTop:5 }}>Montant demandé au client : {fmtCents(Math.round(Number(info.amount) * 100))}</div>}
+        </div>
+        <div style={{ marginBottom:14 }}>
+          <label style={label} htmlFor="recette-note">NOTE (FACULTATIF)</label>
+          <input id="recette-note" data-testid="recette-note" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Par exemple : chèque n° 1234" style={input} />
+        </div>
+        {shownError && <div data-testid="recette-error" style={{ fontSize:12, color:"#B91C1C", marginBottom:10, lineHeight:1.5 }}>{shownError}</div>}
+        <div style={{ display:"flex", gap:10 }}>
+          <button onClick={onCancel} disabled={saving} style={{ flex:1, padding:"11px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.textM }}>Annuler</button>
+          <button data-testid="recette-save" onClick={submit} disabled={saving} style={{ flex:1, padding:"11px 12px", background: saving ? "#E5E7EB" : "#166534", border:"none", borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color: saving ? C.textL : "#fff" }}>{saving ? "Enregistrement…" : "Enregistrer"}</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// Page « Livre des recettes »
+function RecettesPage({ profile, authUser, onBack }) {
+  const [rows, setRows] = useState(null); // null : lecture en cours
+  const [missing, setMissing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [year, setYear] = useState(() => String(new Date().getFullYear()));
+  const [dialog, setDialog] = useState(null); // { mode, info, initial, rowId, dateRequired }
+  const [saving, setSaving] = useState(false);
+  const [dialogError, setDialogError] = useState("");
+  const [notice, setNotice] = useState("");
+  const reload = async () => {
+    const [r, h] = await Promise.all([loadRecettes(), getHistory()]);
+    setRows(r.rows); setMissing(r.missing); setLoadError(r.error); setHistory(h);
+  };
+  useEffect(() => { if (authUser?.id) reload(); else setRows([]); }, [authUser?.id]);
+
+  const all = rows || [];
+  const years = Array.from(new Set([String(new Date().getFullYear()), ...all.map((r) => String(r.received_on).slice(0, 4))])).sort().reverse();
+  const yearRows = recettesOfYear(all, year);
+  const totals = recettesTotals(yearRows);
+  const dups = duplicateRecetteKeys(all);
+  const toComplete = rows && !missing ? paidItemsOf(history, profile).filter((x) => !all.some((r) => sameRecettePayment(r, x.info))) : [];
+  const currentYear = String(new Date().getFullYear());
+  const lastMonth = year === currentYear ? new Date().getMonth() : 11;
+
+  const openPayment = (info, extra = {}) => { setDialogError(""); setDialog({ mode: "paiement", info, ...extra }); };
+  const onConfirm = async (v) => {
+    if (!dialog || saving) return;
+    setSaving(true); setDialogError("");
+    let okSave = false;
+    if (dialog.mode === "paiement") {
+      okSave = (await savePaymentReceived(dialog.info, v)).ok;
+    } else {
+      try {
+        const { error } = await supabase.rpc("save_recette_libre", {
+          p_id: dialog.rowId || null, p_kind: dialog.mode === "remboursement" ? "remboursement" : "autre", p_received_on: v.receivedOn,
+          p_amount_cents: v.amountCents, p_method: v.method, p_client: v.client || "", p_nature: v.nature || "",
+          p_invoice_number: v.invoiceNumber || null, p_note: v.note || null, p_contract_id: null,
+        });
+        okSave = !error;
+        if (error) console.error("[livre des recettes] recette non enregistrée", error);
+      } catch (e) { okSave = false; }
+    }
+    setSaving(false);
+    if (!okSave) { setDialogError("La ligne n'a pas pu être enregistrée. Vérifie ta connexion, puis réessaie."); return; }
+    setDialog(null);
+    const y = String(v.receivedOn).slice(0, 4);
+    if (y !== year) setYear(y);
+    await reload();
+  };
+  const removeRow = async (r) => {
+    const contractLine = !String(r.source_key || "").startsWith("libre:");
+    const msg = contractLine
+      ? "Retirer cette ligne de ton livre des recettes ?\n\nLe paiement restera marqué « payé » dans le contrat. Sa date te sera redemandée dans « À compléter »."
+      : "Supprimer cette ligne de ton livre des recettes ?";
+    if (!window.confirm(msg)) return;
+    try {
+      const { error } = await supabase.rpc("delete_recette", { p_id: r.id });
+      if (error) throw error;
+      setNotice("Ligne supprimée.");
+    } catch (e) { console.error("[livre des recettes] suppression impossible", e); setNotice("La ligne n'a pas pu être supprimée. Réessaie."); }
+    await reload();
+  };
+  const editRow = (r) => {
+    setDialogError("");
+    const initial = { receivedOn: r.received_on, method: r.method, amountCents: Math.abs(Number(r.amount_cents) || 0), note: r.note || "", client: r.client || "", nature: r.nature || "", invoiceNumber: r.invoice_number || "" };
+    if (String(r.source_key || "").startsWith("libre:")) setDialog({ mode: r.kind === "remboursement" ? "remboursement" : "libre", info: {}, initial, rowId: r.id });
+    else setDialog({ mode: "paiement", info: { contractId: r.contract_id, kind: r.kind, avenantNum: r.avenant_num, client: r.client, nature: r.nature, invoiceNumber: r.invoice_number, amount: 0 }, initial });
+  };
+  const exportCsv = () => {
+    downloadBlobFile(new Blob([recettesCsv(yearRows)], { type: "text/csv;charset=utf-8" }), `Livre_des_recettes_${year}.csv`);
+  };
+  const exportPdf = async () => {
+    try { await loadJsPDF(); renderRecettesPDF({ rows: yearRows, year, profile }); }
+    catch (e) { console.error("[livre des recettes] PDF", e); alert("Le PDF n'a pas pu être créé. Vérifie ta connexion, puis réessaie."); }
+  };
+
+  const card = { background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"18px 18px", marginBottom:16, boxShadow:"0 2px 12px #1B2E4B06" };
+  const smallBtn = { padding:"9px 14px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:9, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:C.navy };
+  return (
+    <div data-testid="recettes-page" style={{ maxWidth:860, margin:"0 auto", padding:"24px 16px 80px" }}>
+      <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Mes contrats</button>
+      <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:10 }}>LIVRE DES RECETTES</div>
+      <h1 style={{ fontFamily:T.display, fontSize:30, color:C.navy, fontWeight:600, lineHeight:1.2, marginBottom:8 }}>Livre des recettes</h1>
+      <p style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.65, marginBottom:20 }}>
+        Toutes les sommes que tu as reçues, dans l'ordre des dates. Un paiement par carte s'ajoute tout seul. Un virement, un chèque ou des espèces s'ajoutent quand tu marques le paiement comme reçu dans ton contrat.
+      </p>
+
+      {!authUser?.id ? (
+        <div style={card}><div style={{ fontFamily:T.body, fontSize:13, color:C.textM }}>Connecte-toi pour voir ton livre des recettes.</div></div>
+      ) : rows === null ? (
+        <div style={card}><div style={{ fontFamily:T.body, fontSize:13, color:C.textM }}>Chargement…</div></div>
+      ) : missing ? (
+        <div data-testid="recettes-missing" style={{ ...card, background:"#FFFBEB", borderColor:"#FDE68A" }}>
+          <div style={{ fontFamily:T.body, fontSize:13, color:"#92400E", lineHeight:1.6 }}>Le livre des recettes n'est pas encore disponible. Réessaie un peu plus tard.</div>
+        </div>
+      ) : (
+        <>
+          {loadError && <div style={{ ...card, background:"#FEF2F2", borderColor:"#FECACA", fontFamily:T.body, fontSize:13, color:"#991B1B" }}>Ton livre des recettes n'a pas pu être lu. Vérifie ta connexion, puis recharge la page.</div>}
+          {/* Année */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:14 }}>
+            <span style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, fontWeight:700 }}>Année :</span>
+            {years.map((y) => (
+              <button key={y} data-testid={`recettes-year-${y}`} aria-pressed={y === year} onClick={() => setYear(y)} style={{ padding:"7px 14px", borderRadius:20, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight: y === year ? 700 : 500, background: y === year ? C.navy : C.white, color: y === year ? "#fff" : C.textM, border:`1.5px solid ${y === year ? C.navy : C.border}` }}>{y}</button>
+            ))}
+          </div>
+
+          {/* Totaux */}
+          <div data-testid="recettes-totals" style={card}>
+            <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:4 }}>Total reçu en {year}</div>
+            <div data-testid="recettes-total" style={{ fontFamily:T.display, fontSize:30, color:C.navy, fontWeight:700, marginBottom:4 }}>{fmtCents(totals.total)}</div>
+            {totals.refunds < 0 && <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:4 }}>Remboursements déjà retirés : {fmtCents(totals.refunds)}</div>}
+            <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:14 }}>Montants payés par tes clients, avant les frais de Stripe.</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))", gap:8, marginBottom:14 }}>
+              {totals.quarters.map((q, i) => (
+                <div key={i} data-testid={`recettes-q${i + 1}`} style={{ background:C.cream, borderRadius:10, padding:"10px 12px" }}>
+                  <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:700 }}>{i + 1}{i === 0 ? "er" : "e"} trimestre</div>
+                  <div style={{ fontFamily:T.body, fontSize:14, color:C.navy, fontWeight:700, marginTop:2 }}>{fmtCents(q)}</div>
+                </div>
+              ))}
+            </div>
+            <details>
+              <summary style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:700, cursor:"pointer" }}>Voir le total de chaque mois</summary>
+              <div style={{ marginTop:10, display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(170px, 1fr))", gap:"4px 18px" }}>
+                {totals.months.map((c, i) => i <= lastMonth && (
+                  <div key={i} data-testid={`recettes-m${i + 1}`} style={{ display:"flex", justifyContent:"space-between", fontFamily:T.body, fontSize:12.5, color:C.text, padding:"4px 0", borderBottom:`1px solid ${C.borderL || C.border}` }}>
+                    <span style={{ textTransform:"capitalize" }}>{MONTHS_FR[i]}</span><span style={{ fontWeight:700 }}>{fmtCents(c)}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+
+          {/* À compléter : payés, mais sans date d'encaissement */}
+          {toComplete.length > 0 && (
+            <div data-testid="recettes-to-complete" style={{ ...card, background:"#FFFBEB", borderColor:"#FDE68A" }}>
+              <div style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#92400E", marginBottom:6 }}>À compléter ({toComplete.length})</div>
+              <div style={{ fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6, marginBottom:10 }}>
+                {toComplete.length > 1 ? "Ces paiements sont marqués « payés », mais la date où tu les as reçus n'est pas notée." : "Ce paiement est marqué « payé », mais la date où tu l'as reçu n'est pas notée."} Ajoute-la pour que ton livre soit complet.
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {toComplete.map(({ info }) => (
+                  <div key={`${info.contractId}|${info.kind}|${info.avenantNum ?? ""}`} data-testid="recettes-to-complete-item" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap", background:"#fff", border:"1px solid #FDE68A", borderRadius:9, padding:"9px 12px" }}>
+                    <div style={{ fontFamily:T.body, fontSize:12.5, color:C.text, minWidth:0 }}>
+                      <div style={{ fontWeight:700 }}>{info.nature}</div>
+                      <div style={{ color:C.textM }}>{[info.client, info.invoiceNumber ? `facture ${info.invoiceNumber}` : "", fmtCents(Math.round(info.amount * 100))].filter(Boolean).join(" · ")}</div>
+                    </div>
+                    <button data-testid="recettes-complete-btn" onClick={() => openPayment(info, { dateRequired: true })} style={{ ...smallBtn, borderColor:"#F59E0B", color:"#92400E" }}>Ajouter la date</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14 }}>
+            <button data-testid="recettes-add" onClick={() => { setDialogError(""); setDialog({ mode: "libre", info: {} }); }} style={smallBtn}>➕ Ajouter une recette</button>
+            <button data-testid="recettes-add-refund" onClick={() => { setDialogError(""); setDialog({ mode: "remboursement", info: {} }); }} style={smallBtn}>↩️ Ajouter un remboursement</button>
+            <button data-testid="recettes-csv" onClick={exportCsv} style={smallBtn}>⬇ Tableau {year} (CSV)</button>
+            <button data-testid="recettes-pdf" onClick={exportPdf} style={smallBtn}>⬇ PDF {year}</button>
+          </div>
+          {notice && <div data-testid="recettes-notice" style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:10 }}>{notice}</div>}
+          {dups.size > 0 && (
+            <div data-testid="recettes-duplicates" style={{ ...card, background:"#FEF2F2", borderColor:"#FECACA", fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
+              ⚠️ Un même paiement est noté deux fois (repère « noté deux fois » ci-dessous). Vérifie que ton client n'a pas payé deux fois. Sinon, supprime la ligne en trop.
+            </div>
+          )}
+
+          {/* Les lignes de l'année */}
+          <div data-testid="recettes-list" style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {yearRows.length === 0 ? (
+              <div style={{ ...card, textAlign:"center", fontFamily:T.body, fontSize:13, color:C.textM }}>Aucune somme notée en {year} pour l'instant.</div>
+            ) : yearRows.map((r) => {
+              const libreRow = String(r.source_key || "").startsWith("libre:");
+              const manual = r.source === "manuel";
+              return (
+                <div key={r.id} data-testid="recette-row" style={{ background:C.white, border:`1px solid ${dups.has(r) ? "#FCA5A5" : C.border}`, borderRadius:12, padding:"12px 14px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"flex-start" }}>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, fontWeight:700 }}>{isoDayFr(r.received_on)} · {recetteMethodLabel(r)}</div>
+                      <div style={{ fontFamily:T.body, fontSize:13.5, color:C.navy, fontWeight:700, marginTop:2, wordBreak:"break-word" }}>{r.nature || (r.kind === "remboursement" ? "Remboursement" : "Recette")}</div>
+                      <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginTop:2, wordBreak:"break-word" }}>{[r.client, r.invoice_number ? `facture ${r.invoice_number}` : ""].filter(Boolean).join(" · ") || "—"}</div>
+                      {r.note && <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, marginTop:2, wordBreak:"break-word" }}>{r.note}</div>}
+                      {dups.has(r) && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#B91C1C", fontWeight:700, marginTop:3 }}>Noté deux fois</div>}
+                    </div>
+                    <div data-testid="recette-amount-cell" style={{ fontFamily:T.body, fontSize:15, fontWeight:800, color: Number(r.amount_cents) < 0 ? "#B91C1C" : "#166534", whiteSpace:"nowrap" }}>{fmtCents(r.amount_cents)}</div>
+                  </div>
+                  <div style={{ display:"flex", gap:14, marginTop:8 }}>
+                    {manual ? (
+                      <>
+                        <button data-testid="recette-edit" onClick={() => editRow(r)} style={{ background:"none", border:"none", padding:0, color:C.navy, fontFamily:T.body, fontSize:12, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Modifier</button>
+                        <button data-testid="recette-delete" onClick={() => removeRow(r)} style={{ background:"none", border:"none", padding:0, color:"#B91C1C", fontFamily:T.body, fontSize:12, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>{libreRow ? "Supprimer" : "Retirer du livre"}</button>
+                      </>
+                    ) : (
+                      <span style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>Noté tout seul par Stripe</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.6, marginTop:18 }}>
+            Garde ce livre avec tes factures. « Tout télécharger », dans ton profil, met aussi ton livre des recettes dans le fichier ZIP.
+          </p>
+        </>
+      )}
+      {dialog && (
+        <RecetteDialog mode={dialog.mode} info={dialog.info || {}} initial={dialog.initial || null} dateRequired={!!dialog.dateRequired}
+          saving={saving} error={dialogError} onCancel={() => setDialog(null)} onConfirm={onConfirm} />
+      )}
+    </div>
+  );
+}
+
 // ── Version 233 : tout télécharger d'un coup ──
 // Un seul fichier ZIP avec tous les documents du freelance : contrats, avenants, factures déjà émises et NDA, plus un
 // petit mode d'emploi. Rien n'est créé ni modifié : seules les factures qui ont déjà un numéro sont reprises, avec
@@ -7343,6 +7968,14 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
       }
     }
   }
+  // Version 234 : livre des recettes, une année par fichier (tableau CSV et PDF)
+  const ledger = await loadRecettes();
+  const ledgerYears = Array.from(new Set(ledger.rows.map((r) => String(r.received_on || "").slice(0, 4)).filter((y) => /^\d{4}$/.test(y)))).sort();
+  for (const y of ledgerYears) {
+    const rowsY = recettesOfYear(ledger.rows, y);
+    tasks.push({ name: `Livre des recettes/Livre des recettes ${y}.csv`, make: () => new TextEncoder().encode(recettesCsv(rowsY)) });
+    tasks.push({ name: `Livre des recettes/Livre des recettes ${y}.pdf`, make: () => renderRecettesPDF({ rows: rowsY, year: y, profile, returnDoc: true }) });
+  }
   for (const n of ndas) {
     if (!String(n.content || "").trim()) continue;
     const day = n.created_at ? String(n.created_at).slice(0, 10) : "";
@@ -7356,7 +7989,7 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
     try {
       const doc = t.make();
       if (!doc) throw new Error("document vide");
-      files.push({ name: uniqueName(t.name), data: new Uint8Array(doc.output("arraybuffer")) });
+      files.push({ name: uniqueName(t.name), data: doc instanceof Uint8Array ? doc : new Uint8Array(doc.output("arraybuffer")) });
     } catch (e) { console.error("Document non ajouté au fichier ZIP :", t.name, e); failed.push(t.name); }
     done++;
     if (onProgress) onProgress(done, tasks.length);
@@ -7370,6 +8003,7 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
     "Avenants : les avenants de tes contrats.",
     "Factures : les factures déjà émises, avec leur numéro et leur date d'émission.",
     "NDA : tes accords de confidentialité.",
+    ...(ledgerYears.length ? ["Livre des recettes : les sommes que tu as reçues, année par année (tableau et PDF)."] : []),
     "",
     "Garde ces documents en lieu sûr. La loi t'oblige à conserver tes factures pendant 10 ans.",
     ...(failed.length ? ["", "Documents qui n'ont pas pu être ajoutés (réessaie plus tard) :", ...failed] : []),
@@ -13706,7 +14340,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 }
 
 /* ══════════════════════════════════════════ HISTORY PAGE ══ */
-function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHistory, onOpenContract }) {
+function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHistory, onOpenContract, onOpenRecettes }) {
   // Un contrat annulé par la rétractation du client ne compte ni dans le chiffre d'affaires, ni dans les
   // missions en cours, ni dans les meilleurs clients. Il reste visible dans l'activité récente.
   const history = (allHistory || []).filter(c => !c.retractationExercisedAt);
@@ -13854,7 +14488,11 @@ function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHisto
     <div style={{ maxWidth:960, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
       <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Tableau de bord</div>
-      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:28 }}>Vue d'ensemble de ton activité freelance.</div>
+      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom: onOpenRecettes ? 12 : 28 }}>Vue d'ensemble de ton activité freelance.</div>
+      {/* Version 234 : les sommes vraiment reçues, avec leur date (déclarations, comptabilité) */}
+      {onOpenRecettes && (
+        <button data-testid="dashboard-recettes" onClick={onOpenRecettes} style={{ marginBottom:24, padding:"10px 16px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy }}>📒 Livre des recettes →</button>
+      )}
 
       {total === 0 ? (
         <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #1B2E4B06" }}>
@@ -14004,6 +14642,19 @@ function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHisto
 /* ── ArchivesPage : retrouver un contrat supprimé (et ses factures) par nom de client ── */
 function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPaid, onDownloadPDF }) {
   const [search, setSearch] = useState("");
+  // Version 234 : facture libre payée : date d'encaissement et moyen de paiement (livre des recettes)
+  const [receiptFor, setReceiptFor] = useState(null);
+  const [receiptSaving, setReceiptSaving] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
+  const confirmReceipt = async (values) => {
+    if (!receiptFor || receiptSaving) return;
+    setReceiptSaving(true); setReceiptError("");
+    const r = await savePaymentReceived(receiptFor, values);
+    setReceiptSaving(false);
+    if (!r.ok) { setReceiptError("Le paiement n'a pas pu être enregistré. Vérifie ta connexion, puis réessaie."); return; }
+    setReceiptFor(null);
+    if (onMarkPaid) await onMarkPaid(receiptFor.contractId);
+  };
   const [openId, setOpenId] = useState(null);
   const [restoringId, setRestoringId] = useState(null);
 
@@ -14086,8 +14737,8 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                           {entry.paymentStatus === "paid" ? (
                             <span style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, fontFamily:T.body }}>✓ Payée</span>
                           ) : (
-                            <button
-                              onClick={() => onMarkPaid && onMarkPaid(entry.id)}
+                            <button data-testid="archive-mark-paid"
+                              onClick={() => { setReceiptError(""); setReceiptFor(recetteInfoFor(entry, "facture", profile)); }}
                               style={{ padding:"8px 14px", background:"#fff", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                             >✓ Marquer comme payée</button>
                           )}
@@ -14164,6 +14815,9 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
           })}
         </div>
       )}
+      {receiptFor && (
+        <RecetteDialog mode="paiement" info={receiptFor} saving={receiptSaving} error={receiptError} onCancel={() => setReceiptFor(null)} onConfirm={confirmReceipt} />
+      )}
     </div>
   );
 }
@@ -14232,7 +14886,7 @@ function DraftsPage({ onBack, onResume, onNewContract }) {
   );
 }
 
-function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe, setForm, signingContractId, setSigningContractId, setShowTactileSign, remoteSignLink, setRemoteSignLink, showRemoteSignPad, setShowRemoteSignPad, remoteSigHasStrokes, setRemoteSigHasStrokes, remoteSignLoading, remoteSignCopied, setRemoteSignCopied, remoteSigCanvasRef, startRemoteSigDraw, drawRemoteSig, endRemoteSigDraw, clearRemoteSig, handleRemoteSign }) {
+function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadPDF, onDelete, onDuplicate, jsPDFReady, isPremium, onUpgrade, onRelance, onRateClient, onPaymentStatusChanged, profile, authUser, onRefreshHistory, onGoToArchives, onGoToRecettes, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe, setForm, signingContractId, setSigningContractId, setShowTactileSign, remoteSignLink, setRemoteSignLink, showRemoteSignPad, setShowRemoteSignPad, remoteSigHasStrokes, setRemoteSigHasStrokes, remoteSignLoading, remoteSignCopied, setRemoteSignCopied, remoteSigCanvasRef, startRemoteSigDraw, drawRemoteSig, endRemoteSigDraw, clearRemoteSig, handleRemoteSign }) {
   const [copied, setCopied] = useState(false);
   const [retractMailOpenedFor, setRetractMailOpenedFor] = useState(null);
   // Contenu numérique (version 221) : « J'ai fourni le contenu », avec fenêtre de confirmation
@@ -14312,21 +14966,86 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     })();
   }, [historyView?.id, historyView?.soldeStripeSessionId]);
 
-  // Écrit le vrai statut en base — plus dans le navigateur, pour que le webhook Stripe (côté serveur) puisse aussi le faire
-  const setPaymentStatus = async (contractId, status) => {
+  // Version 234 : livre des recettes. « Payé » (ou « Marquer comme reçu ») ouvre la fenêtre « Paiement reçu » : date
+  // d'encaissement, moyen de paiement, montant. Le statut et la ligne du livre sont enregistrés ensemble par une fonction
+  // de la base (avant : écriture directe du navigateur, refusée par la base).
+  const [receiptAsk, setReceiptAsk] = useState(null); // { info, avenant, dateRequired }
+  const [receiptSaving, setReceiptSaving] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
+  const [contractRecettes, setContractRecettes] = useState(null); // lignes du livre de la fiche ouverte (null : inconnues)
+  const refreshContractRecettes = async (id) => {
+    if (!id) { setContractRecettes(null); return; }
+    const r = await loadRecettes({ contractId: id });
+    setContractRecettes(r.missing || r.error ? null : r.rows);
+  };
+  useEffect(() => { refreshContractRecettes(historyView?.id); }, [historyView?.id, historyView?.paymentStatus, historyView?.soldeStatus]);
+  const firstKind = historyView?.isStandaloneInvoice ? "facture" : "acompte";
+  const askReceipt = (kind, av = null, dateRequired = false) => {
+    if (!historyView) return;
+    setReceiptError("");
+    setReceiptAsk({ info: recetteInfoFor(historyView, kind, profile, av), avenant: av, dateRequired });
+  };
+  // L'avenant payé est noté dans le contrat (son statut n'est pas une colonne de la base)
+  const markAvenantReceivedInContract = async (av) => {
     try {
-      await supabase.from("contracts").update({ payment_status: status }).eq("id", contractId);
-    } catch(e) { console.error("Erreur mise à jour statut paiement:", e); }
+      const { data: existing, error: readError } = await supabase.from("contracts").select("content, status").eq("id", historyView.id).single();
+      if (readError || !existing) return false;
+      const currentContent = parseContent(existing.content);
+      const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
+      const idx = avenants.findIndex(a => String(a.num) === String(av.num));
+      if (idx === -1) return false;
+      if (avenants[idx].paymentReceived !== true) {
+        avenants[idx] = { ...avenants[idx], paymentReceived: true };
+        const { error } = await supabase.rpc("update_contract_content", {
+          p_contract_id: historyView.id,
+          p_new_content: JSON.stringify({ ...currentContent, avenants }),
+          p_new_status: existing.status,
+        });
+        if (error) { console.error("Erreur marquage paiement avenant:", error); return false; }
+      }
+      setHistoryView({ ...historyView, avenants });
+      return true;
+    } catch(e) { console.error("Erreur marquage paiement avenant:", e); return false; }
+  };
+  const confirmReceipt = async (values) => {
+    if (!receiptAsk || receiptSaving) return;
+    setReceiptSaving(true); setReceiptError("");
+    const { info, avenant } = receiptAsk;
+    const r = await savePaymentReceived(info, values);
+    const done = r.ok && (info.kind !== "avenant" || await markAvenantReceivedInContract(avenant));
+    setReceiptSaving(false);
+    if (!done) { setReceiptError("Le paiement n'a pas pu être enregistré. Vérifie ta connexion, puis réessaie."); return; }
+    setReceiptAsk(null);
     if (onRefreshHistory) await onRefreshHistory(); // recharge les données fraîches (met aussi à jour historyView)
     if (onPaymentStatusChanged) onPaymentStatusChanged(); // rafraîchit immédiatement la cloche d'alertes
+    refreshContractRecettes(info.contractId);
   };
-  // Même mécanisme, mais pour le solde restant une fois l'acompte reçu
-  const setSoldeStatus = async (contractId, status) => {
-    try {
-      await supabase.from("contracts").update({ solde_status: status }).eq("id", contractId);
-    } catch(e) { console.error("Erreur mise à jour statut solde:", e); }
+  // « En attente » / « En retard » : statut seul ; si le paiement était « payé », sa date notée à la main est retirée du
+  // livre (on prévient avant)
+  const setPaymentStatus = async (contractId, status) => {
+    if (status === "paid") { if (historyView?.paymentStatus !== "paid") askReceipt(firstKind); return; }
+    const wasPaid = historyView?.paymentStatus === "paid";
+    if (wasPaid && Array.isArray(contractRecettes)) {
+      const info = recetteInfoFor(historyView, firstKind, profile);
+      const lines = contractRecettes.filter((x) => sameRecettePayment(x, info));
+      const manualLine = lines.find((x) => x.source === "manuel");
+      if (manualLine && !window.confirm(`Le paiement noté reçu le ${isoDayFr(manualLine.received_on)} sera retiré de ton livre des recettes.\n\nContinuer ?`)) return;
+      if (!manualLine && lines.some((x) => x.source === "stripe") && !window.confirm("Ton client a payé par carte : ce paiement reste noté dans ton livre des recettes.\n\nChanger quand même le statut ?")) return;
+    }
+    const r = await savePaymentStatus(contractId, "payment_status", status, { wasPaid, kind: firstKind });
+    if (!r.ok) alert("Le statut n'a pas pu être enregistré. Vérifie ta connexion, puis réessaie.");
     if (onRefreshHistory) await onRefreshHistory();
     if (onPaymentStatusChanged) onPaymentStatusChanged();
+    refreshContractRecettes(contractId);
+  };
+  // Même mécanisme pour le solde restant une fois l'acompte reçu
+  const setSoldeStatus = async (contractId, status) => {
+    if (status === "paid") { if (historyView?.soldeStatus !== "paid") askReceipt("solde"); return; }
+    const r = await savePaymentStatus(contractId, "solde_status", status, { wasPaid: historyView?.soldeStatus === "paid", kind: "solde" });
+    if (!r.ok) alert("Le statut n'a pas pu être enregistré. Vérifie ta connexion, puis réessaie.");
+    if (onRefreshHistory) await onRefreshHistory();
+    if (onPaymentStatusChanged) onPaymentStatusChanged();
+    refreshContractRecettes(contractId);
   };
   const [deletingId, setDeletingId] = useState(null);
   const [filter, setFilter] = useState("tous"); // "tous" | "pending" | "signed"
@@ -14390,23 +15109,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     }
   };
 
-  // Marque manuellement le paiement de l'avenant comme reçu (virement, ou carte si le webhook n'est pas encore passé)
-  const markAvenantPaid = async (av) => {
-    try {
-      const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", historyView.id).single();
-      if (!existing) return;
-      const currentContent = parseContent(existing.content);
-      const avenants = Array.isArray(currentContent.avenants) ? currentContent.avenants : [];
-      const idx = avenants.findIndex(a => a.num === av.num);
-      if (idx !== -1) avenants[idx] = { ...avenants[idx], paymentReceived: true };
-      await supabase.rpc("update_contract_content", {
-        p_contract_id: historyView.id,
-        p_new_content: JSON.stringify({ ...currentContent, avenants }),
-        p_new_status: existing.status,
-      });
-      setHistoryView({ ...historyView, avenants });
-    } catch(e) { console.error("Erreur marquage paiement avenant:", e); }
-  };
+  // Marque le paiement de l'avenant comme reçu (virement, ou carte si le webhook n'est pas encore passé) : version 234,
+  // avec la date d'encaissement et le moyen de paiement (livre des recettes)
+  const markAvenantPaid = (av) => askReceipt("avenant", av);
 
   const handleDeleteWithAnim = (id) => {
     setConfirmDelete(null);
@@ -14579,6 +15284,10 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       {deliveryAskFor === historyView.id && (
         <ContentDeliveredModal saving={deliverySaving} error={deliveryError} onCancel={() => setDeliveryAskFor(null)} onConfirm={confirmContentDelivered} />
       )}
+      {receiptAsk && (
+        <RecetteDialog mode="paiement" info={receiptAsk.info} dateRequired={!!receiptAsk.dateRequired} saving={receiptSaving} error={receiptError}
+          onCancel={() => setReceiptAsk(null)} onConfirm={confirmReceipt} />
+      )}
 
       {/* Suivi du paiement — remplacé par une simple note si le client s'est rétracté (contrat annulé) */}
       {historyView.retractationExercisedAt ? (
@@ -14588,6 +15297,8 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         </div>
       ) : (() => {
         const st = historyView.paymentStatus || "pending";
+        // Version 234 : acompte payé mais solde encore dû : la mission n'est pas encore réglée
+        const soldeStillDue = !historyView.isStandaloneInvoice && recetteInfoFor(historyView, "solde", profile).amount > 0 && historyView.soldeStatus !== "paid";
         const options = [
           { key:"pending", label:"⏳ En attente", bg:"#FEF3C7", border:"#FCD34D", color:"#92400E" },
           { key:"paid", label:"✓ Payé", bg:"#D1FAE5", border:"#6EE7B7", color:"#065F46" },
@@ -14612,8 +15323,10 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             </div>
             {/* Version 232 : la carte est détectée toute seule ; un virement se marque à la main */}
             {st !== "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, marginTop:10, lineHeight:1.5 }}>{stripeConnectReady ? "Un paiement par carte passe tout seul en « Payé ». Pour un virement, touche « ✓ Payé » quand l'argent arrive sur ton compte." : "Quand le virement arrive sur ton compte, touche « ✓ Payé »."}</div>}
-            {st === "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#059669", marginTop:10 }}>Paiement encaissé — mission réglée. 🎉</div>}
+            {st === "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#059669", marginTop:10 }}>{soldeStillDue ? "Acompte encaissé. Le solde reste à encaisser (plus bas)." : "Paiement encaissé — mission réglée. 🎉"}</div>}
             {st === "late" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#DC2626", marginTop:10 }}>Pense à relancer le client (module Recouvrement disponible).</div>}
+            {/* Version 234 : date d'encaissement notée dans le livre des recettes (ou à ajouter) */}
+            <RecetteNoteLines entry={historyView} rows={contractRecettes} profile={profile} onAdd={(kind) => askReceipt(kind, null, true)} />
           </div>
         );
       })()}
@@ -14655,7 +15368,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       )}
 
       {/* 🛡️ Garant d'Acompte Automatique */}
-      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => setPaymentStatus(historyView.id, "paid")} onMarkSoldePaid={() => setSoldeStatus(historyView.id, "paid")} profile={profile} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} onGoToProfile={onGoToProfile} onGoToProfileTva={onGoToProfileTva} onConnectStripe={onConnectStripe} connectingStripe={connectingStripe} />
+      <DepositGuard entry={historyView} paid={historyView.paymentStatus === "paid"} onMarkPaid={() => askReceipt(firstKind)} onMarkSoldePaid={() => askReceipt("solde")} profile={profile} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} onGoToProfile={onGoToProfile} onGoToProfileTva={onGoToProfileTva} onConnectStripe={onConnectStripe} connectingStripe={connectingStripe} />
 
       {/* Signature tardive — pour un contrat généré mais jamais signé (fermé avant de signer) */}
       {!historyView.freelanceSignature && (
@@ -14839,9 +15552,20 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                           <button onClick={() => createAvenantPayLink(av)} disabled={avenantPayLoadingNum != null} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #FDE68A", borderRadius:6, cursor: avenantPayLoadingNum != null ? "wait" : "pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E" }}>{avenantPayLoadingNum === av.num ? "Génération…" : "💳 Lien de paiement par carte"}</button>
                         )}
                         {!av.paymentReceived && (
-                          <button onClick={() => markAvenantPaid(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #86EFAC", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534" }}>✓ Marquer comme reçu</button>
+                          <button data-testid={`avenant-mark-paid-${av.num}`} onClick={() => markAvenantPaid(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #86EFAC", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534" }}>✓ Marquer comme reçu</button>
                         )}
                       </div>
+                      {/* Version 234 : livre des recettes */}
+                      {av.paymentReceived && Array.isArray(contractRecettes) && (() => {
+                        const row = contractRecettes.find((x) => x.kind === "avenant" && Number(x.avenant_num) === Number(av.num));
+                        return row ? (
+                          <div data-testid={`avenant-recette-${av.num}`} style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginTop:8, lineHeight:1.5 }}>📒 Reçu le {isoDayLong(row.received_on)}, {RECETTE_METHOD_PHRASE[row.method] || "par un autre moyen"}{row.source === "stripe" ? " (Stripe)" : ""}. C'est noté dans ton livre des recettes.</div>
+                        ) : (
+                          <div data-testid={`avenant-recette-missing-${av.num}`} style={{ fontFamily:T.body, fontSize:11, color:"#92400E", marginTop:8, lineHeight:1.5 }}>📒 La date où tu l'as reçu n'est pas encore notée dans ton livre des recettes.{" "}
+                            <button onClick={() => askReceipt("avenant", av, true)} style={{ background:"none", border:"none", padding:0, color:"#92400E", fontFamily:T.body, fontSize:11, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Ajouter la date</button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
@@ -14977,6 +15701,11 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         {onGoToArchives && history.some(h => h.deleted || h.isStandaloneInvoice) && (
           <button onClick={onGoToArchives} style={{ marginTop:8, background:"none", border:"none", color:C.textL, fontSize:12, cursor:"pointer", fontFamily:T.body, padding:0, textDecoration:"underline" }}>
             🗄️ Voir les contrats supprimés et factures libres ({history.filter(h => h.deleted || h.isStandaloneInvoice).length})
+          </button>
+        )}
+        {onGoToRecettes && (
+          <button data-testid="open-recettes" onClick={onGoToRecettes} style={{ display:"block", marginTop:8, background:"none", border:"none", color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:T.body, padding:0, textDecoration:"underline" }}>
+            📒 Livre des recettes (sommes reçues, totaux par mois)
           </button>
         )}
         {history.length > 0 && (
