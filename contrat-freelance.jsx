@@ -1047,7 +1047,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "240";
+const APP_VERSION = "241";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -4317,7 +4317,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
 // Profil vide (nouvel appareil, déconnexion, compte sans profil)
 const emptyProfile = () => ({
   firstName: "", lastName: "", jobTitle: "", bio: "", tjm: "",
-  siret: "", linkedin: "", portfolio: "", github: "",
+  siret: "",
   skills: [], photo: null,
   companyName: "", legalStatus: "", tvaNumber: "", address: "",
   iban: "", bic: "", bankName: "", logo: null,
@@ -4602,7 +4602,11 @@ function AppInner() {
     const base = emptyProfile();
     try {
       const saved = localStorage.getItem("freeley_profile");
-      if (saved) return { ...base, ...JSON.parse(saved) };
+      if (saved) {
+        // Version 241 : les liens (retirés de Freeley) gardés dans ce navigateur sont oubliés
+        const { linkedin, portfolio, github, ...rest } = JSON.parse(saved) || {};
+        return { ...base, ...rest };
+      }
     } catch(e) {}
     return base;
   });
@@ -4622,7 +4626,9 @@ function AppInner() {
   const profileToRow = (p, userId) => ({
     id: userId,
     first_name: p.firstName, last_name: p.lastName, job_title: p.jobTitle, bio: p.bio, tjm: p.tjm,
-    siret: p.siret, linkedin: p.linkedin, portfolio: p.portfolio, github: p.github,
+    siret: p.siret,
+    // Version 241 : liens (LinkedIn, portfolio, GitHub) retirés de Freeley : ceux déjà enregistrés sont vidés
+    linkedin: "", portfolio: "", github: "",
     skills: p.skills, photo: p.photo,
     company_name: p.companyName, legal_status: p.legalStatus, tva_number: p.tvaNumber, address: p.address,
     iban: p.iban, bic: p.bic, bank_name: p.bankName, logo: p.logo,
@@ -4635,7 +4641,7 @@ function AppInner() {
   // Version 229 : colonnes lues pour le profil. Le secret de facturation électronique n'en fait plus partie : seul le
   // serveur en a besoin. Ce sont les colonnes que la sauvegarde du profil écrit déjà, plus la connexion Stripe et
   // l'identifiant Super PDP.
-  const PROFILE_SELECT_COLUMNS = ["id", "first_name", "last_name", "job_title", "bio", "tjm", "siret", "linkedin", "portfolio", "github",
+  const PROFILE_SELECT_COLUMNS = ["id", "first_name", "last_name", "job_title", "bio", "tjm", "siret",
     "skills", "photo", "company_name", "legal_status", "tva_number", "address", "iban", "bic", "bank_name", "logo",
     "mediateur", "assurance", "super_pdp_client_id", "stripe_connect_account_id", "stripe_connect_ready"];
   const isUnknownColumnError = (error) => !!error && (error.code === "42703" || error.code === "PGRST204" || /column .*does not exist|could not find .*column/i.test(String(error.message || "")));
@@ -4645,7 +4651,6 @@ function AppInner() {
   const rowToProfile = (row) => ({
     firstName: row.first_name || "", lastName: row.last_name || "", jobTitle: row.job_title || "",
     bio: row.bio || "", tjm: row.tjm || "", siret: row.siret || "",
-    linkedin: row.linkedin || "", portfolio: row.portfolio || "", github: row.github || "",
     skills: row.skills || [], photo: row.photo || null,
     companyName: row.company_name || "", legalStatus: row.legal_status || "", tvaNumber: row.tva_number || "",
     address: row.address || "", iban: row.iban || "", bic: row.bic || "", bankName: row.bank_name || "",
@@ -17225,13 +17230,6 @@ ${freelanceName}`;
               {freelanceAddressShown && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>{freelanceAddressShown}</div>}
               {hasSiret && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>SIRET : {form.freelanceSiret || profile?.siret}</div>}
               {form.freelanceEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:2 }}>{form.freelanceEmail}</div>}
-              {(profile?.linkedin || profile?.portfolio || profile?.github) && (
-                <div style={{ display:"flex", gap:8, marginTop:5, flexWrap:"wrap" }}>
-                  {profile?.linkedin && <a href={profile.linkedin} target="_blank" rel="noopener noreferrer" style={{ fontFamily:T.body, fontSize:10, color:"#0077B5", textDecoration:"none" }}>🔗 LinkedIn</a>}
-                  {profile?.portfolio && <a href={profile.portfolio} target="_blank" rel="noopener noreferrer" style={{ fontFamily:T.body, fontSize:10, color:C.navy, textDecoration:"none" }}>🌐 Portfolio</a>}
-                  {profile?.github && <a href={profile.github} target="_blank" rel="noopener noreferrer" style={{ fontFamily:T.body, fontSize:10, color:"#333", textDecoration:"none" }}>⌨ GitHub</a>}
-                </div>
-              )}
             </div>
             <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
@@ -19889,7 +19887,6 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
     { id:"identity", label:"Identité", icon:"👤" },
     { id:"metier", label:"Métier", icon:"💼" },
     { id:"facturation", label:"Facturation", icon:"🧾" },
-    { id:"liens", label:"Liens", icon:"🔗" },
   ];
 
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "Mon Profil";
@@ -20346,37 +20343,6 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
       )}
 
       {/* LIENS */}
-      {activeSection === "liens" && (
-        <div className="fade-up" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
-          <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:20 }}>LIENS & RÉSEAUX</div>
-          {[
-            { key:"linkedin", label:"LINKEDIN", icon:"💼", placeholder:"https://linkedin.com/in/ton-profil" },
-            { key:"portfolio", label:"PORTFOLIO / SITE WEB", icon:"🌐", placeholder:"https://ton-portfolio.fr" },
-            { key:"github", label:"GITHUB", icon:"⌨", placeholder:"https://github.com/ton-username" },
-          ].map(({ key, label, icon, placeholder }) => (
-            <div key={key} style={{ marginBottom:14 }}>
-              <label style={labelStyle}>{icon} {label}</label>
-              <div style={{ position:"relative" }}>
-                <input style={inputStyle} value={profile[key] || ""} placeholder={placeholder} onChange={e => updateProfile(key, e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => { e.target.style.borderColor=C.border; const v = e.target.value.trim(); if (v && !/^https?:\/\//i.test(v)) updateProfile(key, `https://${v}`); }} />
-                {profile[key] && (
-                  <a href={profile[key]} target="_blank" rel="noopener noreferrer" style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontFamily:T.body, fontSize:10, color:C.navy, fontWeight:600, textDecoration:"none", background:C.creamD, padding:"3px 8px", borderRadius:6, border:`1px solid ${C.border}` }}>Ouvrir ↗</a>
-                )}
-              </div>
-            </div>
-          ))}
-          {(profile.linkedin || profile.portfolio || profile.github) && (
-            <div style={{ marginTop:20, background:C.creamD, borderRadius:12, padding:"16px 18px", border:`1px solid ${C.border}` }}>
-              <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.12em", color:C.textL, fontWeight:600, marginBottom:12 }}>APERÇU DES LIENS</div>
-              <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                {profile.linkedin && <a href={profile.linkedin} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", gap:6, background:C.white, border:"1.5px solid #0077B5", borderRadius:8, padding:"8px 14px", textDecoration:"none", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#0077B5" }}>💼 LinkedIn</a>}
-                {profile.portfolio && <a href={profile.portfolio} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", gap:6, background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:8, padding:"8px 14px", textDecoration:"none", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.navy }}>🌐 Portfolio</a>}
-                {profile.github && <a href={profile.github} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", gap:6, background:C.white, border:"1.5px solid #333", borderRadius:8, padding:"8px 14px", textDecoration:"none", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#333" }}>⌨ GitHub</a>}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Liaison magique */}
       <div className="fade-up fade-up-2" style={{ display:"flex", alignItems:"flex-start", gap:12, background:"linear-gradient(135deg, #FFFBEB 0%, #FFF7E6 100%)", border:"1px solid #FDE68A", borderRadius:12, padding:"16px 18px", marginTop:20 }}>
         <span style={{ fontSize:20, flexShrink:0 }}>✨</span>
