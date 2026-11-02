@@ -260,6 +260,7 @@ const getHistory = async () => {
     return {
       id: row.id,
       date: new Date(row.created_at).toLocaleDateString("fr-FR"),
+      createdAt: row.created_at || null, // version 238 : pour ranger les alertes par date
       missionTitle: row.title || row.titre || "",
       clientName: content.clientName || contenu.clientName || "",
       clientCompany: content.clientCompany || contenu.clientCompany || "",
@@ -286,6 +287,9 @@ const getHistory = async () => {
       soldeInvoiceNumber: content.soldeInvoiceNumber || null,
       acompteInvoiceDate: content.acompteInvoiceDate || null, // version 233 : date d'émission de la facture
       soldeInvoiceDate: content.soldeInvoiceDate || null,
+      // Version 237 : remises d'avenant comptées dans la facture du paiement (gardées avec son numéro)
+      acompteInvoiceRemises: Array.isArray(content.acompteInvoiceRemises) ? content.acompteInvoiceRemises : null,
+      soldeInvoiceRemises: Array.isArray(content.soldeInvoiceRemises) ? content.soldeInvoiceRemises : null,
       avenants: content.avenants || contenu.avenants || [],
       form: content.form || contenu.form || {},
       paymentStatus: row.payment_status || "pending",
@@ -1043,7 +1047,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "236";
+const APP_VERSION = "238";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -5274,6 +5278,34 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   /* ── Attente session ── */
   // Forcer connexion au démarrage — sauf pendant la réinitialisation du mot de passe,
   // où l'utilisateur n'est pas censé être "connecté" normalement à ce stade précis.
+  // Version 238 : alertes lues gardées sur le compte (table alert_reads, script SQL v238) : une alerte lue sur
+  // l'ordinateur l'est aussi sur le téléphone. null : pas encore lues, ou script SQL pas lancé (comme avant : navigateur
+  // seulement). Relues à chaque retour sur l'application.
+  const [remoteReadIds, setRemoteReadIds] = useState(null);
+  useEffect(() => {
+    if (!authUser?.id) { setRemoteReadIds(null); return undefined; }
+    let alive = true;
+    const refresh = async () => {
+      const remote = await loadReadAlertIdsRemote();
+      if (alive && remote) setRemoteReadIds(prev => (prev && prev.length === remote.length && prev.every((x, i) => x === remote[i]) ? prev : remote));
+    };
+    refresh();
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { alive = false; window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", onVisible); };
+  }, [authUser?.id]);
+  // Alertes déjà lues dans ce navigateur (avant la version 238, ou pendant une coupure) : envoyées au compte, une fois.
+  // Seulement celles de ce compte (les alertes de ses contrats et de ses NDA).
+  useEffect(() => {
+    if (!remoteReadIds || !authUser?.id) return;
+    const have = new Set(remoteReadIds);
+    const local = new Set(getReadAlertIds());
+    const mine = [...buildAlertsFromHistory(history, profile), ...buildNdaAlerts(myNdas), ...buildAvenantAlerts(history)].map(a => a.id);
+    const toPush = Array.from(new Set(mine.filter(id => local.has(id) && !have.has(id))));
+    if (toPush.length) { markAlertsReadRemote(toPush); setRemoteReadIds(prev => Array.from(new Set([...(prev || []), ...toPush]))); }
+  }, [remoteReadIds, history, myNdas, authUser?.id]);
+
   if (authReady && !authUser && !showAuthModal && !showLanding && screen !== "reset-password") {
     setTimeout(() => { setShowAuthModal(true); setAuthMode("login"); }, 100);
   }
@@ -5298,9 +5330,10 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     : null;
 
   const liveAlerts = (() => {
-    const readIds = getReadAlertIds();
-    const all = [...buildAlertsFromHistory(history), ...buildNdaAlerts(myNdas), ...buildAvenantAlerts(history)];
-    return all.map(a => ({ ...a, read: readIds.includes(a.id) }));
+    // Version 238 : lues dans ce navigateur ou sur le compte ; rangées par date (sortAlerts)
+    const readIds = new Set([...getReadAlertIds(), ...(remoteReadIds || [])]);
+    const all = [...buildAlertsFromHistory(history, profile), ...buildNdaAlerts(myNdas), ...buildAvenantAlerts(history)];
+    return sortAlerts(all.map(a => ({ ...a, read: readIds.has(a.id) })));
   })();
 
   const goToProfileFacturation = () => {
@@ -5394,7 +5427,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
   const headerProps = {
     isPremium, premiumPlan, left: contractsLeft,
-    historyCount: history.length,
+    historyCount: history.filter(h => !h.deleted && !h.isStandaloneInvoice).length, // version 237 : comme la page Mes contrats
     authUser,
     profile,
     alerts: liveAlerts,
@@ -5408,23 +5441,20 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     onCGU: () => goToScreen("cgu"),
     onMyNdas: () => goToScreen("mes-ndas"),
     onProfile: () => goToScreen("profile"),
-    onOpenRecouvrement: () => setShowRecouvrementModal(true),
+    // Version 237 : la fenêtre Recouvrement Ferme n'existe que sur l'écran principal : on y va (avant, depuis le
+    // tableau de bord ou Mes contrats, un clic sur l'alerte ne montrait rien)
+    onOpenRecouvrement: () => { setShowRecouvrementModal(true); if (screen !== "app") goToScreen("app"); },
     onOpenNda: () => setShowNdaModal(true),
     onAlertsChanged: () => setAlertsTick(t => t + 1),
     onOpenMission: (alert) => {
       const contractId = alert?.contractId || (alert?.id ? alert.id.replace(/^(recouvre_|sign_|soon_)/, "") : null);
       const entry = contractId ? history.find(c => String(c.id) === String(contractId)) : null;
       if (alert?.action === "recouvrement" && entry) {
-        setRecouvrementInitialCase({
-          clientName: entry.clientName || "",
-          amount: entry.price || "",
-          dueDate: entry.endDate || "",
-          mission: entry.missionTitle || "",
-          clientEmail: entry.clientEmail || entry.form?.clientEmail || "",
-          clientPhone: entry.clientPhone || entry.form?.clientPhone || "",
-          typeClient: entry.form?.typeClient || "professionnel",
-        });
+        // Version 237 : le dossier de l'alerte (montant vraiment dû, vraie date limite). Avant : le prix entier du
+        // contrat et la date de fin de la mission.
+        setRecouvrementInitialCase(getRecouvrementCases(history, profile).find(rc => String(rc.id) === String(entry.id)) || null);
         setShowRecouvrementModal(true);
+        if (screen !== "app") goToScreen("app");
         return;
       }
       if (entry) { setHistoryView(entry); goToScreen("history"); }
@@ -5735,6 +5765,9 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       <Header {...headerProps} />
       <DashboardPage
         history={history}
+        profile={profile}
+        authUser={authUser}
+        onOpenRecouvrement={() => { setShowRecouvrementModal(true); goToScreen("app"); }}
         onBack={() => goToScreen("app")}
         onNewContract={() => { goToScreen("app"); startFreshContract(); }}
         onOpenHistory={() => goToScreen("history")}
@@ -6984,23 +7017,170 @@ const isoDayFr = (iso) => { const [y, m, d] = String(iso).split("-"); return `${
 const isoDayPlus = (iso, n) => { const [y, m, d] = String(iso).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + (Number(n) || 0))).toISOString().slice(0, 10); };
 const INVOICE_DATE_KEYS = { acompteInvoiceNumber: "acompteInvoiceDate", soldeInvoiceNumber: "soldeInvoiceDate" };
 
+// ═══════════════════════════════════════════════════════════════════════
+// Version 237 — L'ARGENT D'UN CONTRAT : signé ou pas, ce qui reste dû, et pour quand.
+// Un seul calcul, partagé par le tableau de bord, la cloche d'alertes, Recouvrement Ferme, le bloc de paiement du
+// contrat, le livre des recettes et « Tout télécharger ». Avant, chaque écran faisait le sien : le tableau de bord
+// comptait les brouillons et les contrats supprimés, la cloche prenait la fin de la mission pour date limite de
+// paiement (sans le délai écrit dans le contrat), et une remise signée par avenant n'était déduite nulle part.
+// ═══════════════════════════════════════════════════════════════════════
+// Le client a signé le contrat : seul un contrat signé compte dans l'activité et peut être relancé
+const isClientSigned = (c) => !!c && (c.signatureStatus === "signed" || !!c.signedByClientAt || !!c.clientSignature);
+// Jour de Paris (AAAA-MM-JJ) d'une date et heure ; un jour AAAA-MM-JJ reste tel quel ; null si illisible
+const parisIsoDayOf = (v) => {
+  if (!v) return null;
+  if (isIsoDay(v)) return String(v);
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+};
+// « 01/11/2026 » (date de création d'une fiche de Mes contrats) → « 2026-11-01 »
+const frDayToIso = (v) => { const m = String(v || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+// Jours entre aujourd'hui et un jour AAAA-MM-JJ : 0 aujourd'hui, 1 demain, -1 hier (null si illisible). Avant,
+// new Date("AAAA-MM-JJ") donnait minuit à Londres : le dernier jour d'une mission comptait déjà comme passé, et chaque
+// retard avait un jour de trop.
+const daysUntilIso = (iso) => {
+  if (!isIsoDay(iso)) return null;
+  const [y, m, d] = String(iso).split("-").map(Number);
+  const [ty, tm, td] = localTodayIso().split("-").map(Number);
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86400000);
+};
+// Montants de base d'un contrat (prix saisi, sans TVA) : premier paiement (acompte, ou tout le prix) et solde
+const contractBaseAmounts = (entry) => {
+  const form = entry?.form || {};
+  const price = entry?.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) || 0 : 0;
+  const pct = form.acomptePourcentage != null && form.acomptePourcentage !== "" ? Number(form.acomptePourcentage) : null;
+  const isComptant = pct === 0 && price > 0;
+  const firstBase = isComptant ? price : (pct ? Math.round(price * (pct / 100)) || 0 : 0);
+  const hasSolde = !isComptant && pct > 0 && pct < 100;
+  const soldeBase = hasSolde ? Math.max(price - firstBase, 0) : 0;
+  const days = form.paymentTerms && form.paymentTerms !== "Comptant" ? Number(form.paymentTerms) || 0 : 0;
+  return { price, pct, isComptant, firstBase, hasSolde, soldeBase, days, payAfterDelivery: isComptant && days > 0 };
+};
+// Remises signées par avenant (ajustement de prix négatif)
+const signedRemisesOf = (entry) => (Array.isArray(entry?.avenants) ? entry.avenants : [])
+  .filter((a) => a && a.status === "signed" && Number(a.ajustementMontant) < 0)
+  .map((a) => ({ num: Number(a.num), amount: Math.round(Math.abs(Number(a.ajustementMontant)) * 100) / 100 }));
+// Une remise baisse le dernier paiement du contrat : le solde s'il y en a un, sinon le paiement unique. Une facture
+// déjà faite ne change jamais : n'y comptent que les remises gardées avec son numéro. Les autres (comme une remise
+// signée après un paiement comptant déjà reçu) sont « à rembourser » : Freeley prévient, sans rien bloquer.
+// reason : « invoice » (facture déjà faite), « paid » (déjà payé), « excess » (plus grande que le reste à payer).
+const contractRemiseInfo = (entry) => {
+  const none = { target: null, applied: [], appliedTotal: 0, unapplied: [], unappliedTotal: 0, reason: null };
+  if (!entry || entry.isStandaloneInvoice) return none;
+  const remises = signedRemisesOf(entry);
+  if (!remises.length) return none;
+  const m = contractBaseAmounts(entry);
+  const target = m.hasSolde ? "solde" : "first";
+  const targetBase = target === "solde" ? m.soldeBase : (m.firstBase || m.price);
+  const invoiceNumber = target === "solde" ? entry.soldeInvoiceNumber : entry.acompteInvoiceNumber;
+  const kept = target === "solde" ? entry.soldeInvoiceRemises : entry.acompteInvoiceRemises;
+  const paid = target === "solde" ? entry.soldeStatus === "paid" : entry.paymentStatus === "paid";
+  let applied = remises, unapplied = [], reason = null;
+  if (invoiceNumber) {
+    const keep = new Set((Array.isArray(kept) ? kept : []).map(Number));
+    applied = remises.filter((r) => keep.has(r.num));
+    unapplied = remises.filter((r) => !keep.has(r.num));
+    if (unapplied.length) reason = "invoice";
+  } else if (paid && target === "first" && !m.payAfterDelivery) {
+    // Payé à la signature (comptant, acompte de 100 %) : payé avant l'avenant, donc sans la remise
+    applied = []; unapplied = remises; reason = "paid";
+  }
+  const round2 = (n) => Math.round(n * 100) / 100;
+  let appliedTotal = applied.reduce((sum, r) => sum + r.amount, 0);
+  let excess = 0;
+  if (appliedTotal > targetBase) { excess = appliedTotal - targetBase; appliedTotal = targetBase; if (!reason) reason = "excess"; }
+  return { target, applied, appliedTotal: round2(appliedTotal), unapplied, unappliedTotal: round2(unapplied.reduce((sum, r) => sum + r.amount, 0) + excess), reason };
+};
+// Phrase ajoutée en bas d'une facture qui compte une remise
+const remiseFootNote = (nums, total, profile) => (nums && nums.length && total > 0)
+  ? ` Remise accordée par ${nums.length > 1 ? `les avenants n°${nums.join(", n°")}` : `l'avenant n°${nums[0]}`}, déduite : ${fmtEuro(total)} €${profile?.tvaNumber && String(profile.tvaNumber).trim() ? " HT" : ""}.`
+  : "";
+// Les paiements d'un contrat signé par le client (ou d'une facture libre) : montant (prix saisi, sans TVA, remise
+// déduite), payé ou non, facture faite ou non, et vraie date limite (AAAA-MM-JJ) : la date de la facture plus le délai
+// du contrat ; la signature pour un paiement dû à la signature (le 8e jour pour un contrat signé hors établissement
+// avec un client protégé, article L221-10 du Code de la consommation) ; null tant que la facture de fin de mission
+// n'est pas faite (needsInvoice : le freelance doit l'envoyer pour être payé). onReceipt : payable à réception de la
+// facture ou à la signature (pas de délai de paiement).
+const contractPaymentItems = (entry) => {
+  if (!entry || entry.deleted || entry.retractationExercisedAt) return [];
+  if (entry.isStandaloneInvoice) {
+    const amount = entry.price ? parseFloat(String(entry.price).replace(/[^0-9.]/g, "")) || 0 : 0;
+    const day = isIsoDay(entry.acompteInvoiceDate) ? entry.acompteInvoiceDate : frDayToIso(entry.date);
+    return amount > 0 ? [{ kind: "facture", label: "Facture", amount, paid: entry.paymentStatus === "paid", invoiced: true, needsInvoice: false, onReceipt: true, dueDate: day }] : [];
+  }
+  if (!isClientSigned(entry)) return [];
+  const m = contractBaseAmounts(entry);
+  const rem = contractRemiseInfo(entry);
+  const items = [];
+  const endDay = isIsoDay(entry.endDate) ? entry.endDate : null;
+  // Ancien contrat sans pourcentage d'acompte : tout le prix, dû à la signature
+  const legacy = m.pct === null && m.price > 0;
+  const firstBase = legacy ? m.price : m.firstBase;
+  if (firstBase > 0) {
+    const invoiceDay = entry.acompteInvoiceNumber ? (isIsoDay(entry.acompteInvoiceDate) ? entry.acompteInvoiceDate : endDay) : null;
+    let dueDate;
+    if (m.payAfterDelivery) dueDate = invoiceDay ? isoDayPlus(invoiceDay, m.days) : null;
+    else {
+      let start = parisIsoDayOf(entry.signedByClientAt) || frDayToIso(entry.date);
+      if (entry.signedByClientAt && entry.signatureLocation === "hors_etablissement" && isConsumerLikeContract(entry.form, entry)) {
+        const allowed = parisIsoDayOf(paymentAllowedFrom(entry.signedByClientAt));
+        if (allowed && (!start || allowed > start)) start = allowed;
+      }
+      dueDate = invoiceDay && (!start || invoiceDay > start) ? invoiceDay : start;
+    }
+    items.push({
+      kind: "acompte", label: m.payAfterDelivery ? "Prestation" : (legacy || m.isComptant || m.pct >= 100) ? "Paiement" : "Acompte",
+      amount: Math.max(firstBase - (rem.target === "first" ? rem.appliedTotal : 0), 0),
+      paid: entry.paymentStatus === "paid", invoiced: !!entry.acompteInvoiceNumber, needsInvoice: m.payAfterDelivery, onReceipt: !m.payAfterDelivery, dueDate,
+    });
+  }
+  if (m.hasSolde) {
+    const invoiceDay = entry.soldeInvoiceNumber ? (isIsoDay(entry.soldeInvoiceDate) ? entry.soldeInvoiceDate : endDay) : null;
+    items.push({
+      kind: "solde", label: "Solde", amount: Math.max(m.soldeBase - (rem.target === "solde" ? rem.appliedTotal : 0), 0),
+      paid: entry.soldeStatus === "paid", invoiced: !!entry.soldeInvoiceNumber, needsInvoice: true, onReceipt: m.days === 0,
+      dueDate: invoiceDay ? isoDayPlus(invoiceDay, m.days) : null,
+    });
+  }
+  for (const av of Array.isArray(entry.avenants) ? entry.avenants : []) {
+    if (!av || av.status !== "signed" || !(Number(av.ajustementMontant) > 0)) continue;
+    items.push({
+      kind: "avenant", label: `Avenant n°${av.num}`, num: Number(av.num), amount: Number(av.ajustementMontant),
+      paid: !!av.paymentReceived, invoiced: !!av.invoiceNumber, needsInvoice: true, onReceipt: true,
+      dueDate: av.invoiceNumber ? (isIsoDay(av.invoiceDate) ? av.invoiceDate : parisIsoDayOf(av.signedByClientAt || av.createdAt)) : null,
+    });
+  }
+  return items;
+};
+// Paiements à facturer : la mission est finie, mais la facture qui permet d'être payé n'est pas encore faite. Le
+// solde ne se facture qu'une fois le premier paiement reçu (son bouton n'apparaît qu'à ce moment-là).
+const invoicesToSendOf = (c) => {
+  if (!c || c.isStandaloneInvoice || !isIsoDay(c.endDate) || daysUntilIso(c.endDate) >= 0) return [];
+  const items = contractPaymentItems(c);
+  const firstPaid = !items.some((i) => i.kind === "acompte") || items.some((i) => i.kind === "acompte" && i.paid);
+  return items.filter((i) => !i.paid && i.amount > 0 && i.needsInvoice && !i.invoiced && (i.kind !== "solde" || firstPaid));
+};
+
 // Récupère le numéro et la date d'émission de la facture déjà attribuée à cette vente précise (acompte, solde ou
 // avenant), ou en réserve un nouveau si c'est la première fois — jamais un nouveau numéro à chaque re-téléchargement
 // (obligation légale de continuité). `key` vaut "acompteInvoiceNumber", "soldeInvoiceNumber", ou "avenant".
-const getOrReserveInvoice = async ({ authUser, contractId, key, avenantNum }) => {
+const getOrReserveInvoice = async ({ authUser, contractId, key, avenantNum, applyRemises = false }) => {
   const year = new Date().getFullYear();
   const today = parisTodayIso();
   const NONE = `FA-${year}-····`;
   let invoiceNum = NONE, issueDate = null;
   let existingContent = null, existingStatus = null, avenantsArr = null, avenantIdx = -1;
+  let existingPay = null, existingSolde = null;
   const dateKey = INVOICE_DATE_KEYS[key] || null;
 
   if (contractId) {
     try {
-      const { data: existing } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
+      const { data: existing } = await supabase.from("contracts").select("content, status, payment_status, solde_status").eq("id", contractId).single();
       if (existing) {
         existingContent = parseContent(existing.content);
         existingStatus = existing.status;
+        existingPay = existing.payment_status || "pending";
+        existingSolde = existing.solde_status || "pending";
         if (key === "avenant") {
           avenantsArr = Array.isArray(existingContent.avenants) ? existingContent.avenants : [];
           avenantIdx = avenantsArr.findIndex(a => String(a.num) === String(avenantNum));
@@ -7038,13 +7218,24 @@ const getOrReserveInvoice = async ({ authUser, contractId, key, avenantNum }) =>
     } catch(e) { console.error("Erreur sauvegarde numéro de facture:", e); }
   };
 
+  // Version 237 : remises d'avenant comptées dans la facture du dernier paiement (solde, ou paiement unique), gardées
+  // avec son numéro. Seulement quand l'écran qui fait la facture déduit lui-même les remises (applyRemises).
+  const remiseKey = key === "soldeInvoiceNumber" ? "soldeInvoiceRemises" : key === "acompteInvoiceNumber" ? "acompteInvoiceRemises" : null;
+  const remiseEntryOf = (content) => ({ ...content, price: content.price || content.form?.price || "", paymentStatus: existingPay, soldeStatus: existingSolde });
+  let remiseNums = [];
+  let justReserved = false;
   if (invoiceNum === NONE && authUser?.id) {
+    if (applyRemises && remiseKey && existingContent) {
+      const info = contractRemiseInfo(remiseEntryOf(existingContent));
+      if (info.target === (key === "soldeInvoiceNumber" ? "solde" : "first")) remiseNums = info.applied.map(r => r.num);
+    }
     const { data, error } = await supabase.rpc("get_next_invoice_number", { p_user_id: authUser.id, p_year: year });
     if (error) { console.error("Erreur réservation numéro de facture:", error); }
     else {
       invoiceNum = `FA-${year}-${String(data).padStart(4, "0")}`;
       issueDate = today;
-      await store(key === "avenant" ? { invoiceNumber: invoiceNum, invoiceDate: today } : { [key]: invoiceNum, ...(dateKey ? { [dateKey]: today } : {}) });
+      await store(key === "avenant" ? { invoiceNumber: invoiceNum, invoiceDate: today } : { [key]: invoiceNum, ...(dateKey ? { [dateKey]: today } : {}), ...(applyRemises && remiseKey && existingContent ? { [remiseKey]: remiseNums } : {}) });
+      justReserved = true;
     }
   } else if (invoiceNum !== NONE && !isIsoDay(issueDate)) {
     // Facture numérotée avant la version 233 : sa date d'émission n'était pas gardée. On retient celle d'aujourd'hui,
@@ -7052,12 +7243,21 @@ const getOrReserveInvoice = async ({ authUser, contractId, key, avenantNum }) =>
     issueDate = today;
     await store(key === "avenant" ? { invoiceDate: today } : (dateKey ? { [dateKey]: today } : {}));
   }
+  // Facture déjà faite : les remises gardées avec son numéro (aucune pour une facture faite avant la version 237)
+  if (!justReserved && remiseKey && existingContent && Array.isArray(existingContent[remiseKey])) remiseNums = existingContent[remiseKey].map(Number);
   // Garde-fou légal : une facture doit porter un vrai numéro séquentiel. Si la réservation a échoué,
   // on refuse de produire un document plutôt que d'émettre une facture non conforme.
   if (invoiceNum === NONE) {
     throw new Error("Impossible de réserver un numéro de facture. Vérifie ta connexion et réessaie — aucune facture n'a été générée.");
   }
-  return { invoiceNum, issueDate: isIsoDay(issueDate) ? issueDate : today };
+  // Montant des remises comptées dans cette facture (même calcul que le bloc de paiement du contrat)
+  let remiseTotal = 0;
+  if (remiseKey && existingContent && remiseNums.length) {
+    const info = contractRemiseInfo({ ...remiseEntryOf(existingContent), [key]: invoiceNum, [remiseKey]: remiseNums });
+    if (info.target === (key === "soldeInvoiceNumber" ? "solde" : "first")) { remiseTotal = info.appliedTotal; remiseNums = info.applied.map(r => r.num); }
+    else remiseNums = [];
+  }
+  return { invoiceNum, issueDate: isIsoDay(issueDate) ? issueDate : today, remiseNums, remiseTotal };
 };
 // Le numéro seul (ancien nom)
 const getOrReserveInvoiceNumber = async (args) => (await getOrReserveInvoice(args)).invoiceNum;
@@ -7244,15 +7444,17 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const invoiceKey = invoiceType === "solde" ? "soldeInvoiceNumber" : "acompteInvoiceNumber";
-    const { invoiceNum, issueDate } = await getOrReserveInvoice({ authUser, contractId, key: invoiceKey });
+    const { invoiceNum, issueDate, remiseNums, remiseTotal } = await getOrReserveInvoice({ authUser, contractId, key: invoiceKey, applyRemises: !!extra.applyRemises });
     const spec = extra.form ? contractInvoiceSpec(extra.form, invoiceType === "solde" ? "solde" : "acompte") : null;
     const finalDesignation = spec ? spec.designation : designation;
+    // Version 237 : remise d'avenant comptée dans cette facture (« montant » est le montant de base, sans remise)
+    const withRemise = !!extra.applyRemises && remiseTotal > 0;
     renderInvoicePDF({
-      invoiceNum, issueDate, designation: finalDesignation, missionTitle, montant,
+      invoiceNum, issueDate, designation: finalDesignation, missionTitle, montant: withRemise ? Math.max((Number(montant) || 0) - remiseTotal, 0) : montant,
       freelanceName, freelanceSiret, freelanceEmail, freelanceAddress: extra.form?.freelanceAddress || "",
       clientName, clientCompany, clientAddress, clientEmail, typeClient, profile: await profileWithPdfLogo(profile),
       clientSiret: extra.clientSiret || extra.form?.clientSiret || "",
-      footNote: spec ? spec.footNote : undefined, dueDays: spec ? spec.dueDays : 0,
+      footNote: spec ? spec.footNote + (withRemise ? remiseFootNote(remiseNums, remiseTotal, profile) : "") : undefined, dueDays: spec ? spec.dueDays : 0,
       filename: `Facture_${invoiceNum}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
@@ -7313,6 +7515,9 @@ const recetteInfoFor = (entry, kind, profile, avenant = null) => {
   else if (kind === "avenant") { label = `Avenant n°${avenant?.num}`; amountHT = Number(avenant?.ajustementMontant) || 0; invoiceNumber = avenant?.invoiceNumber; }
   else if (kind === "facture") { label = "Facture"; amountHT = rawPrice; invoiceNumber = entry?.acompteInvoiceNumber || entry?.invoiceNumber; }
   else { label = contractInvoiceSpec(form, "acompte").designation; amountHT = hasSolde ? depositAmt : rawPrice; invoiceNumber = entry?.acompteInvoiceNumber; }
+  // Version 237 : remise d'avenant déduite du dernier paiement (même calcul que le bloc de paiement du contrat)
+  const remR = contractRemiseInfo(entry);
+  if ((kind === "solde" && remR.target === "solde") || (kind === "acompte" && remR.target === "first")) amountHT = Math.max(amountHT - remR.appliedTotal, 0);
   return {
     contractId: entry?.id || null,
     kind,
@@ -7933,7 +8138,7 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
   const logoProfile = await profileWithPdfLogo(profile);
 
   // Facture d'acompte, de solde ou facture libre : mêmes données que « Télécharger la facture » dans Mes contrats
-  const paymentInvoice = (entry, kind, invoiceNum, issueDate, montant) => {
+  const paymentInvoice = (entry, kind, invoiceNum, issueDate, montant, remiseNote = "") => {
     const form = entry.form || {};
     const spec = kind === "facture" ? null : contractInvoiceSpec(form, kind === "solde" ? "solde" : "acompte");
     return renderInvoicePDF({
@@ -7942,7 +8147,7 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
       freelanceAddress: kind === "facture" ? "" : (form.freelanceAddress || ""),
       clientName: entry.clientName, clientCompany: form.clientCompany, clientAddress: form.clientAddress, clientEmail: form.clientEmail,
       clientSiret: form.clientSiret || "", typeClient: form.typeClient, profile: logoProfile,
-      footNote: spec ? spec.footNote : undefined, dueDays: spec ? spec.dueDays : 0, filename: "", returnDoc: true,
+      footNote: spec ? spec.footNote + remiseNote : undefined, dueDays: spec ? spec.dueDays : 0, filename: "", returnDoc: true,
     });
   };
 
@@ -7971,11 +8176,14 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
     const hasSolde = !isComptant && pct > 0 && pct < 100;
     const acompteAmt = isComptant ? Number(entry.price) : (pct ? Math.round(Number(entry.price) * (pct / 100)) || 0 : 0);
     const soldeAmt = hasSolde ? Math.max(Number(entry.price) - acompteAmt, 0) : 0;
+    // Version 237 : remise d'avenant comptée dans la facture (celle gardée avec son numéro)
+    const remZ = contractRemiseInfo(entry);
+    const remNoteZ = remiseFootNote(remZ.applied.map(r => r.num), remZ.appliedTotal, profile);
     if (entry.acompteInvoiceNumber && acompteAmt > 0) {
-      tasks.push({ name: `Factures/${zipPart(entry.acompteInvoiceNumber)} - ${isComptant ? "Paiement" : "Acompte"} - ${who}.pdf`, make: () => paymentInvoice(entry, "acompte", entry.acompteInvoiceNumber, entry.acompteInvoiceDate, acompteAmt) });
+      tasks.push({ name: `Factures/${zipPart(entry.acompteInvoiceNumber)} - ${isComptant ? "Paiement" : "Acompte"} - ${who}.pdf`, make: () => paymentInvoice(entry, "acompte", entry.acompteInvoiceNumber, entry.acompteInvoiceDate, remZ.target === "first" ? Math.max(acompteAmt - remZ.appliedTotal, 0) : acompteAmt, remZ.target === "first" ? remNoteZ : "") });
     }
     if (entry.soldeInvoiceNumber && hasSolde && soldeAmt > 0) {
-      tasks.push({ name: `Factures/${zipPart(entry.soldeInvoiceNumber)} - Solde - ${who}.pdf`, make: () => paymentInvoice(entry, "solde", entry.soldeInvoiceNumber, entry.soldeInvoiceDate, soldeAmt) });
+      tasks.push({ name: `Factures/${zipPart(entry.soldeInvoiceNumber)} - Solde - ${who}.pdf`, make: () => paymentInvoice(entry, "solde", entry.soldeInvoiceNumber, entry.soldeInvoiceDate, remZ.target === "solde" ? Math.max(soldeAmt - remZ.appliedTotal, 0) : soldeAmt, remZ.target === "solde" ? remNoteZ : "") });
     }
     for (const av of (Array.isArray(entry.avenants) ? entry.avenants : [])) {
       if (!av || av.num == null) continue;
@@ -8572,7 +8780,7 @@ CONSIGNES :
                     onBlur={e => e.target.style.borderColor = C.border}
                   />
                   <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>
-                    Nombre uniquement (positif = supplément, négatif = remise) • laisse vide si aucun changement de prix
+                    Nombre uniquement (positif = supplément facturé à part, négatif = remise déduite de ce qui reste à payer) • laisse vide si aucun changement de prix
                   </div>
                 </div>
               </>
@@ -9789,9 +9997,12 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
       accentBorder: "#FECACA",
       accentText: "#B91C1C",
       onClick: onRecouvrement,
-      title: "Mise en demeure commerciale",
+      // Version 237 : tant que la mise en demeure est suspendue, la carte décrit ce que l'outil fait vraiment
+      title: FORMAL_LETTER_ENABLED ? "Mise en demeure commerciale" : "Relances de paiement",
       description: "Relancez vos factures en retard efficacement.",
-      example: "Un client a dépassé l'échéance, Freeley génère une mise en demeure officielle citant le Code de commerce.",
+      example: FORMAL_LETTER_ENABLED
+        ? "Un client a dépassé l'échéance, Freeley génère une mise en demeure officielle citant le Code de commerce."
+        : "Un client a dépassé l'échéance : Freeley rédige une relance amiable, prête à envoyer par email ou par SMS. Avant l'échéance, un rappel courtois.",
     },
     {
       id: "scanner",
@@ -10426,15 +10637,35 @@ const deleteDraftFromList = (id) => {
   return drafts;
 };
 
-// Persistance du statut "lu" des alertes (localStorage)
+// Persistance du statut "lu" des alertes : dans le navigateur, tout de suite, et (version 238) sur le compte, dans la
+// table alert_reads du script SQL v238 : une alerte lue sur l'ordinateur l'est aussi sur le téléphone. Avant, elle
+// n'était retenue que dans le navigateur et revenait comme nouvelle sur un autre appareil.
 const getReadAlertIds = () => {
   try { return JSON.parse(localStorage.getItem("freeley_read_alerts") || "[]"); } catch(e) { return []; }
+};
+// Alertes lues gardées sur le compte (les 1 000 plus récentes) ; null si la table n'existe pas encore (script SQL v238
+// pas lancé) ou si la lecture échoue : l'application continue alors comme avant, avec le navigateur seulement.
+const loadReadAlertIdsRemote = async () => {
+  try {
+    const { data, error } = await supabase.from("alert_reads").select("alert_id").order("read_at", { ascending: false }).limit(1000);
+    if (error) return null;
+    return Array.isArray(data) ? data.map(r => String(r.alert_id)) : [];
+  } catch (e) { return null; }
+};
+// Enregistre des alertes lues sur le compte (fonction mark_alerts_read du script SQL v238), sans rien attendre
+const markAlertsReadRemote = (ids) => {
+  const list = Array.from(new Set((ids || []).map(String).filter(x => x && x.length <= 200))).slice(0, 500);
+  if (!list.length) return;
+  Promise.resolve(supabase.rpc("mark_alerts_read", { p_ids: list }))
+    .then((r) => { if (r && r.error && !isMissingDbFunction(r.error)) console.warn("[alertes] lecture non gardée sur le compte", r.error); })
+    .catch(() => {});
 };
 const markAlertReadPersist = (id) => {
   try {
     const ids = getReadAlertIds();
     if (!ids.includes(id)) { ids.push(id); localStorage.setItem("freeley_read_alerts", JSON.stringify(ids)); }
   } catch(e) {}
+  markAlertsReadRemote([id]);
 };
 const markAllAlertsReadPersist = (ids) => {
   try {
@@ -10442,56 +10673,84 @@ const markAllAlertsReadPersist = (ids) => {
     const merged = Array.from(new Set([...existing, ...ids]));
     localStorage.setItem("freeley_read_alerts", JSON.stringify(merged));
   } catch(e) {}
+  markAlertsReadRemote(ids);
 };
 
-// Génère des alertes réelles à partir de l'historique des contrats
-// Retourne la liste des dossiers nécessitant une action de recouvrement (avant ou après échéance)
-function getRecouvrementCases(history) {
-  if (!Array.isArray(history) || !history.length) return [];
-  const now = new Date();
+// Version 238 : la cloche range les alertes par date. Les non lues d'abord, la plus récente en haut (une rétractation
+// non lue reste tout en haut : c'est la plus urgente), puis les alertes déjà lues, grisées, de la plus récente à la plus
+// ancienne. Avant, elles étaient rangées par type (paiements, signatures, puis NDA et avenants) : une alerte du jour
+// pouvait arriver tout en bas, sous une vieille alerte déjà lue.
+const alertTime = (at) => {
+  if (!at) return 0;
+  if (isIsoDay(at)) { const [y, m, d] = String(at).split("-").map(Number); return new Date(y, m - 1, d, 12).getTime(); }
+  const t = new Date(at).getTime();
+  return isNaN(t) ? 0 : t;
+};
+// « aujourd'hui », « hier », « il y a 3 jours », puis « le 12 octobre » (avec l'année si ce n'est pas l'année en cours)
+const alertWhenLabel = (at) => {
+  const t = alertTime(at);
+  if (!t) return "";
+  const d = new Date(t);
+  const ago = -daysUntilIso(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  if (!(ago > 0)) return "aujourd'hui";
+  if (ago === 1) return "hier";
+  if (ago < 7) return `il y a ${ago} jours`;
+  return `le ${d.getDate() === 1 ? "1er" : d.getDate()} ${MONTHS_FR[d.getMonth()]}${d.getFullYear() !== new Date().getFullYear() ? " " + d.getFullYear() : ""}`;
+};
+const sortAlerts = (list) => (list || [])
+  .map((a, i) => ({ a, i, t: alertTime(a.at) }))
+  .sort((x, y) => {
+    const rank = (z) => (z.a.read ? 2 : String(z.a.id).startsWith("retract_") ? 0 : 1);
+    return rank(x) - rank(y) || y.t - x.t || x.i - y.i;
+  })
+  .map(({ a }) => ({ ...a, when: alertWhenLabel(a.at) }));
 
+// Génère des alertes réelles à partir de l'historique des contrats
+// Version 237 : dossiers de relance calculés paiement par paiement, avec la vraie date limite (contractPaymentItems) :
+// la date de la facture plus le délai du contrat, pas la fin de la mission. Seuls les contrats signés par le client et
+// les factures libres sont suivis : plus de « Paiement à relancer » pour un brouillon, une copie ou un contrat jamais
+// signé. « late » : un paiement a dépassé sa date limite (ou le freelance a choisi « En retard ») ; « soon » : une date
+// limite dans 3 jours ou moins. Montants : ce que le client paie (TTC si le freelance facture la TVA).
+// Un paiement à réception de facture (ou à la signature) n'est signalé qu'après 7 jours : un virement met parfois
+// quelques jours à arriver, et une facture libre ne déclenche plus une alerte le jour même. Le retard affiché compte
+// quand même depuis la vraie date limite.
+const RECEIPT_GRACE_DAYS = 7;
+function getRecouvrementCases(history, profile = null) {
+  if (!Array.isArray(history) || !history.length) return [];
   const cases = [];
   history.forEach(c => {
-    if (c.deleted || c.isStandaloneInvoice) return; // ni un contrat supprimé, ni une simple facture libre n'ont besoin d'être relancés ici
-    if (c.retractationExercisedAt) return; // le client s'est rétracté : le contrat est annulé, on ne lui réclame plus rien
-    const basePrice = parseFloat(c.price) || 0;
-    const baseIsPaid = c.paymentStatus === "paid";
-    // Un acompte payé ne règle pas forcément le solde — on ne compte que ce qui reste vraiment dû
-    const acomptePctC = c.form?.acomptePourcentage != null && c.form.acomptePourcentage !== "" ? Number(c.form.acomptePourcentage) : null;
-    const isComptantC = acomptePctC === 0 && basePrice > 0;
-    const hasSoldeC = !isComptantC && acomptePctC > 0 && acomptePctC < 100;
-    const acompteAmtC = isComptantC ? basePrice : (acomptePctC ? Math.round(basePrice * (acomptePctC / 100)) || 0 : 0);
-    const soldeAmtC = hasSoldeC ? Math.max(basePrice - acompteAmtC, 0) : 0;
-
-    let baseDue;
-    if (!baseIsPaid) baseDue = basePrice; // rien payé du tout, tout est dû
-    else if (hasSoldeC && c.soldeStatus !== "paid") baseDue = soldeAmtC; // acompte réglé, solde encore dû
-    else baseDue = 0; // tout est réglé
-
-    // Les avenants signés mais pas encore marqués payés restent dus, même si le contrat de base est réglé
-    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
-    const unpaidAvenantsTotal = avenants
-      .filter(a => a.status === "signed" && a.ajustementMontant > 0 && !a.paymentReceived)
-      .reduce((s, a) => s + a.ajustementMontant, 0);
-    const amountDue = baseDue + unpaidAvenantsTotal;
-
-    if (!c.endDate || amountDue <= 0) return;
-    const end = new Date(c.endDate);
-    if (isNaN(end)) return;
-    const diffDays = Math.floor((end - now) / (1000 * 60 * 60 * 24));
-    if (diffDays > 3) return; // trop loin dans le futur, pas encore concerné
-
+    const items = contractPaymentItems(c).filter(i => !i.paid && i.amount > 0);
+    if (!items.length) return;
+    const dated = items.filter(i => i.dueDate).map(i => ({ ...i, diff: daysUntilIso(i.dueDate) })).filter(i => i.diff !== null);
+    let pick = dated.filter(i => i.diff < (i.onReceipt ? -RECEIPT_GRACE_DAYS : 0)), status = "late", manual = false;
+    if (!pick.length && c.paymentStatus === "late") {
+      // « En retard » choisi à la main dans « Suivi du paiement » : il concerne le premier paiement
+      const first = items.find(i => i.kind === "acompte" || i.kind === "facture");
+      if (first) { pick = [{ ...first, diff: Math.min(first.dueDate ? (daysUntilIso(first.dueDate) ?? 0) : 0, 0) }]; manual = true; }
+    }
+    if (!pick.length) { pick = dated.filter(i => !i.onReceipt && i.diff >= 0 && i.diff <= 3); status = "soon"; }
+    if (!pick.length) return;
+    const earliest = pick.reduce((a, b) => (b.diff < a.diff ? b : a));
+    const amountHT = pick.reduce((sum, i) => sum + i.amount, 0);
     cases.push({
       id: c.id,
-      clientName: c.clientName || "Client sans nom",
-      amount: amountDue,
-      dueDate: c.endDate,
+      contractId: c.id,
+      clientName: c.clientName || c.clientCompany || "Client sans nom",
+      amount: withTva(amountHT, profile),
+      // Date limite dépassée la plus ancienne (vide si « En retard » a été choisi à la main avant la date limite)
+      dueDate: earliest.dueDate && earliest.diff === daysUntilIso(earliest.dueDate) ? earliest.dueDate : "",
       mission: c.missionTitle || "Sans titre",
+      what: pick.map(i => i.label).join(" + "),
       clientEmail: c.clientEmail || c.form?.clientEmail || "",
       clientPhone: c.clientPhone || c.form?.clientPhone || "",
       typeClient: c.form?.typeClient || "professionnel",
-      diffDays,
-      status: diffDays < 0 ? "late" : "soon",
+      diffDays: earliest.diff,
+      // Version 238 : jour où l'alerte est apparue (pour ranger la cloche par date)
+      since: manual
+        ? (earliest.dueDate || parisIsoDayOf(c.signedByClientAt) || frDayToIso(c.date) || "")
+        : pick.map(i => status === "late" ? isoDayPlus(i.dueDate, (i.onReceipt ? RECEIPT_GRACE_DAYS : 0) + 1) : isoDayPlus(i.dueDate, -3)).sort()[0],
+      status,
+      manual,
     });
   });
 
@@ -10499,17 +10758,19 @@ function getRecouvrementCases(history) {
   return cases.sort((a, b) => a.diffDays - b.diffDays);
 }
 
-function buildAlertsFromHistory(history) {
+function buildAlertsFromHistory(history, profile = null) {
   if (!Array.isArray(history) || !history.length) return [];
   const alerts = [];
   const retractAlerts = []; // affichées en tête de liste : c'est l'alerte la plus importante
   const now = new Date();
 
-  // Alertes recouvrement (avant + après échéance) — même logique que la liste dans Recouvrement Ferme
-  getRecouvrementCases(history).forEach(rc => {
+  // Alertes de paiement (avant et après la date limite) — mêmes dossiers que Recouvrement Ferme et le tableau de bord
+  getRecouvrementCases(history, profile).forEach(rc => {
+    const amountTxt = rc.amount ? ` · ${fmtEuro(rc.amount)} €` : "";
     if (rc.status === "soon") {
       alerts.push({
         id: "soon_" + rc.id,
+        at: rc.since,
         read: false,
         icon: "⏰",
         accentBg: "#FFFBEB",
@@ -10518,13 +10779,15 @@ function buildAlertsFromHistory(history) {
         badgeBg: "#D97706",
         badgeText: "ÉCHÉANCE PROCHE",
         title: rc.diffDays === 0 ? "Échéance aujourd'hui" : `Échéance dans ${rc.diffDays} j`,
-        detail: `Mission « ${rc.mission} » · ${rc.clientName} arrive à échéance${rc.amount ? " · " + rc.amount + " €" : ""} — envoie un rappel préventif avant que des pénalités s'appliquent.`,
+        detail: `${rc.what} · Mission « ${rc.mission} » · ${rc.clientName}${amountTxt} — envoie un rappel amical avant l'échéance.`,
         action: "recouvrement",
+        contractId: rc.id,
       });
     } else {
       const daysLate = Math.abs(rc.diffDays);
       alerts.push({
         id: "recouvre_" + rc.id,
+        at: rc.since,
         read: false,
         icon: "⚠️",
         accentBg: "#FEF5F5",
@@ -10533,17 +10796,40 @@ function buildAlertsFromHistory(history) {
         badgeBg: "#DC2626",
         badgeText: "PAIEMENT",
         title: "Paiement à relancer",
-        detail: `Mission « ${rc.mission} » · ${rc.clientName} terminée depuis ${daysLate} j${rc.amount ? " · " + rc.amount + " €" : ""}`,
+        detail: `${rc.what} · Mission « ${rc.mission} » · ${rc.clientName}${amountTxt} · ${rc.manual && daysLate === 0 ? "marqué en retard" : `en retard depuis ${daysLate} j`}`,
         action: "recouvrement",
+        contractId: rc.id,
       });
     }
   });
 
   history.forEach(c => {
+    // Version 237 : mission finie, mais la facture qui permet d'être payé n'est pas faite : sans elle, rien n'est dû
+    const toInvoice = c.deleted ? [] : invoicesToSendOf(c);
+    if (toInvoice.length) {
+      const amount = withTva(toInvoice.reduce((sum, i) => sum + i.amount, 0), profile);
+      alerts.push({
+        id: "invoice_" + c.id,
+        at: isoDayPlus(c.endDate, 1),
+        read: false,
+        icon: "🧾",
+        accentBg: "#F8FAFC",
+        accentIcon: "#E2E8F0",
+        accentBorder: "#CBD5E1",
+        badgeBg: "#475569",
+        badgeText: "FACTURE",
+        title: "Facture à envoyer",
+        detail: `Mission « ${c.missionTitle || "Sans titre"} » · ${c.clientName || "Client"} — la mission est finie : envoie ta facture (${toInvoice.map(i => i.label.charAt(0).toLowerCase() + i.label.slice(1)).join(" + ")}, ${fmtEuro(amount)} €) pour être payé.`,
+        action: "mission",
+        contractId: c.id,
+      });
+    }
+
     // Alerte 2 : contrat non signé
     if (!c.deleted && !c.isStandaloneInvoice && c.signatureStatus === "none" && c.date) {
       alerts.push({
         id: "sign_" + c.id,
+        at: c.createdAt || frDayToIso(c.date),
         read: false,
         icon: "✍️",
         accentBg: "#FFFBEB",
@@ -10567,6 +10853,7 @@ function buildAlertsFromHistory(history) {
       const deadlineLabel = deadline.toLocaleDateString("fr-FR");
       alerts.push({
         id: "retractconf_" + c.id,
+        at: c.retractationWaivedAt || c.signedByClientAt,
         read: false,
         icon: late ? "🚨" : "⏳",
         accentBg: late ? "#FEF5F5" : "#FFFBEB",
@@ -10587,6 +10874,7 @@ function buildAlertsFromHistory(history) {
     if (!c.deleted && c.retractationExercisedAt) {
       retractAlerts.push({
         id: "retract_" + c.id,
+        at: c.retractationExercisedAt,
         read: false,
         icon: "⛔",
         accentBg: "#FEF5F5",
@@ -10609,6 +10897,7 @@ function buildNdaAlerts(myNdas) {
   if (!Array.isArray(myNdas) || !myNdas.length) return [];
   return myNdas.filter(n => n.status === "signed").map(n => ({
     id: "nda_signed_" + n.id,
+    at: n.signed_at || n.created_at, // version 238 : pour ranger la cloche par date
     read: false,
     icon: "✅",
     accentBg: "#F0FDF4",
@@ -10632,6 +10921,7 @@ function buildAvenantAlerts(history) {
       if (av.status === "signed") {
         alerts.push({
           id: `avenant_signed_${entry.id}_${av.num}`,
+          at: av.signedByClientAtServer || av.signedByClientAt || av.createdAt, // version 238
           read: false,
           icon: "✅",
           accentBg: "#F0FDF4",
@@ -10653,6 +10943,12 @@ function buildAvenantAlerts(history) {
 function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNdas, onClose, initialAlerts = [], onAlertsChanged }) {
   const panelRef = useRef(null);
   const [alerts, setAlerts] = useState(initialAlerts);
+  // Version 238 : sur téléphone, la bulle d'aide cachait « Tout marquer comme lu » : les bulles se cachent, comme pour
+  // les autres fenêtres
+  useHideFloatingBubbles();
+  // Version 238 : la liste suit les alertes de l'application, même cloche ouverte (avant : figée à l'ouverture)
+  const alertsKey = (initialAlerts || []).map(a => `${a.id}:${a.read ? 1 : 0}`).join("|");
+  useEffect(() => { setAlerts(initialAlerts || []); }, [alertsKey]);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 600);
 
   useEffect(() => {
@@ -10844,6 +11140,9 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
                   display:"-webkit-box", WebkitLineClamp:3, WebkitBoxOrient:"vertical", overflow:"hidden",
                   transition:"color 0.25s ease",
                 }}>{alert.detail}</div>
+                {alert.when && (
+                  <div data-testid="alert-when" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:3, fontWeight:600 }}>{alert.when}</div>
+                )}
               </div>
 
               {/* Flèche si cliquable */}
@@ -11800,7 +12099,7 @@ SIGNATURE (uniquement pour une question qui concerne bien ce contrat) : si le co
 
 Si la question concerne bien ce contrat/ce client, réponds en :
 1. Répondant clairement si le freelance est protégé ou non dans sa situation, en citant l'article ou la clause exacte du contrat qui s'applique (ou en disant clairement qu'aucune clause ne le couvre si c'est le cas)
-2. Donnant un conseil concret et actionnable pour cette situation précise. Si un outil ou un réglage de la liste ci-dessous sert dès maintenant (par exemple « Modifier le contrat » avant la signature du client${formal ? ", ou « Recouvrement Ferme » pour un impayé" : ""}), cite-le ici plutôt que dans « Pour la prochaine fois »
+2. Donnant un conseil concret et actionnable pour cette situation précise. Si un outil ou un réglage de la liste ci-dessous sert dès maintenant (par exemple « Modifier le contrat » avant la signature du client${formal ? ", ou « Recouvrement Ferme » pour un impayé" : ", ou « Recouvrement Ferme » pour relancer un impayé à l'amiable"}), cite-le ici plutôt que dans « Pour la prochaine fois »
 3. Ajoutant un court paragraphe "Pour la prochaine fois" — UNIQUEMENT si l'un des outils ou réglages RÉELLEMENT existants ci-dessous aurait aidé dans cette situation précise. Voici la liste FERMÉE de ce qui existe réellement dans Freeley, avec le nom exact à utiliser :
 - « Acompte à la commande » : le pourcentage du prix payé à la signature ;
 - « Délai de paiement » : comptant, 15, 30, 45 ou 60 jours ;
@@ -11808,7 +12107,7 @@ Si la question concerne bien ce contrat/ce client, réponds en :
 - « Clause de dédommagement en cas d'annulation » : un dédommagement si le client annule la mission en cours ;
 - « Révisions incluses » : le nombre d'allers-retours de corrections compris dans le prix ;
 - « Créer un avenant » : changer le périmètre ou le prix une fois le contrat signé par les deux parties ;
-- « Recouvrement Ferme » : ${formal ? "rappel avant l'échéance d'une facture, relance d'un client qui ne répond plus, et mise en demeure en cas d'impayé" : "rappel avant l'échéance d'une facture, et relance d'un client qui ne répond plus. La mise en demeure d'un impayé n'y est PAS disponible en ce moment : pour une facture déjà en retard, conseille au freelance de relancer lui-même son client, puis, si besoin, de lui envoyer une mise en demeure par lettre recommandée avec accusé de réception ; ne dis jamais que Freeley peut la rédiger ou l'envoyer"} ;
+- « Recouvrement Ferme » : ${formal ? "rappel avant l'échéance d'une facture, relance d'un client qui ne répond plus, et mise en demeure en cas d'impayé" : "rappel avant l'échéance d'une facture, relance amiable d'une facture déjà en retard (sans pénalités chiffrées), et relance d'un client qui ne répond plus. La mise en demeure d'un impayé n'y est PAS disponible en ce moment : si la relance amiable ne suffit pas, conseille au freelance d'envoyer lui-même une mise en demeure par lettre recommandée avec accusé de réception ; ne dis jamais que Freeley peut la rédiger ou l'envoyer"} ;
 - « Radar Client » : vérifier l'entreprise du client avant de signer ;
 - « Clause de bonne conduite et respect mutuel » : en cas de comportement abusif du client ;
 - « Clause de suspension en cas de retard de paiement » : arrêter le travail tant qu'un paiement est en retard ;
@@ -11822,19 +12121,20 @@ Désigne toujours ces outils et réglages par leur nom, entre guillemets comme c
 Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 150-250 mots maximum. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple, il sera affiché tel quel.`;
   return prompt;
 };
-// Vrai quand le courrier serait une mise en demeure formelle (échéance dépassée ou non renseignée)
-const isFormalLetterPath = (dueDate) => !(dueDate && Math.floor((new Date() - new Date(dueDate)) / (1000 * 60 * 60 * 24)) < 0);
+// Vrai quand le paiement est en retard (échéance dépassée ou non renseignée) : mise en demeure formelle, ou relance
+// amiable tant qu'elle est suspendue. Version 237 : le jour même de l'échéance, ce n'est pas encore un retard.
+const isFormalLetterPath = (dueDate) => { const d = daysUntilIso(dueDate); return d === null || d < 0; };
 function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripeConnectAccountId, stripeConnectReady, onGoToProfileTva }) {
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   /* ── State global ── */
   const [manualOpen, setManualOpen] = useState(false); // le mode manuel démarre toujours fermé et vide
-  const recouvrementCases = useMemo(() => getRecouvrementCases(history), [history]);
+  const recouvrementCases = useMemo(() => getRecouvrementCases(history, profile), [history, profile]);
 
   /* ── Dossier actif pour le mode AUTO : celui de l'alerte cliquée (initialCase),
      celui choisi via "Traiter" dans la liste, ou à défaut le plus urgent suivi ── */
   const [selectedCase, setSelectedCase] = useState(initialCase || null);
   const autoCase = selectedCase || recouvrementCases[0] || null;
-  const autoDiffDays = autoCase?.dueDate ? Math.floor((new Date(autoCase.dueDate) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+  const autoDiffDays = autoCase?.dueDate ? daysUntilIso(autoCase.dueDate) : null; // version 237 : en jours du calendrier
   const autoIsLate = autoDiffDays !== null && autoDiffDays < 0;
 
   // Sélectionne un dossier suivi comme dossier actif du mode Auto (bouton "Traiter")
@@ -11847,7 +12147,7 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripe
 
   const [autoStep, setAutoStep]     = useState("alert"); // alert | loading | result
   const [autoLetter, setAutoLetter] = useState("");
-  const [autoLetterType, setAutoLetterType] = useState("formal"); // "formal" | "preventive"
+  const [autoLetterType, setAutoLetterType] = useState("formal"); // "formal" | "preventive" | "amicable" (version 237)
   const [autoTotal, setAutoTotal]   = useState(0);
   const [autoDots, setAutoDots]     = useState(1);
 
@@ -11987,6 +12287,33 @@ Termine par une formule de politesse simple et la signature "${senderName}".
 Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple uniquement, ce message sera affiché tel quel.`;
   };
 
+  // Version 237 — Relance AMIABLE d'un paiement en retard, tant que la mise en demeure formelle est suspendue (taux légaux
+  // à mettre à jour, relecture juridique). Courtoise et claire : aucun chiffre de pénalité, aucune menace, aucune loi citée.
+  const buildAmicablePrompt = (debtor, amount, dueDateLabel, mission, daysLate, isParticulier) => {
+    const p = profile || {};
+    const senderName = withEI(p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" "), p.legalStatus) || "le prestataire";
+    return `Tu es un freelance dont le client n'a pas encore payé une facture arrivée à échéance. Rédige un court message de RELANCE AMIABLE, courtois et clair — PAS une mise en demeure.
+
+De la part de : ${senderName}
+Client : ${debtor} (${isParticulier ? "particulier" : "professionnel"})
+Montant à régler : ${amount} €
+Date d'échéance dépassée : ${dueDateLabel || "non précisée"}
+Retard : ${daysLate} jour${daysLate > 1 ? "s" : ""}
+Mission concernée : ${mission}
+
+Le message doit :
+1. Rappeler poliment que le paiement de ${amount} € pour cette mission ${dueDateLabel ? `était attendu le ${dueDateLabel}` : "est arrivé à échéance"} et qu'il n'a pas encore été reçu, sauf erreur de ta part
+2. Demander de le régler rapidement, ou de signaler s'il y a un souci (facture non reçue, question, difficulté)
+3. Ne parler d'aucun lien de paiement, RIB ou moyen de paiement : Freeley ajoute lui-même les moyens de paiement à la fin du message
+4. Ne mentionner AUCUN chiffre de pénalités, d'intérêts ou d'indemnité, aucun article de loi, aucune mise en demeure, aucune menace de poursuites
+5. Ne jamais affirmer qu'une relance a déjà été envoyée
+6. Rester bref (4-6 phrases), courtois et professionnel, sans jargon juridique${isParticulier ? ", en vouvoyant le client" : ""}
+
+Termine par une formule de politesse simple et la signature "${senderName}".
+
+Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de markdown (pas de tableaux, pas de gras **, pas de titres #) — texte simple uniquement, ce message sera affiché tel quel.`;
+  };
+
   // Relance "SILENCE PROLONGÉ" — pour un client qui ne répond plus en cours de mission (ghosting), indépendamment de tout paiement en retard.
   // Ton neutre et posé, pas de menace, pas de pénalités — le but est juste de formaliser une trace écrite datée, utile si la situation se dégrade plus tard.
   const buildSilencePrompt = (debtor, mission, lastContactLabel, details) => {
@@ -12023,21 +12350,32 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     return text;
   };
 
+  // Version 237 : jours de retard en jours du calendrier (0 le jour de l'échéance : pas encore en retard). Échéance
+  // dépassée : mise en demeure formelle si elle est active, sinon relance amiable (avant : rien, le bouton était bloqué).
+  const daysLateOf = (dueDate) => { const d = daysUntilIso(dueDate); return d === null ? null : -d; };
   const generateAuto = async () => {
     if (!autoCase) return;
-    if (!FORMAL_LETTER_ENABLED && isFormalLetterPath(autoCase.dueDate)) return; // mise en demeure formelle masquée
     setAutoStep("loading");
     setStripeLinkUrl(""); setStripeLinkCopied(false); // évite de réutiliser le lien d'un dossier précédent
     try {
       const isPart = autoCase.typeClient === "particulier";
-      // Jours écoulés depuis l'échéance : positif = dépassée, négatif = pas encore atteinte
-      const rawDiff = autoCase.dueDate ? Math.floor((new Date() - new Date(autoCase.dueDate)) / (1000 * 60 * 60 * 24)) : 30;
+      // Jours écoulés depuis l'échéance : positif = dépassée, 0 ou négatif = pas encore en retard
+      const late = daysLateOf(autoCase.dueDate);
+      const rawDiff = late === null ? 30 : late;
+      const dueDateLabel = isIsoDay(autoCase.dueDate) ? isoDayFr(autoCase.dueDate) : "";
 
-      if (autoCase.dueDate && rawDiff < 0) {
-        // ── Échéance PAS ENCORE atteinte → relance préventive ──
+      if (late !== null && late <= 0) {
+        // ── Échéance PAS ENCORE dépassée → relance préventive ──
         setAutoLetterType("preventive");
-        const dueDateLabel = new Date(autoCase.dueDate).toLocaleDateString("fr-FR");
-        const prompt = buildPreventivePrompt(autoCase.clientName, autoCase.amount, dueDateLabel, autoCase.mission || "Mission freelance", autoCase.clientEmail);
+        const prompt = buildPreventivePrompt(autoCase.clientName, fmtEuro(autoCase.amount), dueDateLabel, autoCase.mission || "Mission freelance", autoCase.clientEmail);
+        setAutoTotal(parseFloat(autoCase.amount) || 0);
+        const text = await callAI(prompt);
+        setAutoLetter(text);
+        setAutoStep("result");
+      } else if (!FORMAL_LETTER_ENABLED) {
+        // ── Échéance dépassée, mise en demeure suspendue → relance amiable, sans pénalités chiffrées ──
+        setAutoLetterType("amicable");
+        const prompt = buildAmicablePrompt(autoCase.clientName, fmtEuro(autoCase.amount), dueDateLabel, autoCase.mission || "Mission freelance", Math.max(1, rawDiff), isPart);
         setAutoTotal(parseFloat(autoCase.amount) || 0);
         const text = await callAI(prompt);
         setAutoLetter(text);
@@ -12045,9 +12383,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       } else {
         // ── Échéance dépassée (ou non renseignée) → mise en demeure formelle ──
         setAutoLetterType("formal");
-        const dueDateLabel = autoCase.dueDate ? new Date(autoCase.dueDate).toLocaleDateString("fr-FR") : "Non renseignée";
         const realDaysLate = Math.max(1, rawDiff);
-        const prompt = buildPrompt(autoCase.clientName, autoCase.amount, dueDateLabel, autoCase.mission || "Mission freelance", realDaysLate, isPart);
+        const prompt = buildPrompt(autoCase.clientName, autoCase.amount, dueDateLabel || "Non renseignée", autoCase.mission || "Mission freelance", realDaysLate, isPart);
         const { total } = computeDueTotal(autoCase.amount, realDaysLate, isPart);
         setAutoTotal(total);
         const text = await callAI(prompt);
@@ -12067,7 +12404,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       setManLetterType("silence");
       setStripeLinkUrl(""); setStripeLinkCopied(false);
       try {
-        const lastContactLabel = manLastContact ? new Date(manLastContact).toLocaleDateString("fr-FR") : "";
+        const lastContactLabel = isIsoDay(manLastContact) ? isoDayFr(manLastContact) : "";
         const prompt = buildSilencePrompt(manDebtor, manDetails || "Mission freelance", lastContactLabel, "");
         setManTotal(0);
         const text = await callAI(prompt);
@@ -12080,29 +12417,36 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       return;
     }
     if (!manDebtor.trim() || !manAmount.trim()) return;
-    if (!FORMAL_LETTER_ENABLED && isFormalLetterPath(manDueDate)) return; // mise en demeure formelle masquée
     setManStep("loading");
     setStripeLinkUrl(""); setStripeLinkCopied(false); // évite de réutiliser le lien d'un dossier précédent
     try {
       const isPart = manClientType === "particulier";
-      // Jours écoulés depuis l'échéance : positif = dépassée, négatif = pas encore atteinte
-      const rawDiff = manDueDate ? Math.floor((new Date() - new Date(manDueDate)) / (1000 * 60 * 60 * 24)) : 30;
+      // Jours écoulés depuis l'échéance : positif = dépassée, 0 ou négatif = pas encore en retard
+      const late = daysLateOf(manDueDate);
+      const rawDiff = late === null ? 30 : late;
+      const dueDateLabel = isIsoDay(manDueDate) ? isoDayFr(manDueDate) : "";
 
-      if (manDueDate && rawDiff < 0) {
-        // ── Échéance PAS ENCORE atteinte → relance préventive (ton amical, pas de pénalités) ──
+      if (late !== null && late <= 0) {
+        // ── Échéance PAS ENCORE dépassée → relance préventive (ton amical, pas de pénalités) ──
         setManLetterType("preventive");
-        const dueDateLabel = new Date(manDueDate).toLocaleDateString("fr-FR");
         const prompt = buildPreventivePrompt(manDebtor, manAmount, dueDateLabel, manDetails || "Mission freelance", manClientEmail);
         setManTotal(parseFloat(manAmount) || 0); // pas de pénalités : le total à régler est simplement le montant dû
+        const text = await callAI(prompt);
+        setManLetter(text);
+        setManStep("result");
+      } else if (!FORMAL_LETTER_ENABLED) {
+        // ── Échéance dépassée, mise en demeure suspendue → relance amiable, sans pénalités chiffrées ──
+        setManLetterType("amicable");
+        const prompt = buildAmicablePrompt(manDebtor, manAmount, dueDateLabel, manDetails || "Mission freelance", Math.max(1, rawDiff), isPart);
+        setManTotal(parseFloat(manAmount) || 0);
         const text = await callAI(prompt);
         setManLetter(text);
         setManStep("result");
       } else {
         // ── Échéance dépassée (ou non renseignée) → mise en demeure formelle ──
         setManLetterType("formal");
-        const dueDateLabel = manDueDate ? new Date(manDueDate).toLocaleDateString("fr-FR") : "Non renseignée";
         const realDaysLate = Math.max(1, rawDiff);
-        const prompt = buildPrompt(manDebtor, manAmount, dueDateLabel, manDetails || "Mission freelance", realDaysLate, isPart);
+        const prompt = buildPrompt(manDebtor, manAmount, dueDateLabel || "Non renseignée", manDetails || "Mission freelance", realDaysLate, isPart);
         const { total } = computeDueTotal(manAmount, realDaysLate, isPart);
         setManTotal(total);
         const text = await callAI(prompt);
@@ -12126,7 +12470,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
 
   /* ── Loading screen shared ── */
   const LoadingScreen = ({ dots, type = "formal" }) => {
-    const isPrev = type === "preventive";
+    const isPrev = type === "preventive" || type === "amicable"; // version 237 : aucune pénalité à calculer
     const isSilence = type === "silence";
     return (
     <div style={{ textAlign:"center", padding:"36px 0" }}>
@@ -12202,6 +12546,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     if (!letter) { alert("Aucune lettre à télécharger."); return; }
     const isPreventive = letterType === "preventive";
     const isSilence = letterType === "silence";
+    const isAmicable = letterType === "amicable"; // version 237 : relance amiable d'un paiement en retard
     try {
       // 1. Récupérer (ou générer) le lien de paiement Stripe pour le montant dû — non pertinent pour une relance "silence prolongé"
       let payUrl = stripeLinkUrl;
@@ -12216,15 +12561,15 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
       const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
-      const NAVY = isSilence ? [30, 64, 175] : isPreventive ? [180, 140, 70] : [26, 54, 93];
+      const NAVY = isSilence ? [30, 64, 175] : isPreventive ? [180, 140, 70] : isAmicable ? [154, 52, 18] : [26, 54, 93];
       const GOLD = [180, 140, 70];
       const today = new Date().toLocaleDateString("fr-FR");
       doc.setFillColor(...NAVY); doc.rect(0, 0, PW, 30, "F");
       doc.setDrawColor(...GOLD); doc.setLineWidth(1); doc.line(0, 30, PW, 30);
       doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
-      doc.text(isSilence ? "MESSAGE DE RELANCE" : isPreventive ? "RAPPEL AVANT ÉCHÉANCE" : "MISE EN DEMEURE DE PAIEMENT", ML, 15);
+      doc.text(isSilence ? "MESSAGE DE RELANCE" : isPreventive ? "RAPPEL AVANT ÉCHÉANCE" : isAmicable ? "RELANCE DE PAIEMENT" : "MISE EN DEMEURE DE PAIEMENT", ML, 15);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-      doc.text(`Établi le ${today} via Freeley${isSilence ? "" : isPreventive ? "" : " — Recouvrement Ferme"}`, ML, 23);
+      doc.text(`Établi le ${today} via Freeley${isSilence || isPreventive || isAmicable ? "" : " — Recouvrement Ferme"}`, ML, 23);
       let y = 42;
       doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
       const cleanText = cleanLetterText(letter);
@@ -12256,29 +12601,32 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         const boxH = 36;
         doc.setFillColor(248, 246, 240); doc.roundedRect(ML, y, cw, boxH, 2, 2, "F");
         doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
-        doc.text(isPreventive ? "RÉGLER PAR CARTE" : "RÉGLER CETTE MISE EN DEMEURE PAR CARTE", ML + 4, y + 8);
+        doc.text(isPreventive || isAmicable ? "RÉGLER PAR CARTE" : "RÉGLER CETTE MISE EN DEMEURE PAR CARTE", ML + 4, y + 8);
         doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(80,80,80);
         const totalLabel = total && total.toFixed ? total.toFixed(2) : total;
         const boxText = isPreventive
           ? `Scanner ce code pour régler dès maintenant le montant de ${totalLabel} € avant l'échéance.`
-          : `Scanner ce code pour régler immédiatement le montant total de ${totalLabel} € réclamé dans ce courrier.`;
+          : isAmicable
+            ? `Scanner ce code pour régler le montant de ${totalLabel} € par carte.`
+            : `Scanner ce code pour régler immédiatement le montant total de ${totalLabel} € réclamé dans ce courrier.`;
         doc.text(doc.splitTextToSize(boxText, cw - 40), ML + 4, y + 15);
         try { doc.addImage(qrBase64, "PNG", ML + cw - 32, y + 3, 30, 30, undefined, PDF_IMAGE_COMPRESSION); } catch(e) {}
         y += boxH;
       }
 
-      doc.save(`${isSilence ? "Relance" : isPreventive ? "Rappel" : "Mise_en_demeure"}_${(clientName||"client").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
+      doc.save(`${isSilence ? "Relance" : isPreventive ? "Rappel" : isAmicable ? "Relance_paiement" : "Mise_en_demeure"}_${(clientName||"client").replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}.pdf`);
     } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
   };
 
   const ResultScreen = ({ letter, onEdit, clientName, clientEmail, clientPhone, total, mission, type = "formal" }) => {
-    const isPreventive = type === "preventive";
+    const isAmicable = type === "amicable"; // version 237 : relance amiable d'un paiement en retard
+    const isPreventive = type === "preventive" || isAmicable; // mêmes couleurs, aucune pénalité
     const isSilence = type === "silence";
     return (
     <div className="fade-up">
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background: isSilence ? "#EFF6FF" : isPreventive ? "#FFFBEB" : "#FEF2F2", border:`1px solid ${isSilence ? "#BFDBFE" : isPreventive ? "#FCD34D" : "#FCA5A5"}`, borderRadius:10, padding:"11px 16px" }}>
         <span>{isSilence ? "💬" : isPreventive ? "⏰" : "🚨"}</span>
-        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isSilence ? "#1E3A8A" : isPreventive ? "#92400E" : "#991B1B" }}>{isSilence ? "Message de relance prêt · Client silencieux" : isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isSilence ? "#1E3A8A" : isPreventive ? "#92400E" : "#991B1B" }}>{isSilence ? "Message de relance prêt · Client silencieux" : isAmicable ? "Relance amiable prête · Sans pénalités ni mise en demeure" : isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
       </div>
       <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"18px 20px", maxHeight:260, overflowY:"auto", marginBottom:14 }}>
         <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanLetterText(letter)}</pre>
@@ -12300,7 +12648,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
         <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Carte bancaire (Stripe) : faire régler {isPreventive ? "" : "le montant total "}({total ? total.toFixed(2) : "0.00"} €) par carte</div>
         <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:10 }}>
-          {isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien correspond au montant total réclamé dans la lettre : le client règle tout en un clic."}
+          {isAmicable ? "Le client règle en un clic, par carte." : isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien correspond au montant total réclamé dans la lettre : le client règle tout en un clic."}
         </div>
         <button
           onClick={() => handleGeneratePaymentLink(total, clientName || "Client", mission, clientEmail)}
@@ -12332,7 +12680,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
           onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";}}
           onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";}}
         >
-          <span style={{ fontSize:16 }}>✉️</span> {isSilence ? "Envoyer le message" : isPreventive ? "Envoyer le rappel" : "Envoyer la mise en demeure"}
+          <span style={{ fontSize:16 }}>✉️</span> {isSilence ? "Envoyer le message" : isAmicable ? "Envoyer la relance" : isPreventive ? "Envoyer le rappel" : "Envoyer la mise en demeure"}
         </button>
       </div>
 
@@ -12346,7 +12694,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
             /* ── Écran confirmation succès ── */
             <div className="fade-up" style={{ background:C.white, borderRadius:20, padding:"24px 16px", maxWidth:400, width:"100%", textAlign:"center", boxShadow:"0 40px 100px rgba(0,0,0,0.35)", border:"1px solid #BBF7D0" }}>
               <div style={{ width:64, height:64, background:"linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%)", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:30, margin:"0 auto 18px" }}>🚀</div>
-              <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:"#065F46", marginBottom:10, lineHeight:1.3 }}>{sendModal?.type === "preventive" ? "Rappel" : "Notification officielle"} envoyé{sendModal?.type === "preventive" ? "" : "e"} avec succès à {sendSuccess}.</div>
+              <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:"#065F46", marginBottom:10, lineHeight:1.3 }}>{({ preventive: "Rappel envoyé", silence: "Message envoyé", amicable: "Relance envoyée" })[sendModal?.type] || "Notification officielle envoyée"} avec succès à {sendSuccess}.</div>
               <div style={{ fontFamily:T.body, fontSize:13, color:"#047857", marginBottom:24, lineHeight:1.65 }}>Le dossier est mis à jour.</div>
               <button
                 onClick={() => { setSendSuccess(null); setSendModal(null); }}
@@ -12370,7 +12718,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                 onClick={() => {
                   const isPrev = sendModal.type === "preventive";
                   const isSilenceSend = sendModal.type === "silence";
-                  const subject = isSilenceSend ? `Petit point sur la mission — ${sendModal.clientName}` : isPrev ? `Rappel avant échéance — ${sendModal.clientName}` : `Mise en demeure de paiement — ${sendModal.clientName}`;
+                  const subject = isSilenceSend ? `Petit point sur la mission — ${sendModal.clientName}` : isPrev ? `Rappel avant échéance — ${sendModal.clientName}` : sendModal.type === "amicable" ? `Relance de paiement — ${sendModal.clientName}` : `Mise en demeure de paiement — ${sendModal.clientName}`;
                   // Version 232 : l'IBAN est ajouté s'il n'est pas déjà écrit dans la lettre, et le lien par carte s'il existe
                   const ibanAlready = ibanInText(sendModal.letter, profile?.iban);
                   const payLines = isSilenceSend ? [] : paymentInstructionLines({ profile: ibanAlready ? { ...profile, iban: "" } : profile, ref: "", cardLink: stripeLinkUrl });
@@ -12387,7 +12735,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   <div style={{ width:44, height:44, background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>📧</div>
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#1E3A8A", marginBottom:3 }}>Par Email</div>
-                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Ouvre ton application email avec {sendModal.type === "silence" ? "le message" : sendModal.type === "preventive" ? "le rappel" : "la mise en demeure"} déjà rédigé{sendModal.type === "preventive" ? "" : "e"}, prêt{sendModal.type === "preventive" ? "" : "e"} à envoyer à {sendModal.clientName}.</div>
+                    <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Ouvre ton application email avec {({ silence: "le message déjà rédigé, prêt", preventive: "le rappel déjà rédigé, prêt", amicable: "la relance déjà rédigée, prête" })[sendModal.type] || "la mise en demeure déjà rédigée, prête"} à envoyer à {sendModal.clientName}.</div>
                   </div>
                 </div>
               </button>
@@ -12399,6 +12747,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                     ? `Bonjour ${sendModal.clientName}, je n'ai plus de nouvelles de votre part depuis un moment concernant notre mission en cours. Pourriez-vous me faire un retour quand vous pourrez ? Merci !`
                     : sendModal.type === "preventive"
                     ? `Bonjour ${sendModal.clientName}, petit rappel amical : votre paiement arrive bientôt à échéance.${String(profile?.iban || "").trim() && stripeLinkUrl ? ` Vous pouvez régler par virement (IBAN ${String(profile.iban).trim()}) ou par carte ici : ${stripeLinkUrl}` : stripeLinkUrl ? ` Vous pouvez régler ici : ${stripeLinkUrl}` : String(profile?.iban || "").trim() ? ` Vous pouvez régler par virement : IBAN ${String(profile.iban).trim()}.` : ""} Merci !`
+                    : sendModal.type === "amicable"
+                    ? `Bonjour ${sendModal.clientName}, sauf erreur de ma part, je n'ai pas encore reçu le paiement de votre facture, arrivée à échéance. Pourriez-vous la régler dès que possible ?${String(profile?.iban || "").trim() && stripeLinkUrl ? ` Vous pouvez régler par virement (IBAN ${String(profile.iban).trim()}) ou par carte ici : ${stripeLinkUrl}` : stripeLinkUrl ? ` Vous pouvez régler ici : ${stripeLinkUrl}` : String(profile?.iban || "").trim() ? ` Vous pouvez régler par virement : IBAN ${String(profile.iban).trim()}.` : ""} Merci !`
                     : `Bonjour ${sendModal.clientName}, une mise en demeure de paiement vous a été adressée concernant une facture en retard. Merci de régulariser rapidement.${stripeLinkUrl ? ` Réglez ici : ${stripeLinkUrl}` : ""} Cordialement.`;
                   window.location.href = `sms:${sendModal.clientPhone || ""}?body=${encodeURIComponent(msg)}`;
                   setSendSuccess(sendModal.clientName);
@@ -12438,7 +12788,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
               <div style={{ width:42, height:42, background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:13, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>🚨</div>
               <div>
                 <div style={{ fontFamily:T.display, fontSize:17, fontWeight:700, color:"#fff", lineHeight:1.2 }}>Recouvrement Ferme</div>
-                <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>Rappels avant échéance & mises en demeure</div>
+                <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>{FORMAL_LETTER_ENABLED ? "Rappels avant échéance & mises en demeure" : "Rappels avant échéance & relances amiables"}</div>
               </div>
             </div>
             <button onClick={onClose} style={{ width:30, height:30, borderRadius:"50%", background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.18)", cursor:"pointer", color:"rgba(255,255,255,0.75)", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>×</button>
@@ -12468,7 +12818,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         <span style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color: rc.status === "late" ? "#991B1B" : "#92400E" }}>{rc.clientName}</span>
                       </div>
                       <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textM, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                        {rc.mission} · {rc.amount ? rc.amount + " €" : "—"} · {rc.status === "late" ? `${Math.abs(rc.diffDays)} j de retard` : rc.diffDays === 0 ? "échéance aujourd'hui" : `échéance dans ${rc.diffDays} j`}
+                        {rc.what ? rc.what + " · " : ""}{rc.mission} · {rc.amount ? fmtEuro(rc.amount) + " €" : "—"} · {rc.status === "late" ? (rc.manual && rc.diffDays === 0 ? "marqué en retard" : `${Math.abs(rc.diffDays)} j de retard`) : rc.diffDays === 0 ? "échéance aujourd'hui" : `échéance dans ${rc.diffDays} j`}
                       </div>
                     </div>
                     <button
@@ -12495,7 +12845,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                       </div>
                       <div style={{ fontFamily:T.body, fontSize:12, color:"#7F1D1D", lineHeight:1.6 }}>
                         <strong>{autoCase.clientName || "Client sans nom"}</strong>
-                        {autoCase.amount && <> — <strong>{autoCase.amount} € TTC</strong></>}
+                        {autoCase.amount ? <> — <strong>{fmtEuro(autoCase.amount)} € TTC</strong>{autoCase.what ? ` (${autoCase.what})` : ""}</> : null}
                         {autoDiffDays !== null && (
                           autoIsLate
                             ? <> en retard de <strong>{Math.abs(autoDiffDays)} jour{Math.abs(autoDiffDays) > 1 ? "s" : ""}</strong></>
@@ -12512,21 +12862,27 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                     </div>
                   )}
                   {/* Bouton génération auto */}
-                  {autoStep === "alert" && (!FORMAL_LETTER_ENABLED && isFormalLetterPath(autoCase.dueDate) ? (
-                    <div style={{ background:"rgba(255,255,255,0.75)", border:"1px solid #FECACA", borderRadius:11, padding:"13px 15px" }}>
-                      <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:800, color:"#991B1B", marginBottom:5 }}>La mise en demeure formelle est temporairement indisponible</div>
-                      <div style={{ fontFamily:T.body, fontSize:12, color:"#7F1D1D", lineHeight:1.6 }}>Les taux légaux sont en cours de mise à jour. Pour relancer ce client, contacte-le directement ou envoie-lui toi-même un courrier recommandé.</div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={generateAuto}
-                      style={{ width:"100%", padding:"13px 16px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:"0 6px 24px rgba(185,28,28,0.45)", transition:"all 0.2s", letterSpacing:"0.02em" }}
-                      onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 32px rgba(185,28,28,0.55)";}}
-                      onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 6px 24px rgba(185,28,28,0.45)";}}
-                    >
-                      <span style={{ fontSize:16 }}>⚡</span> Générer la mise en demeure
-                    </button>
-                  ))}
+                  {autoStep === "alert" && (() => {
+                    // Version 237 : le bouton dit ce qu'il fait. Échéance dépassée et mise en demeure suspendue : relance
+                    // amiable (avant : bloc « temporairement indisponible », sans rien pour relancer ce client).
+                    const latePath = isFormalLetterPath(autoCase.dueDate);
+                    const amicable = latePath && !FORMAL_LETTER_ENABLED;
+                    return (
+                      <>
+                        {amicable && (
+                          <div data-testid="recouvrement-amiable-note" style={{ fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", lineHeight:1.6, marginBottom:10 }}>La mise en demeure formelle est suspendue pour l'instant (mise à jour des taux légaux). Freeley rédige une relance amiable, sans pénalités chiffrées.</div>
+                        )}
+                        <button
+                          onClick={generateAuto}
+                          style={{ width:"100%", padding:"13px 16px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:"0 6px 24px rgba(185,28,28,0.45)", transition:"all 0.2s", letterSpacing:"0.02em" }}
+                          onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 32px rgba(185,28,28,0.55)";}}
+                          onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 6px 24px rgba(185,28,28,0.45)";}}
+                        >
+                          <span style={{ fontSize:16 }}>⚡</span> {!latePath ? "Générer le rappel avant échéance" : amicable ? "Générer la relance amiable" : "Générer la mise en demeure"}
+                        </button>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Loading / Résultat mode auto */}
@@ -12642,7 +12998,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                           ))}
                         </div>
                         <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
-                          {manClientType === "particulier" ? "Taux d'intérêt légal consommateur — pas d'indemnité de 40€ (réservée aux pros)." : "Régime légal complet : BCE + 10 pts + indemnité de 40€."}
+                          {!FORMAL_LETTER_ENABLED ? "Le message s'adapte à ton client : particulier ou professionnel." : manClientType === "particulier" ? "Taux d'intérêt légal consommateur — pas d'indemnité de 40€ (réservée aux pros)." : "Régime légal complet : BCE + 10 pts + indemnité de 40€."}
                         </div>
                       </div>
                       <div style={{ marginBottom:12 }}>
@@ -12655,7 +13011,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
                           {FORMAL_LETTER_ENABLED
                             ? "Dépassée ou à venir — Freeley choisit automatiquement le bon courrier : rappel préventif (pas encore due) ou mise en demeure (en retard)."
-                            : "Pour l'instant, seul le rappel amical avant échéance est disponible : indique une échéance à venir. La mise en demeure formelle est temporairement indisponible."}
+                            : "Dépassée ou à venir : Freeley choisit le bon message. Un rappel amical si l'échéance est à venir, une relance amiable sans pénalités si elle est dépassée (la mise en demeure formelle est suspendue pour l'instant)."}
                         </div>
                       </div>
                       </>
@@ -12683,7 +13039,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         />
                       </div>
                       {(() => {
-                        const manFormalBlocked = manMode !== "silence" && !FORMAL_LETTER_ENABLED && isFormalLetterPath(manDueDate);
+                        const manFormalBlocked = false; // version 237 : échéance dépassée et mise en demeure suspendue → relance amiable
                         const manDisabled = manMode === "silence" ? !manDebtor.trim() : (!manDebtor.trim() || !manAmount.trim() || manFormalBlocked);
                         return (
                         <button
@@ -13766,7 +14122,11 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   // donc la mission n'est pas suspendue en attendant ce paiement.
   const paymentTermsDays = entry?.form?.paymentTerms && entry.form.paymentTerms !== "Comptant" ? entry.form.paymentTerms : null;
   const payAfterDelivery = isComptant && !!paymentTermsDays;
-  const depositAmt = isComptant ? rawPrice : (acomptePct ? Math.round(rawPrice * (acomptePct / 100)) || 0 : 0);
+  const depositBaseAmt = isComptant ? rawPrice : (acomptePct ? Math.round(rawPrice * (acomptePct / 100)) || 0 : 0);
+  // Version 237 : une remise signée par avenant baisse le dernier paiement (le solde, sinon le paiement unique) tant que
+  // sa facture n'est pas faite. Les factures déduisent elles-mêmes la remise : on leur donne le montant de base.
+  const remise = contractRemiseInfo(entry);
+  const depositAmt = remise.target === "first" ? Math.max(depositBaseAmt - remise.appliedTotal, 0) : depositBaseAmt;
   const paymentWord = isComptant ? "paiement" : "acompte";
   const paymentWordCap = isComptant ? "Paiement" : "Acompte";
   // "le paiement" mais "l'acompte" — l'élision est nécessaire devant une voyelle
@@ -13775,7 +14135,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   const progress = paid ? (isComptant ? 100 : Math.min(acomptePct || 0, 100)) : 0;
   // Le solde ne concerne que les contrats avec un vrai acompte partiel (pas comptant, pas 100%)
   const hasSolde = !isComptant && acomptePct > 0 && acomptePct < 100;
-  const soldeAmt = hasSolde ? Math.max(rawPrice - depositAmt, 0) : 0;
+  const soldeBaseAmt = hasSolde ? Math.max(rawPrice - depositBaseAmt, 0) : 0;
+  const soldeAmt = remise.target === "solde" ? Math.max(soldeBaseAmt - remise.appliedTotal, 0) : soldeBaseAmt;
   const soldePaid = entry?.soldeStatus === "paid";
   // Ce que le client paie vraiment : TTC si le freelance facture la TVA (liens Stripe, relances, montants affichés)
   const depositDue = withTva(depositAmt, profile);
@@ -13987,7 +14348,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     setTimeout(() => setRelanceSent(false), 3500);
   };
 
-  if (depositAmt <= 0) {
+  if (depositBaseAmt <= 0) {
     return (
       <div className="fade-up" style={{ marginBottom:24, background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:C.textL, textAlign:"center" }}>
         🛡️ Renseigne un montant sur ce contrat pour activer le suivi automatique du paiement.
@@ -13995,8 +14356,26 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
     );
   }
 
+  // Version 237 : textes de la remise d'avenant (déduite, ou à rendre au client)
+  const remiseNums = (list) => list.map(r => `n°${r.num}`).join(" et ");
+  const remiseAppliedText = remise.appliedTotal > 0
+    ? `Remise ${remise.applied.length > 1 ? "des avenants" : "de l'avenant"} ${remiseNums(remise.applied)} déduite : −${fmtDue(withTva(remise.appliedTotal, profile))} €${dueUnit}`
+    : "";
+  const remiseRefundWhy = remise.reason === "invoice"
+    ? `${remise.unapplied.length > 1 ? `Les avenants ${remiseNums(remise.unapplied)} baissent` : `L'avenant ${remiseNums(remise.unapplied)} baisse`} le prix, mais la facture ${remise.target === "solde" ? "du solde" : "de ce paiement"} était déjà faite : une facture ne se modifie pas.`
+    : remise.reason === "paid"
+      ? `${remise.unapplied.length > 1 ? `Les avenants ${remiseNums(remise.unapplied)} baissent` : `L'avenant ${remiseNums(remise.unapplied)} baisse`} le prix, mais ton client avait déjà payé.`
+      : "La remise est plus grande que ce qu'il restait à payer.";
+
   return (
     <div className="fade-up" style={{ marginBottom: 24 }}>
+
+      {/* Version 237 : remise signée qui n'a pas pu être déduite : à rendre au client (on prévient, on ne bloque pas) */}
+      {remise.unappliedTotal > 0 && (
+        <div data-testid="remise-a-rembourser" style={{ background:"#FEF2F2", border:"1.5px solid #FECACA", borderRadius:14, padding:"14px 18px", marginBottom:14, fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
+          ↩️ <strong>{fmtDue(withTva(remise.unappliedTotal, profile))} €{dueUnit} à rendre à ton client.</strong> {remiseRefundWhy} Rembourse-lui cette somme, ou fais-lui une facture d'avoir.
+        </div>
+      )}
 
       {/* Contrat hors établissement, moins de 7 jours : rappel de la loi (les boutons restent utilisables) */}
       {earlyWindow && (
@@ -14022,7 +14401,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       }}>
 
         {/* Zone état */}
-        {depositAmt > 0 && <div style={{
+        {depositBaseAmt > 0 && <div style={{
           padding: "20px 22px 18px",
           background: paid
             ? "linear-gradient(135deg, #DCFCE7 0%, #F0FDF4 100%)"
@@ -14081,6 +14460,11 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                     : `Ne commence pas la mission. Le contrat prévoit qu'elle démarre à la réception ${isComptant ? "du paiement" : "de l'acompte"}.`
                 }
               </div>
+              {remise.target === "first" && remise.appliedTotal > 0 && (
+                <div data-testid="remise-deduite" style={{ fontFamily: T.body, fontSize: 11.5, fontWeight: 700, color: paid ? "#166534" : "#9A3412", marginTop: 6 }}>
+                  🏷️ {remiseAppliedText}
+                </div>
+              )}
             </div>
 
             {/* Badge status */}
@@ -14119,12 +14503,12 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 {payAfterDelivery ? "Paiement reçu" : `${paymentWordCap} reçu · Mission démarrée`}
               </div>
               <button
-                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte", { form: entry?.form })}
+                onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositBaseAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte", { form: entry?.form, applyRemises: true })}
                 style={{ marginTop:10, padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
               >🧾 Télécharger la facture ({paymentWordCap.toLowerCase()})</button>
               <SendElectronicInvoiceButton
                 contractId={entry?.id} invoiceKey="acompteInvoiceNumber"
-                designation={acompteSpec.designation} montant={depositAmt} missionTitle={entry?.missionTitle}
+                designation={acompteSpec.designation} montant={depositBaseAmt} shownMontant={depositAmt} applyRemises missionTitle={entry?.missionTitle}
                 freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                 freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                 tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
@@ -14150,12 +14534,12 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   ✓ Solde également réglé — contrat entièrement payé
                 </div>
                 <button
-                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form })}
+                  onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeBaseAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form, applyRemises: true })}
                   style={{ padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
                 >🧾 Télécharger la facture (solde)</button>
                 <SendElectronicInvoiceButton
                   contractId={entry?.id} invoiceKey="soldeInvoiceNumber"
-                  designation="Solde" montant={soldeAmt} missionTitle={entry?.missionTitle}
+                  designation="Solde" montant={soldeBaseAmt} shownMontant={soldeAmt} applyRemises missionTitle={entry?.missionTitle}
                   freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                   freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                   tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
@@ -14166,7 +14550,10 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
             ) : (
               <>
                 <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:2, textTransform:"uppercase", letterSpacing:"0.05em" }}>Solde restant à encaisser</div>
-                <div style={{ fontFamily:T.display, fontSize:22, fontWeight:800, color:"#92400E", marginBottom:12 }}>{fmtDue(soldeDue)} €{dueUnit}</div>
+                <div style={{ fontFamily:T.display, fontSize:22, fontWeight:800, color:"#92400E", marginBottom: remise.target === "solde" && remise.appliedTotal > 0 ? 4 : 12 }}>{fmtDue(soldeDue)} €{dueUnit}</div>
+                {remise.target === "solde" && remise.appliedTotal > 0 && (
+                  <div data-testid="remise-deduite" style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E", marginBottom:12 }}>🏷️ {remiseAppliedText}</div>
+                )}
                 {/* Version 232 : le virement et la carte, à égalité ; la relance marche aussi sans Stripe */}
                 <div style={{ marginBottom:12 }}>
                   <PaymentWaysBox
@@ -14197,13 +14584,13 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                     cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#fff",
                   }}>{soldeRelanceSent ? "✓ Envoyé !" : "✉️ Relancer pour le solde"}</button>
                   <button
-                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form })}
+                    onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeBaseAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form, applyRemises: true })}
                     style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
                   >🧾 Télécharger la facture</button>
                 </div>
                 <SendElectronicInvoiceButton
                   contractId={entry?.id} invoiceKey="soldeInvoiceNumber"
-                  designation="Solde" montant={soldeAmt} missionTitle={entry?.missionTitle}
+                  designation="Solde" montant={soldeBaseAmt} shownMontant={soldeAmt} applyRemises missionTitle={entry?.missionTitle}
                   freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                   freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                   tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
@@ -14312,7 +14699,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 
             {/* Télécharger la facture — pour la réclamer, même avant paiement */}
             <button
-              onClick={early.guard("facture", () => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte", { form: entry?.form }))}
+              onClick={early.guard("facture", () => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositBaseAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte", { form: entry?.form, applyRemises: true }))}
               style={{
                 flex: 1, minWidth: 200,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:9,
@@ -14326,7 +14713,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
             <div style={{ flexBasis:"100%" }}>
               <SendElectronicInvoiceButton
                 contractId={entry?.id} invoiceKey="acompteInvoiceNumber"
-                designation={acompteSpec.designation} montant={depositAmt} missionTitle={entry?.missionTitle}
+                designation={acompteSpec.designation} montant={depositBaseAmt} shownMontant={depositAmt} applyRemises missionTitle={entry?.missionTitle}
                 freelanceName={entry?.form?.freelanceName} freelanceSiret={entry?.form?.freelanceSiret}
                 freelanceEmail={entry?.form?.freelanceEmail} freelanceAddress={entry?.form?.freelanceAddress}
                 tvaNumber={profile?.tvaNumber} clientName={entry?.clientName}
@@ -14364,161 +14751,171 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 }
 
 /* ══════════════════════════════════════════ HISTORY PAGE ══ */
-function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHistory, onOpenContract, onOpenRecettes }) {
-  // Un contrat annulé par la rétractation du client ne compte ni dans le chiffre d'affaires, ni dans les
-  // missions en cours, ni dans les meilleurs clients. Il reste visible dans l'activité récente.
-  const history = (allHistory || []).filter(c => !c.retractationExercisedAt);
-  const total = history.length;
-  let caTotal = 0, caPaid = 0, caPending = 0, nbPaid = 0, nbPending = 0, nbLate = 0;
-  let caFromAvenants = 0, caFromAvenantsPaid = 0;
+function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewContract, onOpenHistory, onOpenContract, onOpenRecettes, onOpenRecouvrement }) {
+  // Version 237 : les chiffres ne comptent que ce qui engage vraiment le client : les contrats qu'il a signés et les
+  // factures libres. Les contrats pas encore signés (brouillons, copies, contrats envoyés) ont leur propre case ; les
+  // contrats supprimés et ceux annulés par une rétractation n'entrent plus dans les chiffres. L'argent encaissé vient
+  // du livre des recettes, à la date du paiement (c'est lui qui sert aux déclarations). Les retards sont calculés comme
+  // dans la cloche et Recouvrement Ferme. Avant : tout était additionné (brouillons, copies, contrats supprimés), le
+  // « CA » suivait la date de création des contrats, et « En retard » ne comptait que le bouton choisi à la main.
+  const all = (allHistory || []).filter(c => !c.deleted);
+  const live = all.filter(c => !c.retractationExercisedAt);
+  const signedContracts = live.filter(c => !c.isStandaloneInvoice && isClientSigned(c));
+  const invoices = live.filter(c => c.isStandaloneInvoice);
+  const unsigned = live.filter(c => !c.isStandaloneInvoice && !isClientSigned(c));
+  const tva = !!(profile?.tvaNumber && String(profile.tvaNumber).trim());
+  const ht = tva ? " HT" : "";
+  const ttc = tva ? " TTC" : "";
+  const fmt = (n) => fmtEuro(n);
+  const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
   const now = new Date();
+  const currentYear = String(now.getFullYear());
+  const todayIso = localTodayIso();
+  const priceOf = (c) => (c?.price ? parseFloat(String(c.price).replace(/[^0-9.]/g, "")) || 0 : 0);
+  const avenantDay = (a) => parisIsoDayOf(a.signedByClientAt || a.createdAt);
+  // Avenants signés (une remise est négative), tous ou seulement ceux signés une année donnée
+  const netAvenants = (c, year = null) => (Array.isArray(c.avenants) ? c.avenants : [])
+    .filter(a => a && a.status === "signed" && Number(a.ajustementMontant) && (!year || String(avenantDay(a) || "").slice(0, 4) === year))
+    .reduce((sum, a) => sum + Number(a.ajustementMontant), 0);
+  const valueOf = (c) => Math.max(priceOf(c) + netAvenants(c), 0);
+  const signedDay = (c) => parisIsoDayOf(c.signedByClientAt) || frDayToIso(c.date);
+  const invoiceDay = (c) => (isIsoDay(c.acompteInvoiceDate) ? c.acompteInvoiceDate : frDayToIso(c.date));
 
-  history.forEach(c => {
-    const price = parseFloat(c.price) || 0;
-    // Les avenants signés font partie du chiffre d'affaires réel de la mission, qu'ils soient déjà payés ou non
-    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
-    const avenantsSignedTotal = avenants.filter(a => a.status === "signed" && a.ajustementMontant > 0).reduce((s,a) => s + a.ajustementMontant, 0);
-    const avenantsPaidTotal = avenants.filter(a => a.status === "signed" && a.ajustementMontant > 0 && a.paymentReceived).reduce((s,a) => s + a.ajustementMontant, 0);
-    const avenantsUnpaidTotal = avenantsSignedTotal - avenantsPaidTotal;
-    caFromAvenants += avenantsSignedTotal;
-    caFromAvenantsPaid += avenantsPaidTotal;
+  // ── Livre des recettes : l'argent vraiment reçu, à sa date ──
+  const [ledger, setLedger] = useState(null); // null : lecture en cours
+  useEffect(() => {
+    let alive = true;
+    if (!authUser?.id) { setLedger({ rows: [], ok: false }); return undefined; }
+    loadRecettes().then(r => { if (alive) setLedger({ rows: r.rows || [], ok: !r.missing && !r.error }); });
+    return () => { alive = false; };
+  }, [authUser?.id]);
+  const ledgerRows = ledger?.rows || [];
+  const ledgerOk = !!ledger?.ok;
+  const eurosOf = (rows) => rows.reduce((sum, r) => sum + (Number(r.amount_cents) || 0), 0) / 100;
+  const encaisseYear = eurosOf(ledgerRows.filter(r => String(r.received_on || "").slice(0, 4) === currentYear));
+  const encaisseAll = eurosOf(ledgerRows);
+  const toComplete = ledgerOk ? paidItemsOf(allHistory || [], profile).filter(x => !ledgerRows.some(r => sameRecettePayment(r, x.info))) : [];
+  // Sans livre des recettes (script SQL pas lancé, ou lecture impossible) : les paiements marqués « payés »
+  const paidFallback = [...signedContracts, ...invoices].reduce((sum, c) => sum + contractPaymentItems(c).filter(i => i.paid).reduce((t, i) => t + withTva(i.amount, profile), 0), 0);
 
-    caTotal += price + avenantsSignedTotal;
+  // ── À encaisser et en retard (mêmes dossiers que la cloche et Recouvrement Ferme) ──
+  const dueRows = [...signedContracts, ...invoices]
+    .map(c => ({ c, items: contractPaymentItems(c).filter(i => !i.paid && i.amount > 0) }))
+    .filter(x => x.items.length);
+  const aEncaisser = dueRows.reduce((sum, x) => sum + x.items.reduce((t, i) => t + withTva(i.amount, profile), 0), 0);
+  const dueContracts = dueRows.filter(x => !x.c.isStandaloneInvoice).length;
+  const dueInvoices = dueRows.length - dueContracts;
+  const lateCases = getRecouvrementCases(allHistory || [], profile).filter(rc => rc.status === "late");
+  const lateTotal = lateCases.reduce((sum, rc) => sum + (Number(rc.amount) || 0), 0);
 
-    // Sépare acompte et solde : payer l'acompte ne règle pas le solde, contrairement à avant
-    const acomptePctC = c.form?.acomptePourcentage != null && c.form.acomptePourcentage !== "" ? Number(c.form.acomptePourcentage) : null;
-    const isComptantC = acomptePctC === 0 && price > 0;
-    const hasSoldeC = !isComptantC && acomptePctC > 0 && acomptePctC < 100;
-    const acompteAmtC = isComptantC ? price : (acomptePctC ? Math.round(price * (acomptePctC / 100)) || 0 : 0);
-    const soldeAmtC = hasSoldeC ? Math.max(price - acompteAmtC, 0) : 0;
+  // ── Signé cette année : contrats signés par le client cette année, avenants signés cette année, factures libres ──
+  const signedThisYear = signedContracts.filter(c => String(signedDay(c) || "").slice(0, 4) === currentYear);
+  const invoicesThisYear = invoices.filter(c => String(invoiceDay(c) || "").slice(0, 4) === currentYear);
+  const signeYear = Math.max(
+    signedThisYear.reduce((sum, c) => sum + priceOf(c), 0)
+    + signedContracts.reduce((sum, c) => sum + netAvenants(c, currentYear), 0)
+    + invoicesThisYear.reduce((sum, c) => sum + priceOf(c), 0), 0);
+  const unsignedTotal = unsigned.reduce((sum, c) => sum + priceOf(c), 0);
+  const sentToClient = unsigned.filter(c => c.signatureStatus === "pending_client").length;
+  const panierMoyen = signedContracts.length ? signedContracts.reduce((sum, c) => sum + valueOf(c), 0) / signedContracts.length : 0;
 
-    const st = c.paymentStatus || "pending";
-    if (st === "paid" && hasSoldeC) {
-      // Acompte réglé, mais le solde peut rester dû
-      caPaid += acompteAmtC;
-      nbPaid++;
-      if (c.soldeStatus === "paid") caPaid += soldeAmtC;
-      else caPending += soldeAmtC;
-    } else if (st === "paid") {
-      caPaid += price; nbPaid++;
-    } else {
-      caPending += price;
-      if (st === "late") nbLate++; else nbPending++;
-    }
-    // Les avenants payés/impayés s'ajoutent indépendamment du statut du contrat principal
-    caPaid += avenantsPaidTotal;
-    caPending += avenantsUnpaidTotal;
-  });
-
-  const fmt = (n) => n.toLocaleString("fr-FR");
-  const currentYear = now.getFullYear();
-  const caThisYear = history.reduce((sum, c) => {
-    const d = c.date ? c.date.split("/") : null;
-    const y = d && d[2] ? Number(d[2]) : null;
-    let contractTotal = y === currentYear ? (parseFloat(c.price) || 0) : 0;
-    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
-    avenants.forEach(a => {
-      if (a.status === "signed" && a.ajustementMontant > 0) {
-        const aDate = a.signedByClientAt || a.createdAt;
-        if (aDate && new Date(aDate).getFullYear() === currentYear) contractTotal += a.ajustementMontant;
-      }
-    });
-    return sum + contractTotal;
-  }, 0);
-  const panierMoyen = total > 0 ? caTotal / total : 0;
-
-  // Parser une date "JJ/MM/AAAA" (format de c.date) en objet Date
-  const parseFrDate = (s) => {
-    if (!s) return null;
-    const parts = s.split("/");
-    if (parts.length !== 3) return null;
-    return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
-  };
-
-  // ── Évolution du CA sur 6 mois ──
+  // ── 6 derniers mois : l'argent encaissé (livre des recettes), sinon les contrats signés ──
+  const chartFromLedger = ledger === null || ledgerOk;
   const months = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleDateString("fr-FR", { month: "short" }), total: 0 });
+    months.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, label: d.toLocaleDateString("fr-FR", { month: "short" }), total: 0 });
   }
-  history.forEach(c => {
-    const d = parseFrDate(c.date);
-    if (!d) return;
-    const m = months.find(mo => mo.year === d.getFullYear() && mo.month === d.getMonth());
-    if (m) m.total += parseFloat(c.price) || 0;
-  });
-  // Ajoute les avenants signés au mois où ils ont réellement été signés
-  history.forEach(c => {
-    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
-    avenants.forEach(a => {
-      if (a.status !== "signed" || !(a.ajustementMontant > 0)) return;
-      const aDateStr = a.signedByClientAt || a.createdAt;
-      if (!aDateStr) return;
-      const aDate = new Date(aDateStr);
-      if (isNaN(aDate)) return;
-      const m = months.find(mo => mo.year === aDate.getFullYear() && mo.month === aDate.getMonth());
-      if (m) m.total += a.ajustementMontant;
+  const addTo = (day, amount) => { const m = months.find(mo => mo.key === String(day || "").slice(0, 7)); if (m) m.total += amount; };
+  if (chartFromLedger) ledgerRows.forEach(r => addTo(r.received_on, (Number(r.amount_cents) || 0) / 100));
+  else {
+    signedContracts.forEach(c => {
+      addTo(signedDay(c), priceOf(c));
+      (Array.isArray(c.avenants) ? c.avenants : []).forEach(a => { if (a && a.status === "signed" && Number(a.ajustementMontant)) addTo(avenantDay(a), Number(a.ajustementMontant)); });
     });
-  });
+    invoices.forEach(c => addTo(invoiceDay(c), priceOf(c)));
+  }
   const maxMonth = Math.max(1, ...months.map(m => m.total));
 
-  // ── Meilleurs clients ──
+  // ── Meilleurs clients : regroupés par entreprise (numéro SIREN, puis nom de l'entreprise), sinon par nom ──
   const clientsMap = {};
-  history.forEach(c => {
-    const key = c.clientName || "Client sans nom";
-    if (!clientsMap[key]) clientsMap[key] = { name: key, company: c.clientCompany || "", total: 0, count: 0 };
-    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
-    const avenantsSignedTotal = avenants.filter(a => a.status === "signed" && a.ajustementMontant > 0).reduce((s,a) => s + a.ajustementMontant, 0);
-    clientsMap[key].total += (parseFloat(c.price) || 0) + avenantsSignedTotal;
-    clientsMap[key].count += 1;
+  [...signedContracts, ...invoices].forEach(c => {
+    const company = String(c.clientCompany || c.form?.clientCompany || "").trim();
+    const name = String(c.clientName || c.form?.clientName || "").trim();
+    const siren = String(c.form?.clientSiret || "").replace(/\D/g, "").slice(0, 9);
+    const key = siren.length === 9 ? "s:" + siren : company ? "e:" + company.toLowerCase() : "n:" + (name.toLowerCase() || "?");
+    if (!clientsMap[key]) clientsMap[key] = { name: company || name || "Client sans nom", total: 0, contracts: 0 };
+    clientsMap[key].total += valueOf(c);
+    if (!c.isStandaloneInvoice) clientsMap[key].contracts += 1;
   });
   const topClients = Object.values(clientsMap).sort((a, b) => b.total - a.total).slice(0, 5);
   const maxClient = Math.max(1, ...topClients.map(c => c.total));
 
-  // ── Missions en cours (date de fin future) ──
-  const missionsEnCours = history.filter(c => {
-    if (c.deleted || c.isStandaloneInvoice || !c.endDate) return false;
-    const end = new Date(c.endDate);
-    return !isNaN(end) && end >= now;
-  }).sort((a, b) => new Date(a.endDate) - new Date(b.endDate)).slice(0, 5);
+  // ── Missions en cours (jusqu'au soir de leur dernier jour), puis à venir ──
+  const missions = signedContracts
+    .filter(c => isIsoDay(c.endDate) && c.endDate >= todayIso)
+    .map(c => ({ c, upcoming: isIsoDay(c.startDate) && c.startDate > todayIso }))
+    .sort((a, b) => (Number(a.upcoming) - Number(b.upcoming)) || String(a.upcoming ? a.c.startDate : a.c.endDate).localeCompare(String(b.upcoming ? b.c.startDate : b.c.endDate)))
+    .slice(0, 5);
 
-  // ── Avenants à suivre (en attente de signature, ou signés mais pas encore payés) ──
+  // ── Avenants à suivre (à signer, à encaisser) et remises à rendre au client ──
   const avenantsASuivre = [];
-  history.forEach(c => {
-    if (c.deleted) return;
-    const avenants = Array.isArray(c.avenants) ? c.avenants : [];
-    avenants.forEach(a => {
-      if (a.status === "pending_signature" || (a.status === "signed" && a.ajustementMontant > 0 && !a.paymentReceived)) {
-        avenantsASuivre.push({ contract: c, avenant: a });
-      }
+  signedContracts.forEach(c => {
+    (Array.isArray(c.avenants) ? c.avenants : []).forEach(a => {
+      if (a && (a.status === "pending_signature" || (a.status === "signed" && a.ajustementMontant > 0 && !a.paymentReceived))) avenantsASuivre.push({ contract: c, avenant: a });
     });
+    const rem = contractRemiseInfo(c);
+    if (rem.unappliedTotal > 0) avenantsASuivre.push({ contract: c, refund: rem });
   });
 
-  // ── Activité récente (5 derniers, hors supprimés) ──
-  const recent = (allHistory || []).filter(c => !c.deleted && !c.isStandaloneInvoice).slice(0, 5);
+  // ── Activité récente (5 dernières fiches, hors supprimées), avec leur état ──
+  const recent = all.slice(0, 5);
+  const statusOf = (c) => {
+    if (c.retractationExercisedAt) return ["Rétracté", "#B91C1C", "#FEE2E2"];
+    const items = contractPaymentItems(c);
+    const allPaid = items.length > 0 && items.every(i => i.paid || !(i.amount > 0));
+    if (c.isStandaloneInvoice) return allPaid ? ["Payée", "#166534", "#DCFCE7"] : ["À encaisser", "#92400E", "#FEF3C7"];
+    if (!isClientSigned(c)) return c.signatureStatus === "pending_client" ? ["En attente du client", "#92400E", "#FEF3C7"] : ["Pas encore signé", "#475569", "#F1F5F9"];
+    return allPaid ? ["Payé", "#166534", "#DCFCE7"] : ["Signé", C.navy, "#E8EEF6"];
+  };
 
-  const stat = (label, value, sub, color) => (
-    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06", flex:"1 1 200px", minWidth:0 }}>
+  const stat = (label, value, sub, color, { onClick = null, testId, subColor } = {}) => (
+    <div data-testid={testId} onClick={onClick || undefined} role={onClick ? "button" : undefined} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06", flex:"1 1 200px", minWidth:0, cursor: onClick ? "pointer" : "default" }}>
       <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.1em", color:C.textL, fontWeight:600, marginBottom:8, textTransform:"uppercase" }}>{label}</div>
       <div style={{ fontFamily:T.display, fontSize:28, color: color || C.navy, fontWeight:700, lineHeight:1.1 }}>{value}</div>
-      {sub && <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginTop:6 }}>{sub}</div>}
+      {sub && <div style={{ fontFamily:T.body, fontSize:12, color: subColor || C.textM, marginTop:6, lineHeight:1.45 }}>{sub}</div>}
     </div>
   );
 
   const cardStyle = { background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06" };
   const cardTitle = { fontFamily:T.body, fontSize:11, letterSpacing:"0.1em", color:C.gold, fontWeight:700, marginBottom:16, textTransform:"uppercase" };
 
+  const encaisseLabel = chartFromLedger ? `Encaissé en ${currentYear}` : "Encaissé";
+  const encaisseValue = ledger === null ? "…" : `${fmt(ledgerOk ? encaisseYear : paidFallback)} €${ttc}`;
+  const encaisseSub = ledger === null ? "Lecture de ton livre des recettes…"
+    : !ledgerOk ? "Paiements marqués « payés » (livre des recettes indisponible)"
+      : toComplete.length ? `⚠️ ${plural(toComplete.length, "paiement reçu", "paiements reçus")} sans date : complète ton livre des recettes`
+        : `${fmt(encaisseAll)} €${ttc} depuis le début, d'après ton livre des recettes`;
+  const dueSub = dueRows.length
+    ? `sur ${[dueContracts ? plural(dueContracts, "contrat signé", "contrats signés") : null, dueInvoices ? plural(dueInvoices, "facture libre", "factures libres") : null].filter(Boolean).join(" et ")}`
+    : "rien en attente";
+  const signeSub = [plural(signedThisYear.length, "contrat signé", "contrats signés"), invoicesThisYear.length ? plural(invoicesThisYear.length, "facture libre", "factures libres") : null].filter(Boolean).join(" et ");
+  const unsignedSub = unsigned.length
+    ? `${plural(unsigned.length, "contrat pas encore signé", "contrats pas encore signés")}${sentToClient ? `, dont ${sentToClient} envoyé${sentToClient > 1 ? "s" : ""} au client` : ""}`
+    : "aucun contrat en attente";
+
   return (
     <div style={{ maxWidth:960, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
       <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Tableau de bord</div>
-      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom: onOpenRecettes ? 12 : 28 }}>Vue d'ensemble de ton activité freelance.</div>
+      <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:4 }}>Vue d'ensemble de ton activité freelance.</div>
+      <div data-testid="dashboard-rule" style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom: onOpenRecettes ? 12 : 28, lineHeight:1.5 }}>Seuls les contrats signés par ton client et tes factures libres comptent dans les chiffres.</div>
       {/* Version 234 : les sommes vraiment reçues, avec leur date (déclarations, comptabilité) */}
       {onOpenRecettes && (
         <button data-testid="dashboard-recettes" onClick={onOpenRecettes} style={{ marginBottom:24, padding:"10px 16px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy }}>📒 Livre des recettes →</button>
       )}
 
-      {total === 0 ? (
+      {all.length === 0 ? (
         <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #1B2E4B06" }}>
           <div style={{ fontSize:40, marginBottom:16 }}>📊</div>
           <div style={{ fontFamily:T.display, fontSize:19, color:C.navy, marginBottom:8 }}>Aucune donnée pour l'instant</div>
@@ -14527,28 +14924,29 @@ function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHisto
         </div>
       ) : (
         <>
-          {/* ── Stats principales ── */}
+          {/* ── Argent : encaissé, à encaisser, en retard ── */}
           <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
-            {stat("Chiffre d'affaires total", `${fmt(caTotal)} €`, `${total} contrat${total>1?"s":""}${caFromAvenants > 0 ? ` · dont ${fmt(caFromAvenants)} € d'avenants` : ""}`, C.navy)}
-            {stat("Encaissé", `${fmt(caPaid)} €`, `${nbPaid} contrat${nbPaid>1?"s":""} payé${nbPaid>1?"s":""}${caFromAvenantsPaid > 0 ? ` · dont ${fmt(caFromAvenantsPaid)} € d'avenants` : ""}`, "#059669")}
-            {stat("En attente", `${fmt(caPending)} €`, `${nbPending + nbLate} à encaisser`, "#D97706")}
+            {stat(encaisseLabel, encaisseValue, encaisseSub, "#059669", { onClick: onOpenRecettes, testId: "dash-encaisse", subColor: ledgerOk && toComplete.length ? "#B45309" : undefined })}
+            {stat("À encaisser", `${fmt(aEncaisser)} €${ttc}`, dueSub, "#D97706", { testId: "dash-a-encaisser" })}
+            {stat("En retard", `${lateCases.length}`, lateCases.length ? `${fmt(lateTotal)} €${ttc} à relancer` : "tout est à jour", lateCases.length ? "#DC2626" : "#059669", { onClick: lateCases.length && onOpenRecouvrement ? onOpenRecouvrement : null, testId: "dash-retard" })}
           </div>
+          {/* ── Activité : signé cette année, en attente de signature, panier moyen ── */}
           <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
-            {stat("CA " + currentYear, `${fmt(caThisYear)} €`, "année en cours", C.gold)}
-            {stat("En retard", `${nbLate}`, nbLate > 0 ? "à relancer" : "tout est à jour", nbLate > 0 ? "#DC2626" : "#059669")}
-            {stat("Panier moyen", `${fmt(Math.round(panierMoyen))} €`, "par contrat", C.navy)}
+            {stat(`Signé en ${currentYear}`, `${fmt(signeYear)} €${ht}`, signeSub, C.gold, { testId: "dash-signe" })}
+            {stat("En attente de signature", `${fmt(unsignedTotal)} €${ht}`, unsignedSub, C.navy, { onClick: unsigned.length ? onOpenHistory : null, testId: "dash-a-signer" })}
+            {stat("Panier moyen", `${fmt(Math.round(panierMoyen))} €${ht}`, "par contrat signé", C.navy, { testId: "dash-panier" })}
           </div>
 
-          {/* ── Graphique évolution CA ── */}
-          <div style={{ ...cardStyle, marginBottom:16 }}>
-            <div style={cardTitle}>Évolution du chiffre d'affaires · 6 derniers mois</div>
+          {/* ── Graphique des 6 derniers mois ── */}
+          <div data-testid="dash-chart" style={{ ...cardStyle, marginBottom:16 }}>
+            <div style={cardTitle}>{chartFromLedger ? "Encaissé" : "Contrats signés"} · 6 derniers mois</div>
             <div style={{ display:"flex", alignItems:"flex-end", gap:10, height:140 }}>
               {months.map((m, i) => (
-                <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:6, height:"100%", justifyContent:"flex-end" }}>
-                  <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, fontWeight:600 }}>{m.total > 0 ? fmt(m.total) + " €" : ""}</div>
+                <div key={m.key} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:6, height:"100%", justifyContent:"flex-end" }}>
+                  <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, fontWeight:600 }}>{m.total !== 0 ? fmt(m.total) + " €" : ""}</div>
                   <div style={{
                     width:"100%", maxWidth:36,
-                    height: `${Math.max(4, (m.total / maxMonth) * 92)}px`,
+                    height: `${Math.max(4, (Math.max(m.total, 0) / maxMonth) * 92)}px`,
                     background: i === months.length - 1 ? `linear-gradient(180deg, ${C.gold} 0%, ${C.navy} 100%)` : C.borderL,
                     borderRadius:"5px 5px 2px 2px",
                     transition:"height 0.3s ease",
@@ -14561,17 +14959,17 @@ function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHisto
 
           {/* ── Meilleurs clients + Missions en cours ── */}
           <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
-            <div style={{ ...cardStyle, flex:"1 1 320px", minWidth:0 }}>
+            <div data-testid="dash-clients" style={{ ...cardStyle, flex:"1 1 320px", minWidth:0 }}>
               <div style={cardTitle}>🏆 Meilleurs clients</div>
               {topClients.length === 0 ? (
-                <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textL }}>Aucun client pour l'instant.</div>
+                <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textL }}>Aucun contrat signé pour l'instant.</div>
               ) : (
                 <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
                   {topClients.map((cl, i) => (
                     <div key={i}>
-                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
-                        <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600 }}>{cl.name}{cl.company ? ` · ${cl.company}` : ""}</span>
-                        <span style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, fontWeight:700 }}>{fmt(cl.total)} €</span>
+                      <div style={{ display:"flex", justifyContent:"space-between", gap:8, marginBottom:4 }}>
+                        <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{cl.name}{cl.contracts > 1 ? ` · ${cl.contracts} contrats` : ""}</span>
+                        <span style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, fontWeight:700, flexShrink:0 }}>{fmt(cl.total)} €{ht}</span>
                       </div>
                       <div style={{ height:6, background:C.creamD, borderRadius:4, overflow:"hidden" }}>
                         <div style={{ height:"100%", width:`${Math.max(4, cl.total/maxClient*100)}%`, background:C.gold, borderRadius:4 }} />
@@ -14582,23 +14980,24 @@ function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHisto
               )}
             </div>
 
-            <div style={{ ...cardStyle, flex:"1 1 320px", minWidth:0 }}>
+            <div data-testid="dash-missions" style={{ ...cardStyle, flex:"1 1 320px", minWidth:0 }}>
               <div style={cardTitle}>🚀 Missions en cours</div>
-              {missionsEnCours.length === 0 ? (
+              {missions.length === 0 ? (
                 <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textL }}>Aucune mission en cours actuellement.</div>
               ) : (
                 <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                  {missionsEnCours.map((c, i) => {
-                    const end = new Date(c.endDate);
-                    const daysLeft = Math.ceil((end - now) / (1000*60*60*24));
+                  {missions.map(({ c, upcoming }, i) => {
+                    const daysLeft = daysUntilIso(c.endDate);
+                    const badge = upcoming ? `À venir · ${isoDayFr(c.startDate).slice(0, 5)}` : daysLeft === 0 ? "Aujourd'hui" : daysLeft === 1 ? "Demain" : `${daysLeft} j`;
+                    const urgent = !upcoming && daysLeft <= 3;
                     return (
-                      <div key={i} onClick={() => onOpenContract && onOpenContract(c)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor: onOpenContract ? "pointer" : "default", padding:"6px 0", borderBottom: i < missionsEnCours.length-1 ? `1px solid ${C.borderL}` : "none" }}>
+                      <div key={c.id || i} onClick={() => onOpenContract && onOpenContract(c)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor: onOpenContract ? "pointer" : "default", padding:"6px 0", borderBottom: i < missions.length-1 ? `1px solid ${C.borderL}` : "none" }}>
                         <div style={{ minWidth:0 }}>
                           <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
                           <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName}</div>
                         </div>
-                        <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color: daysLeft <= 3 ? "#DC2626" : "#059669", background: daysLeft <= 3 ? "#FEE2E2" : "#D1FAE5", borderRadius:20, padding:"3px 9px", flexShrink:0, marginLeft:8 }}>
-                          {daysLeft <= 0 ? "Aujourd'hui" : `${daysLeft} j`}
+                        <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color: upcoming ? "#1D4ED8" : urgent ? "#DC2626" : "#059669", background: upcoming ? "#DBEAFE" : urgent ? "#FEE2E2" : "#D1FAE5", borderRadius:20, padding:"3px 9px", flexShrink:0, marginLeft:8 }}>
+                          {badge}
                         </span>
                       </div>
                     );
@@ -14610,17 +15009,17 @@ function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHisto
 
           {/* ── Avenants à suivre ── */}
           {avenantsASuivre.length > 0 && (
-            <div style={{ ...cardStyle, marginBottom:16 }}>
+            <div data-testid="dash-avenants" style={{ ...cardStyle, marginBottom:16 }}>
               <div style={cardTitle}>📎 Avenants à suivre</div>
               <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                {avenantsASuivre.map(({ contract: c, avenant: a }, i) => (
+                {avenantsASuivre.map(({ contract: c, avenant: a, refund }, i) => (
                   <div key={i} onClick={() => onOpenContract && onOpenContract(c)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor: onOpenContract ? "pointer" : "default", padding:"6px 0", borderBottom: i < avenantsASuivre.length-1 ? `1px solid ${C.borderL}` : "none" }}>
                     <div style={{ minWidth:0 }}>
-                      <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>Avenant n°{a.num} — {c.missionTitle || "Sans titre"}</div>
-                      <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName}{a.ajustementMontant > 0 ? ` · ${fmt(a.ajustementMontant)} €` : ""}</div>
+                      <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{refund ? "Remise à rendre" : `Avenant n°${a.num}`} — {c.missionTitle || "Sans titre"}</div>
+                      <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName}{refund ? ` · ${fmt(withTva(refund.unappliedTotal, profile))} €${ttc}` : a.ajustementMontant > 0 ? ` · ${fmt(a.ajustementMontant)} €${ht}` : ""}</div>
                     </div>
-                    <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color: a.status === "pending_signature" ? "#B45309" : "#D97706", background: a.status === "pending_signature" ? "#FEF3C7" : "#FFFBEB", borderRadius:20, padding:"3px 9px", flexShrink:0, marginLeft:8 }}>
-                      {a.status === "pending_signature" ? "⏳ À signer" : "💰 À encaisser"}
+                    <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color: refund ? "#991B1B" : a.status === "pending_signature" ? "#B45309" : "#D97706", background: refund ? "#FEE2E2" : a.status === "pending_signature" ? "#FEF3C7" : "#FFFBEB", borderRadius:20, padding:"3px 9px", flexShrink:0, marginLeft:8 }}>
+                      {refund ? "↩️ À rembourser" : a.status === "pending_signature" ? "⏳ À signer" : "💰 À encaisser"}
                     </span>
                   </div>
                 ))}
@@ -14629,27 +15028,32 @@ function DashboardPage({ history: allHistory, onBack, onNewContract, onOpenHisto
           )}
 
           {/* ── Activité récente ── */}
-          <div style={{ ...cardStyle, marginBottom:28 }}>
+          <div data-testid="dash-recent" style={{ ...cardStyle, marginBottom:28 }}>
             <div style={cardTitle}>🕓 Activité récente</div>
             <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
-              {recent.map((c, i) => (
-                <div key={i} onClick={() => onOpenContract && onOpenContract(c)} style={{
-                  display:"flex", alignItems:"center", justifyContent:"space-between",
-                  padding:"11px 4px", cursor: onOpenContract ? "pointer" : "default",
-                  borderBottom: i < recent.length-1 ? `1px solid ${C.borderL}` : "none",
-                }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10, minWidth:0 }}>
-                    <div style={{ width:32, height:32, borderRadius:9, background:C.creamD, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>📄</div>
-                    <div style={{ minWidth:0 }}>
-                      <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
-                      <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName} · {c.date}</div>
+              {recent.map((c, i) => {
+                const [stLabel, stColor, stBg] = statusOf(c);
+                const clickable = !!onOpenContract && !c.isStandaloneInvoice;
+                return (
+                  <div key={c.id || i} onClick={() => clickable && onOpenContract(c)} style={{
+                    display:"flex", alignItems:"center", justifyContent:"space-between",
+                    padding:"11px 4px", cursor: clickable ? "pointer" : "default",
+                    borderBottom: i < recent.length-1 ? `1px solid ${C.borderL}` : "none",
+                  }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10, minWidth:0 }}>
+                      <div style={{ width:32, height:32, borderRadius:9, background:C.creamD, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>{c.isStandaloneInvoice ? "🧾" : "📄"}</div>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
+                        <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName} · {c.date}</div>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:3, flexShrink:0, marginLeft:8 }}>
+                      {!c.retractationExercisedAt && <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:700 }}>{fmt(isClientSigned(c) ? valueOf(c) : priceOf(c))} €{ht}</span>}
+                      <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color:stColor, background:stBg, borderRadius:20, padding:"2px 8px", whiteSpace:"nowrap" }}>{stLabel}</span>
                     </div>
                   </div>
-                  {c.retractationExercisedAt
-                    ? <span style={{ fontFamily:T.body, fontSize:11.5, color:"#B91C1C", fontWeight:700, flexShrink:0, marginLeft:8 }}>Rétracté</span>
-                    : <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:700, flexShrink:0, marginLeft:8 }}>{fmt(parseFloat(c.price)||0)} €</span>}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -14727,6 +15131,10 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
             const hasSoldeA = !isComptantA && acomptePctA > 0 && acomptePctA < 100;
             const acompteAmtA = isComptantA ? Number(entry.price) : (acomptePctA ? Math.round(Number(entry.price) * (acomptePctA / 100)) || 0 : 0);
             const soldeAmtA = hasSoldeA ? Math.max(Number(entry.price) - acompteAmtA, 0) : 0;
+            // Version 237 : montants affichés avec la remise d'avenant (les factures la déduisent elles-mêmes)
+            const remA = contractRemiseInfo(entry);
+            const shownAcompteA = remA.target === "first" ? Math.max(acompteAmtA - remA.appliedTotal, 0) : acompteAmtA;
+            const shownSoldeA = remA.target === "solde" ? Math.max(soldeAmtA - remA.appliedTotal, 0) : soldeAmtA;
             return (
               <div key={entry.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
                 <div onClick={() => setOpenId(isOpen ? null : entry.id)} style={{ padding:"14px 18px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
@@ -14776,12 +15184,12 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && acompteAmtA > 0 && (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte", { form: entry.form })}
+                            onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte", { form: entry.form, applyRemises: true })}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture {isComptantA ? "paiement" : "acompte"}</button>
                           <SendElectronicInvoiceButton compact
                             contractId={entry.id} invoiceKey="acompteInvoiceNumber"
-                            designation={contractInvoiceSpec(entry.form, "acompte").designation} montant={acompteAmtA} missionTitle={entry.missionTitle}
+                            designation={contractInvoiceSpec(entry.form, "acompte").designation} montant={acompteAmtA} shownMontant={shownAcompteA} applyRemises missionTitle={entry.missionTitle}
                             freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
                             freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
                             tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
@@ -14793,12 +15201,12 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && hasSoldeA && (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "solde", { form: entry.form })}
+                            onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "solde", { form: entry.form, applyRemises: true })}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture solde</button>
                           <SendElectronicInvoiceButton compact
                             contractId={entry.id} invoiceKey="soldeInvoiceNumber"
-                            designation="Solde" montant={soldeAmtA} missionTitle={entry.missionTitle}
+                            designation="Solde" montant={soldeAmtA} shownMontant={shownSoldeA} applyRemises missionTitle={entry.missionTitle}
                             freelanceName={entry.form?.freelanceName} freelanceSiret={entry.form?.freelanceSiret}
                             freelanceEmail={entry.form?.freelanceEmail} freelanceAddress={entry.form?.freelanceAddress}
                             tvaNumber={profile?.tvaNumber} clientName={entry.clientName}
@@ -15547,6 +15955,20 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                     </div>
                   )}
 
+                  {/* Version 237 : remise signée (ajustement négatif) : déduite du dernier paiement, ou à rendre au client */}
+                  {av.status === "signed" && Number(av.ajustementMontant) < 0 && (() => {
+                    const remInfo = contractRemiseInfo(historyView);
+                    const appliedHere = remInfo.applied.some(r => r.num === Number(av.num));
+                    return (
+                      <div data-testid={`avenant-remise-${av.num}`} style={{ background: appliedHere ? "#F0FDF4" : "#FEF2F2", border:`1px solid ${appliedHere ? "#86EFAC" : "#FECACA"}`, borderRadius:8, padding:"10px 12px", marginBottom:10, fontFamily:T.body, fontSize:11.5, color: appliedHere ? "#166534" : "#991B1B", lineHeight:1.55 }}>
+                        🏷️ <strong>Remise de {fmtEuro(Math.abs(Number(av.ajustementMontant)))} € {contractPricing(historyView.form, profile).enteredUnit}</strong>
+                        {appliedHere
+                          ? ` : déduite ${remInfo.target === "solde" ? "du solde" : "du paiement"}.`
+                          : " : pas déduite, car la facture était déjà faite ou le paiement déjà reçu. Rends cette somme à ton client, ou fais-lui une facture d'avoir."}
+                      </div>
+                    );
+                  })()}
+
                   {/* Ajustement de prix : facture + paiement */}
                   {av.ajustementMontant > 0 && (
                     <div style={{ background: av.paymentReceived ? "#F0FDF4" : "#FFFBEB", border:`1px solid ${av.paymentReceived ? "#86EFAC" : "#FDE68A"}`, borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
@@ -16093,7 +16515,7 @@ function SendElectronicInvoiceButton({
   contractId, invoiceKey, avenantNum, designation, montant, missionTitle,
   freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
   clientName, clientCompany, clientAddress, clientSiret, clientEmail, typeClient, authUser,
-  compact,
+  compact, applyRemises = false, shownMontant = null,
 }) {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
@@ -16125,7 +16547,9 @@ function SendElectronicInvoiceButton({
     setSending(true);
     setResult(null);
     try {
-      const { invoiceNum, issueDate } = await getOrReserveInvoice({ authUser, contractId, key: invoiceKey, avenantNum });
+      const { invoiceNum, issueDate, remiseTotal } = await getOrReserveInvoice({ authUser, contractId, key: invoiceKey, avenantNum, applyRemises: !!applyRemises });
+      // Version 237 : remise d'avenant comptée dans cette facture (« montant » est le montant de base, sans remise)
+      const montantSent = applyRemises && remiseTotal > 0 ? Math.max((Number(montant) || 0) - remiseTotal, 0) : montant;
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch("/api/generate-ubl-invoice", {
         method: "POST",
@@ -16134,7 +16558,7 @@ function SendElectronicInvoiceButton({
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
         },
         body: JSON.stringify({
-          send: true, invoiceNum, issueDate, designation, missionTitle, montant,
+          send: true, invoiceNum, issueDate, designation, missionTitle, montant: montantSent,
           freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, tvaNumber,
           clientName, clientCompany, clientAddress, clientSiret, clientEmail, typeClient,
         }),
@@ -16163,7 +16587,7 @@ function SendElectronicInvoiceButton({
 
   const openConfirm = () => { if (sending) return; setResult(null); setConfirming(c => !c); };
   const who = String(clientCompany || clientName || "").trim() || "ton client";
-  const amount = `${fmtEuro(montant)} €${tvaNumber ? " HT" : ""}`;
+  const amount = `${fmtEuro(shownMontant != null ? shownMontant : montant)} €${tvaNumber ? " HT" : ""}`;
   const shownNum = sentInfo?.num || knownNum;
   const numLabel = shownNum ? ` ${shownNum}` : "";
   const sent = !!(result?.success || sentInfo);
