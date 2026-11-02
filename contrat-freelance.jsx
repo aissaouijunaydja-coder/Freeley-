@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabase.js";
 
@@ -1047,7 +1047,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "238";
+const APP_VERSION = "240";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -3386,6 +3386,48 @@ class ErrorBoundary extends React.Component {
 }
 
 /* ══════════════════════════════════════════════════════════ APP ══ */
+// Version 239 : ce que l'application garde dans ce navigateur pour un compte (brouillon en cours, brouillons enregistrés,
+// analyses de contrats, NDA, contrat ouvert…) est marqué au nom de ce compte. Si un autre compte se connecte sur le même
+// appareil, tout est effacé au lieu de lui être montré. Le profil a son propre marquage (freeley_profile_owner).
+const LOCAL_OWNER_KEY = "freeley_local_owner";
+const OWNED_LOCAL_KEYS = ["freeley_current_draft", "freeley_drafts_list", "freeley_scan_list", "freeley_scan_results",
+  "freeley_nda_list", "freeley_history_view_id", "freeley_result_contract_id", "freeley_read_alerts",
+  "freeley_invoice_counters", "freeley_payment_status"];
+const readLocalOwner = () => {
+  try { return localStorage.getItem(LOCAL_OWNER_KEY) || null; } catch(e) { return null; }
+};
+const clearOwnedLocalData = () => {
+  try { OWNED_LOCAL_KEYS.forEach(k => localStorage.removeItem(k)); localStorage.removeItem(LOCAL_OWNER_KEY); } catch(e) {}
+};
+// Compte supprimé : tout ce que Freeley gardait dans ce navigateur (avec session : la connexion de Supabase aussi)
+const wipeAllLocalData = ({ session = false } = {}) => {
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith("freeley_") || (session && k.startsWith("sb-")))
+      .forEach(k => localStorage.removeItem(k));
+  } catch(e) {}
+  try { sessionStorage.removeItem("freeley_goto"); } catch(e) {}
+};
+// Après une suppression de compte, la page se recharge : on finit d'effacer (une écriture a pu arriver juste avant le
+// rechargement), et l'accueil confirme la suppression.
+const ACCOUNT_JUST_DELETED = (() => {
+  try {
+    if (sessionStorage.getItem("freeley_wipe") !== "1") return false;
+    sessionStorage.removeItem("freeley_wipe");
+    wipeAllLocalData();
+    return true;
+  } catch(e) { return false; }
+})();
+// Message juste après un échec de la suppression du compte (réponse de api/delete-account, version 239)
+const deleteAccountErrorMessage = (status, body) => {
+  const help = " Si ça recommence, préviens-nous avec la bulle 💬 en bas de l'écran.";
+  if (status === 401) return "Ta session a expiré. Reconnecte-toi, puis recommence la suppression.";
+  if (body && body.dataDeleted) return "Tes données ont bien été effacées, mais la fermeture de ton compte a échoué. Réessaie pour terminer la suppression." + help;
+  if (body && body.partial) return "La suppression s'est arrêtée en route : une partie de tes données a pu être effacée, mais ton compte existe toujours. Réessaie pour terminer la suppression." + help;
+  if (body && body.nothingDeleted) return "La suppression n'a pas abouti. Rien n'a été effacé : ton compte et tes documents sont intacts. Réessaie dans un instant." + help;
+  return "La suppression n'a pas abouti. Réessaie dans un instant." + help;
+};
+
 // Lit un brouillon transporté dans l'URL de retour (après une connexion Google) — prioritaire sur
 // le localStorage, qui peut avoir été effacé pendant l'aller-retour par la protection anti-tracking
 // de Chrome (surtout lors d'une toute première visite du site, sans historique d'interaction).
@@ -4416,6 +4458,13 @@ function AppInner() {
     try { return new URLSearchParams(window.location.search).get("app") !== "1"; } catch(e) { return true; }
   });
   const [authMode, setAuthMode]   = useState("login"); // "login" | "signup"
+  // Version 239 : la page vient d'être rechargée après la suppression du compte
+  const [accountDeletedNotice, setAccountDeletedNotice] = useState(ACCOUNT_JUST_DELETED);
+  useEffect(() => {
+    if (!accountDeletedNotice) return undefined;
+    const t = setTimeout(() => setAccountDeletedNotice(false), 12000);
+    return () => clearTimeout(t);
+  }, [accountDeletedNotice]);
   const [contractsUsed, setContractsUsed] = useState(0);
 
   // Subscription modal state (pop-up après épuisement des 2 essais gratuits)
@@ -5260,12 +5309,51 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     })();
   }, [authUser?.id, stripeConnectAccountId]);
 
+  // Version 239 : vide ce qui est à l'écran (formulaire, contrat, analyse) sans toucher à ce qui est gardé dans le navigateur
+  const resetLocalWork = () => {
+    setForm(initialForm); setStep(0); setContract(""); setErrors({}); setApiError("");
+    setHistoryView(null); setScanResultsToShow(null);
+    rememberResultContract(null);
+    setHasScanResults(false);
+  };
+  // Déconnexion dans cette page : le même compte retrouve son brouillon en se reconnectant
+  const signedOutWorkRef = useRef(false);
+  // À chaque connexion : les données gardées dans ce navigateur pour un autre compte sont effacées (jamais montrées),
+  // puis marquées au nom du compte connecté. Avant l'affichage (useLayoutEffect) : rien d'un autre compte n'apparaît.
+  useLayoutEffect(() => {
+    if (!authReady || !authUser?.id) return;
+    const uid = authUser.id;
+    let owner = readLocalOwner();
+    // Données d'avant la version 239 (pas encore marquées) : le profil gardé ici dit à quel compte elles sont
+    if (!owner) { try { owner = localStorage.getItem("freeley_profile_owner") || null; } catch(e) {} }
+    if (owner && owner !== uid) {
+      clearOwnedLocalData();
+      resetLocalWork();
+      setScreen(sc => (sc === "scan-results" ? "app" : sc));
+    } else if (signedOutWorkRef.current) {
+      try {
+        const draft = JSON.parse(localStorage.getItem("freeley_current_draft") || "null");
+        if (draft && draft.form) {
+          setForm({ ...initialForm, ...draft.form });
+          if (typeof draft.step === "number") setStep(draft.step);
+        }
+      } catch(e) {}
+    }
+    signedOutWorkRef.current = false;
+    try { localStorage.setItem(LOCAL_OWNER_KEY, uid); } catch(e) {}
+    try { setHasScanResults(!!localStorage.getItem("freeley_scan_results")); } catch(e) {}
+  }, [authReady, authUser?.id]);
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setAuthUser(null);
     setPremium(false); setPlan(null);
     setContractsUsed(0); setHistory([]);
     setMyNdas([]);
+    // Version 239 : le formulaire et le contrat à l'écran sont vidés : la personne qui se connecte ensuite sur cet
+    // appareil ne les voit pas. Ils restent gardés dans le navigateur pour ce compte.
+    resetLocalWork();
+    signedOutWorkRef.current = true;
     // Efface le profil et son cache local — sinon le profil de cette session reste affiché
     // (et pourrait même être ré-enregistré par erreur) sur le compte de la prochaine personne
     // qui se connecte sur ce même appareil.
@@ -5322,7 +5410,17 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   );
 
   if (authReady && !authUser && showLanding) {
-    return <LandingPage onStart={() => { setShowLanding(false); setShowAuthModal(true); setAuthMode("signup"); }} />;
+    return (
+      <>
+        {accountDeletedNotice && (
+          <div data-testid="account-deleted-notice" role="status" style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:10000, width:"calc(100% - 32px)", maxWidth:460, boxSizing:"border-box", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, padding:"12px 40px 12px 16px", boxShadow:"0 8px 28px rgba(0,0,0,0.12)", fontFamily:T.body, fontSize:13.5, color:"#166534", lineHeight:1.5 }}>
+            ✓ Ton compte a bien été supprimé, avec toutes tes données.
+            <button onClick={() => setAccountDeletedNotice(false)} aria-label="Fermer" style={{ position:"absolute", top:6, right:8, background:"none", border:"none", fontSize:18, color:"#166534", cursor:"pointer", padding:4, lineHeight:1 }}>×</button>
+          </div>
+        )}
+        <LandingPage onStart={() => { setShowLanding(false); setShowAuthModal(true); setAuthMode("signup"); }} />
+      </>
+    );
   }
 
   const AuthModalEl = showAuthModal
@@ -5618,6 +5716,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         profileScanNote={profileScanNote}
         onDismissScanNote={() => setProfileScanNote(null)}
         stripeConnectReady={stripeConnectReady}
+        stripeConnectAccountId={stripeConnectAccountId}
         onConnectStripe={handleConnectStripe}
         connectingStripe={connectingStripe}
         onConnectSuperPdp={handleConnectSuperPdp}
@@ -13171,7 +13270,9 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
       // survit toujours au trajet complet.
       let redirectTo = window.location.origin;
       try {
-        const rawDraft = localStorage.getItem("freeley_current_draft");
+        // Version 239 : seulement un brouillon sans propriétaire. Celui d'un compte déconnecté reste dans ce
+        // navigateur (son propriétaire le retrouve en se reconnectant) et n'est jamais donné à un autre compte.
+        const rawDraft = readLocalOwner() ? null : localStorage.getItem("freeley_current_draft");
         if (rawDraft) {
           const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(rawDraft))));
           if (encoded.length < 6000) redirectTo = `${window.location.origin}?draft=${encoded}`;
@@ -19662,7 +19763,7 @@ function MiniPlanCard({ icon, title, price, sub, color, recommended, onSelect })
 }
 
 /* ══════════════════════════════════════════ PROFILE PAGE ══ */
-function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, profileScanNote, onDismissScanNote, stripeConnectReady, onConnectStripe, connectingStripe, onConnectSuperPdp, onDisconnectSuperPdp, connectingSuperPdp }) {
+function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, premiumPlan, isPremium, onSignOut, onGoHome, initialSection, onProfileScan, profileScanLoading, profileScanSuccess, profileScanError, profileScanNote, onDismissScanNote, stripeConnectReady, stripeConnectAccountId, onConnectStripe, connectingStripe, onConnectSuperPdp, onDisconnectSuperPdp, connectingSuperPdp }) {
   const [newSkill, setNewSkill] = useState("");
   const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState(initialSection || "identity");
@@ -19751,31 +19852,37 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   const handleDeleteAccount = async () => {
     setDeleteConfirming(true);
     setDeleteError("");
+    // Toute la suppression (le compte et toutes ses données) se fait sur le serveur, en une seule fois. Version 239 :
+    // avec le script SQL v239, c'est tout ou rien ; la réponse dit ce qui s'est passé, pour un message juste.
+    let res = null;
+    let body = null;
     try {
-      // Toute la suppression (contrats + comptes rendus + factures + NDA + le compte lui-même) se fait
-      // désormais uniquement côté serveur, en une seule fois — pour ne jamais risquer de perdre tes
-      // contrats si la suppression du compte échouait juste après côté client.
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const res = await fetch("/api/delete-account", {
+      res = await fetch("/api/delete-account", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      if (!res.ok) throw new Error("delete-account request failed");
-
-      // Nettoie toutes les données locales de l'app sur cet appareil — seulement une fois la
-      // suppression confirmée réussie côté serveur.
-      ["freeley_profile","freeley_profile_owner","freeley_current_draft","freeley_drafts_list","freeley_invoice_counters",
-       "freeley_nda_list","freeley_payment_status","freeley_read_alerts","freeley_scan_list",
-       "freeley_scan_results","freeley_screen"].forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
-
-      if (onSignOut) await onSignOut();
-      if (onGoHome) onGoHome();
+      try { body = await res.json(); } catch(e) { body = null; }
     } catch (e) {
       console.error("Erreur suppression compte:", e);
-      setDeleteError("La suppression a échoué. Rien n'a été perdu — vérifie ta connexion et réessaie, ou contacte le support si le problème persiste.");
+      setDeleteError("Le serveur n'a pas répondu. Vérifie ta connexion, puis réessaie.");
       setDeleteConfirming(false);
+      return;
     }
+    if (!res.ok) {
+      console.error("Erreur suppression compte:", res.status, body);
+      setDeleteError(deleteAccountErrorMessage(res.status, body));
+      setDeleteConfirming(false);
+      return;
+    }
+    // Compte supprimé : tout ce que Freeley gardait dans ce navigateur est effacé, puis la page se recharge (l'accueil
+    // confirme). Avant, le brouillon (nom, SIRET, adresse) était réécrit juste après l'effacement.
+    try { sessionStorage.setItem("freeley_wipe", "1"); } catch(e) {}
+    wipeAllLocalData({ session: true });
+    try { await supabase.auth.signOut({ scope: "local" }); } catch(e) {}
+    wipeAllLocalData({ session: true });
+    window.location.replace("/");
   };
 
   const sections = [
@@ -20292,8 +20399,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
         <DownloadAllDocumentsButton profile={profile} />
       </div>
 
-      {/* ── ZONE DE DANGER ── */}
-      <div className="fade-up fade-up-2" style={{ marginTop:32 }}>
+      {/* ── ZONE DE DANGER ── version 240 : seulement sous l'onglet Identité (avant : sous les quatre onglets) */}
+      {activeSection === "identity" && (
+      <div className="fade-up fade-up-2" data-testid="danger-zone" style={{ marginTop:32 }}>
         {/* Séparateur */}
         <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
           <div style={{ flex:1, height:1, background:`${C.border}` }} />
@@ -20306,7 +20414,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             Suppression du compte
           </div>
           <div style={{ fontFamily:T.body, fontSize:12, color:"#B91C1C", lineHeight:1.6, marginBottom:16, opacity:0.85 }}>
-            Cette action est permanente et irréversible. Toutes vos données seront effacées conformément au RGPD.
+            C'est définitif. Ton compte et toutes tes données seront effacés, conformément au RGPD.
           </div>
           <button
             onClick={() => { setDeleteError(""); setShowDeleteModal(true); }}
@@ -20324,20 +20432,21 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           </button>
         </div>
       </div>
+      )}
 
       {/* ── MODAL CONFIRMATION SUPPRESSION ── */}
       {showDeleteModal && (
         <div style={{
           position:"fixed", inset:0, zIndex:9999,
           background:"rgba(10,15,30,0.55)", backdropFilter:"blur(4px)",
-          display:"flex", alignItems:"center", justifyContent:"center",
+          display:"flex", overflowY:"auto",
           padding:20,
         }}
           onClick={e => { if (e.target === e.currentTarget && !deleteConfirming) setShowDeleteModal(false); }}
         >
           <div style={{
             background:C.white, borderRadius:20, padding:"24px 16px",
-            maxWidth:400, width:"100%",
+            maxWidth:400, width:"100%", margin:"auto",
             boxShadow:"0 24px 80px rgba(0,0,0,0.25)",
             animation:"fadeInUp 0.22s ease",
           }}>
@@ -20348,7 +20457,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                   Suppression en cours…
                 </div>
                 <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.6 }}>
-                  Suppression de vos contrats et de votre compte sur nos serveurs…
+                  Suppression de ton compte et de toutes tes données…
                 </div>
                 <div style={{ marginTop:20, display:"flex", justifyContent:"center" }}>
                   <div style={{ width:32, height:32, border:`3px solid ${C.border}`, borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
@@ -20359,10 +20468,16 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 <div style={{ textAlign:"center", marginBottom:20 }}>
                   <div style={{ fontSize:44, marginBottom:12 }}>⚠️</div>
                   <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:C.navy, marginBottom:10 }}>
-                    Supprimer votre compte ?
+                    Supprimer ton compte ?
                   </div>
                   <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.7 }}>
-                    Attention, cette action est <strong>irréversible</strong>. Toutes vos données, vos scans et vos contrats générés seront définitivement effacés de nos serveurs sécurisés conformément au RGPD.
+                    Attention, c'est <strong>définitif</strong>. Ton profil, tes contrats, tes avenants, tes factures, tes NDA, ton livre des recettes et tes analyses de contrats seront effacés de Freeley, conformément au RGPD.
+                  </div>
+                  <div data-testid="delete-consequences" style={{ marginTop:10, fontFamily:T.body, fontSize:12.5, color:C.textM, lineHeight:1.6, textAlign:"left" }}>
+                    <div>• Tes clients ne pourront plus ouvrir leurs liens de signature ni de paiement. Ils gardent les PDF qu'ils ont déjà téléchargés.</div>
+                    {(stripeConnectAccountId || stripeConnectReady) && (
+                      <div style={{ marginTop:4 }}>• Ton compte Stripe reste à toi : Freeley ne le ferme pas. Tu peux le gérer ou le fermer depuis ton tableau de bord Stripe.</div>
+                    )}
                   </div>
                   {deleteError && (
                     <div style={{ marginTop:14, background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 14px", fontFamily:T.body, fontSize:12, color:"#B91C1C", lineHeight:1.5 }}>
@@ -20372,7 +20487,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 </div>
                 {/* Version 233 : garder ses documents avant de tout effacer */}
                 <div data-testid="delete-download-all" style={{ marginBottom:14, padding:"12px 14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6 }}>
-                  Avant de supprimer votre compte, téléchargez tous vos documents. La loi vous oblige à garder vos factures pendant 10 ans.
+                  Avant de supprimer ton compte, télécharge tous tes documents. La loi t'oblige à garder tes factures pendant 10 ans.
                   <div style={{ marginTop:10 }}><DownloadAllDocumentsButton profile={profile} /></div>
                 </div>
                 <div style={{ display:"flex", gap:12, marginTop:8 }}>
