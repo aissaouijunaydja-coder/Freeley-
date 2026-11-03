@@ -1047,7 +1047,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "241";
+const APP_VERSION = "243";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -3011,18 +3011,20 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
 }
 
 /* ══════════════════════════════════════════════════════════ HELP MODAL ══ */
+// Version 242 : réponses remises à jour (avant : « lien de négociation », factures « sur le tableau de bord », onglet
+// « En cours » : rien de tout ça n'existe plus) et tutoiement, comme le reste de l'application.
 const HELP_FAQ = [
   {
     q: "🔗 Mon client n'a pas reçu le lien ?",
-    a: "Pas de panique ! Copiez simplement le lien de négociation et envoyez-le lui directement par SMS ou WhatsApp.",
+    a: "Pas de panique. Dans Mes contrats, ouvre le contrat et choisis l'envoi au client à distance. Appuie sur « 📋 Copier le lien », puis envoie-le à ton client par SMS, WhatsApp ou email.",
   },
   {
     q: "📄 Comment générer la facture ?",
-    a: "Une fois le contrat scellé ou l'acompte payé, un bouton de téléchargement automatique apparaît sur votre tableau de bord.",
+    a: "Dans Mes contrats, appuie sur le contrat pour l'ouvrir : les boutons « 🧾 Facture acompte » et « 🧾 Facture solde » sont là. Pour une facture sans contrat, utilise l'outil « Facture », en haut de l'écran principal.",
   },
   {
     q: "⚠️ L'écran a planté ou affiche une erreur ?",
-    a: "Actualisez simplement la page depuis votre navigateur (F5 ou le bouton ↺). Vos contrats déjà générés sont sauvegardés et réapparaîtront dans l'onglet « En cours ».",
+    a: "Recharge la page avec le bouton ↻ de ton navigateur. Tes contrats sont enregistrés dans ton compte : tu les retrouves dans Mes contrats. Si le problème revient, écris-nous avec le bouton ci-dessous.",
   },
 ];
 
@@ -3141,8 +3143,14 @@ function HelpModal({ onClose }) {
             padding:"14px 16px",
           }}>
             <span style={{ fontSize:18, flexShrink:0 }}>💡</span>
-            <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.65 }}>
-              <strong>Pas trouvé votre réponse ?</strong> La plupart des problèmes se résolvent en quelques secondes avec le bouton de réinitialisation ci-dessus.
+            <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.65, flex:1 }}>
+              <strong>Pas trouvé ta réponse ?</strong> Écris-nous : on te répond par email.
+              {/* Version 242 : avant, la note renvoyait à un « bouton de réinitialisation ci-dessus » qui n'existe pas ici */}
+              <button
+                data-testid="help-write-us"
+                onClick={() => { onClose(); window.dispatchEvent(new CustomEvent("freeley-open-feedback")); }}
+                style={{ display:"block", marginTop:10, padding:"9px 14px", background:C.navy, color:"#fff", border:"none", borderRadius:10, fontFamily:T.body, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
+              >💬 Écrire à Freeley</button>
             </div>
           </div>
         </div>
@@ -3152,26 +3160,24 @@ function HelpModal({ onClose }) {
 }
 
 /* ══════════════════════════════════════════════════════════ ERROR BOUNDARY ══ */
+// Version 242 : remis à jour (avant : un accès Premium payant qui n'existe plus, des contrats « sauvegardés localement
+// dans votre session » alors qu'ils sont dans le compte, un onglet « En cours » disparu) et tutoiement.
 const FAQ_ITEMS = [
   {
     q: "Mon contrat n'apparaît plus — où est-il passé ?",
-    a: "Vos contrats sont sauvegardés localement dans votre session. Cliquez sur « Relancer et corriger » ci-dessus : l'app s'ouvre directement sur l'onglet « En cours » où se trouvent tous vos contrats.",
+    a: "Tes contrats sont enregistrés dans ton compte, pas seulement sur cet appareil. Appuie sur « Relancer et corriger » ci-dessus : l'application s'ouvre sur Mes contrats, où tu les retrouves tous.",
   },
   {
     q: "Mon contrat ne se génère plus — que faire ?",
-    a: "Vérifiez votre connexion internet, puis cliquez sur « Relancer et corriger ». Si le problème persiste après 2 tentatives, attendez 2 minutes (limite de quota API temporaire) et réessayez.",
+    a: "Vérifie ta connexion internet, puis appuie sur « Relancer et corriger ». Si ça bloque encore après deux essais, attends deux minutes et réessaie.",
   },
   {
     q: "Pourquoi l'application s'est-elle bloquée ?",
-    a: "Un décalage d'affichage mineur a figé l'interface. Cela arrive parfois lors d'une navigation rapide entre les onglets. Vos données sont 100 % intactes — un simple rechargement suffit.",
-  },
-  {
-    q: "J'ai payé mais je n'ai plus accès à mes contrats illimités.",
-    a: "Votre accès Premium est lié à votre compte. Cliquez sur « Relancer et corriger » pour vous reconnecter, puis vérifiez que vous êtes bien connecté avec l'email utilisé lors de l'achat.",
+    a: "Un petit souci d'affichage a figé l'écran. Tes contrats et tes factures ne sont pas touchés : ils sont enregistrés dans ton compte. Relancer l'application suffit.",
   },
   {
     q: "Comment télécharger un contrat en PDF après un bug ?",
-    a: "Relancez l'application via le bouton ci-dessus, ouvrez l'onglet « En cours », cliquez sur votre contrat, puis utilisez le bouton « Télécharger PDF ».",
+    a: "Appuie sur « Relancer et corriger », puis ouvre ton contrat dans Mes contrats et appuie sur « ⬇ PDF du contrat ».",
   },
 ];
 
@@ -3238,7 +3244,7 @@ class ErrorBoundary extends React.Component {
               fontSize: 13, color: "rgba(255,255,255,0.75)",
               lineHeight: 1.6, fontWeight: 400,
             }}>
-              Rien de grave — vos données et contrats sont{" "}
+              Rien de grave — tes données et tes contrats sont{" "}
               <span style={{ color: "#6EE7B7", fontWeight: 700 }}>100 % en sécurité</span> !<br />
               L'interface a juste eu un accroc. Un clic suffit pour tout remettre en ordre.
             </div>
@@ -3371,9 +3377,10 @@ class ErrorBoundary extends React.Component {
                 }}>
                   <span style={{ fontSize: 18, flexShrink: 0 }}>💡</span>
                   <div style={{ fontSize: 12, color: "#92400E", lineHeight: 1.6 }}>
-                    <strong>Pas trouvé votre réponse ?</strong> Cliquez sur{" "}
-                    <span style={{ fontWeight: 700 }}>« Relancer et corriger »</span> — dans 95 % des cas,
-                    cela résout le problème en quelques secondes.
+                    <strong>Pas trouvé ta réponse ?</strong> Appuie sur{" "}
+                    <span style={{ fontWeight: 700 }}>« Relancer et corriger »</span> : la plupart du temps,
+                    ça règle le problème en quelques secondes. Sinon, écris-nous à{" "}
+                    <a href="mailto:contact.freeley@gmail.com" style={{ color: "#92400E", fontWeight: 700 }}>contact.freeley@gmail.com</a>.
                   </div>
                 </div>
               </div>
@@ -3390,7 +3397,7 @@ class ErrorBoundary extends React.Component {
 // analyses de contrats, NDA, contrat ouvert…) est marqué au nom de ce compte. Si un autre compte se connecte sur le même
 // appareil, tout est effacé au lieu de lui être montré. Le profil a son propre marquage (freeley_profile_owner).
 const LOCAL_OWNER_KEY = "freeley_local_owner";
-const OWNED_LOCAL_KEYS = ["freeley_current_draft", "freeley_drafts_list", "freeley_scan_list", "freeley_scan_results",
+const OWNED_LOCAL_KEYS = ["freeley_current_draft", "freeley_drafts_list", "freeley_drafts_deleted", "freeley_scan_list", "freeley_scan_results",
   "freeley_nda_list", "freeley_history_view_id", "freeley_result_contract_id", "freeley_read_alerts",
   "freeley_invoice_counters", "freeley_payment_status"];
 const readLocalOwner = () => {
@@ -4345,6 +4352,18 @@ function AppInner() {
     } catch(e) {}
     return initialForm;
   });
+  // Version 243 : brouillon de « Mes brouillons » qu'on est en train de compléter (null : aucun). L'enregistrer de nouveau
+  // le met à jour ; une fois le contrat créé, il quitte la liste.
+  const draftIdRef = useRef(undefined);
+  if (draftIdRef.current === undefined) {
+    draftIdRef.current = null;
+    try {
+      const urlDraft = readUrlDraft();
+      const saved = urlDraft && urlDraft.form ? urlDraft : JSON.parse(localStorage.getItem("freeley_current_draft") || "null");
+      if (saved && typeof saved.draftId === "string") draftIdRef.current = saved.draftId;
+    } catch(e) {}
+  }
+  const draftToastTimerRef = useRef(null); // minuterie du message « Brouillon enregistré »
   const [errors, setErrors]       = useState({});
   // Dernière valeur du formulaire, relue après un appel à l'IA (pré-remplissage par photo, version 224)
   const formRef = useRef(form);
@@ -4369,7 +4388,7 @@ function AppInner() {
     // On ne sauvegarde que s'il y a un minimum de contenu saisi, pour ne pas polluer avec un formulaire vide
     const hasContent = form.freelanceName || form.clientName || form.missionTitle || form.missionDescription;
     if (hasContent && !contract) {
-      try { localStorage.setItem("freeley_current_draft", JSON.stringify({ form, step, savedAt: Date.now() })); } catch(e) {}
+      try { localStorage.setItem("freeley_current_draft", JSON.stringify({ form, step, savedAt: Date.now(), draftId: draftIdRef.current || null })); } catch(e) {}
     }
   }, [form, step]);
   const [contract, setContract]   = useState("");
@@ -5033,6 +5052,9 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     setAnimDone(false);
     animDoneRef.current = false;
     apiReadyRef.current = null;
+    // Version 243 : le brouillon qui a servi à créer ce contrat quitte « Mes brouillons » (avant : il y restait, et on
+    // risquait de créer deux fois le même contrat)
+    if (draftIdRef.current) { deleteDraftFromList(draftIdRef.current); draftIdRef.current = null; }
     try {
       localStorage.removeItem("freeley_current_draft");
       // Retient quel contrat vient d'être généré, pour survivre à un rafraîchissement de la page
@@ -5316,6 +5338,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
   // Version 239 : vide ce qui est à l'écran (formulaire, contrat, analyse) sans toucher à ce qui est gardé dans le navigateur
   const resetLocalWork = () => {
+    draftIdRef.current = null;
     setForm(initialForm); setStep(0); setContract(""); setErrors({}); setApiError("");
     setHistoryView(null); setScanResultsToShow(null);
     rememberResultContract(null);
@@ -5341,6 +5364,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         if (draft && draft.form) {
           setForm({ ...initialForm, ...draft.form });
           if (typeof draft.step === "number") setStep(draft.step);
+          draftIdRef.current = typeof draft.draftId === "string" ? draft.draftId : null;
         }
       } catch(e) {}
     }
@@ -5348,6 +5372,15 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     try { localStorage.setItem(LOCAL_OWNER_KEY, uid); } catch(e) {}
     try { setHasScanResults(!!localStorage.getItem("freeley_scan_results")); } catch(e) {}
   }, [authReady, authUser?.id]);
+  // Version 243 : brouillons gardés sur le compte. Ceux de cet appareil pas encore envoyés (connexion coupée, script SQL
+  // lancé depuis) partent dès la connexion au compte, et quand la connexion internet revient.
+  useEffect(() => {
+    if (!authUser?.id) return undefined;
+    syncDrafts().catch(() => {});
+    const onOnline = () => { syncDrafts().catch(() => {}); };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [authUser?.id]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -5488,6 +5521,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   ) : null;
 
   const startFreshContract = () => {
+    draftIdRef.current = null; // version 243 : un nouveau contrat n'est plus rattaché au brouillon d'avant
     try {
       localStorage.removeItem("freeley_current_draft");
       localStorage.removeItem("freeley_result_contract_id");
@@ -5508,24 +5542,61 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     setErrors({}); setApiError("");
   };
 
+  // Message en haut de l'écran (brouillon enregistré, contrat en cours rangé dans les brouillons)
+  const showDraftToast = (text) => {
+    setDraftSavedToast(text);
+    clearTimeout(draftToastTimerRef.current);
+    draftToastTimerRef.current = setTimeout(() => setDraftSavedToast(false), 3200);
+  };
+
   const handleSaveDraft = () => {
-    saveDraftToList(form, step);
-    setDraftSavedToast(true);
-    setTimeout(() => setDraftSavedToast(false), 2600);
+    // Version 243 : le brouillon en cours est mis à jour (avant : un nouveau à chaque clic, donc des doublons), et il est
+    // gardé sur le compte (script SQL v243) pour le retrouver sur tous ses appareils
+    const d = saveDraftToList(form, step, draftIdRef.current);
+    draftIdRef.current = d.id;
+    try { localStorage.setItem("freeley_current_draft", JSON.stringify({ form, step, savedAt: Date.now(), draftId: d.id })); } catch(e) {}
+    showDraftToast("Brouillon enregistré. Retrouve-le dans le menu de ton compte, « Mes brouillons ».");
   };
 
   const handleResumeDraft = (draft) => {
+    // Le même brouillon est déjà ouvert : on garde la version la plus récente (celle de cet appareil, sauf si le brouillon
+    // a été modifié depuis sur un autre appareil)
+    if (draftIdRef.current === draft.id && !contract) {
+      let localAt = 0;
+      try { localAt = JSON.parse(localStorage.getItem("freeley_current_draft") || "null")?.savedAt || 0; } catch(e) {}
+      if (localAt >= (draft.savedAt || 0)) { goToScreen("app"); return; }
+    }
+    // Version 243 : le contrat en cours (pas encore créé) est d'abord rangé dans les brouillons. Avant, il était effacé
+    // sans prévenir.
+    const hasWork = !!(form.clientName || form.clientCompany || form.missionTitle || form.missionDescription || form.price);
+    let parked = false;
+    if (hasWork && !contract && draftIdRef.current !== draft.id) {
+      saveDraftToList(form, step, draftIdRef.current);
+      parked = true;
+    }
+    // Version 243 : on repart d'un écran propre. Avant, un contrat généré juste avant restait en mémoire, et plus rien
+    // n'était enregistré tout seul ensuite.
+    setContract(""); setErrors({}); setApiError("");
+    setRemoteSignLink(""); setShowRemoteSignPad(false); setRemoteSigHasStrokes(false);
+    rememberResultContract(null);
+    try { localStorage.removeItem("freeley_result_contract_id"); } catch(e) {}
     const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ");
-    setForm({
+    const nextForm = {
       ...initialForm,
       ...draft.form,
       freelanceName: fullName || draft.form?.freelanceName || "",
       freelanceActivity: profile.jobTitle || draft.form?.freelanceActivity || "",
       freelanceSiret: profile.siret || draft.form?.freelanceSiret || "",
-      freelanceLegalStatus: profile.legalStatus || "",
-    });
-    setStep(draft.step || 0);
+      // Version 243 : le statut juridique du brouillon est gardé si le profil n'en a pas (avant : effacé)
+      freelanceLegalStatus: profile.legalStatus || draft.form?.freelanceLegalStatus || "",
+    };
+    const nextStep = Math.min(Math.max(Number(draft.step) || 0, 0), 2);
+    setForm(nextForm);
+    setStep(nextStep);
+    draftIdRef.current = draft.id;
+    try { localStorage.setItem("freeley_current_draft", JSON.stringify({ form: nextForm, step: nextStep, savedAt: Date.now(), draftId: draft.id })); } catch(e) {}
     goToScreen("app");
+    if (parked) showDraftToast("Ton contrat en cours est gardé dans « Mes brouillons ».");
   };
 
   const headerProps = {
@@ -5894,7 +5965,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     <Shell>
       {AuthModalEl}
       <Header {...headerProps} />
-      <CguPage />
+      <CguPage onBack={() => goToScreen("app")} />
     </Shell>
   );
 
@@ -6812,20 +6883,21 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
           {/* Toast confirmation brouillon enregistré */}
           {draftSavedToast && (
-            <div style={{
+            <div data-testid="draft-toast" style={{
               position:"fixed", top:80, left:"50%", transform:"translateX(-50%)",
-              zIndex:9999, pointerEvents:"none",
+              zIndex:9999, pointerEvents:"none", width:"max-content", maxWidth:"calc(100vw - 32px)",
               animation:"toastSlideIn 0.35s cubic-bezier(.22,.68,0,1.2) both",
             }}>
+              {/* Version 243 : le texte passe à la ligne sur téléphone (avant : coupé des deux côtés de l'écran) */}
               <div style={{
                 display:"flex", alignItems:"center", gap:10,
                 background:"linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
-                color:"#fff", borderRadius:50, padding:"13px 22px",
-                fontFamily:T.body, fontSize:12.5, fontWeight:600,
-                boxShadow:"0 8px 32px #15803D40", whiteSpace:"nowrap",
+                color:"#fff", borderRadius:18, padding:"12px 18px",
+                fontFamily:T.body, fontSize:12.5, fontWeight:600, lineHeight:1.45,
+                boxShadow:"0 8px 32px #15803D40",
               }}>
-                <span style={{ fontSize:15 }}>✅</span>
-                Brouillon enregistré — retrouve-le dans ton profil → « Mes brouillons »
+                <span style={{ fontSize:15, flexShrink:0 }}>✅</span>
+                <span>{typeof draftSavedToast === "string" ? draftSavedToast : "Brouillon enregistré."}</span>
               </div>
             </div>
           )}
@@ -10317,6 +10389,19 @@ function Shell({ children }) {
 // ─── Bulle "Un problème ? Une idée ?" — flottante sur tous les écrans ───
 // ─── Ton email admin — DOIT être le même que dans la policy Supabase ───
 const ADMIN_EMAIL = "aissaoui.junayd.ja@gmail.com";
+// Version 242 : longueur maximale d'un message de la bulle (la base refuse au-delà, script SQL v242)
+const FEEDBACK_MAX = 2000;
+// Version 242 : n'importe qui peut écrire dans la table des messages, même sans passer par l'application. Le lien « page
+// concernée » n'est donc cliquable que s'il mène à une page de Freeley (jamais un lien javascript: ni un autre site).
+const FREELEY_HOSTS = ["www.freeley.fr", "freeley.fr", "freeley-ten.vercel.app"];
+const safeFeedbackUrl = (raw) => {
+  try {
+    const u = new URL(String(raw || ""));
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    if (u.origin !== window.location.origin && !FREELEY_HOSTS.includes(u.hostname)) return null;
+    return u.href;
+  } catch (e) { return null; }
+};
 
 // ─── Page privée pour lire les messages de la bulle feedback : /?admin=feedback ───
 function AdminFeedbackPage() {
@@ -10395,7 +10480,9 @@ function AdminFeedbackPage() {
           <div style={{ fontSize:14, lineHeight:1.5, marginBottom:8, whiteSpace:"pre-wrap" }}>{m.message}</div>
           <div style={{ fontSize:11.5, color:"#999" }}>
             {m.email && <>✉️ {m.email} · </>}
-            {m.page_url && <a href={m.page_url} style={{ color:"#999" }}>page concernée</a>}
+            {safeFeedbackUrl(m.page_url)
+              ? <a href={safeFeedbackUrl(m.page_url)} target="_blank" rel="noopener noreferrer" style={{ color:"#999" }}>page concernée</a>
+              : (m.page_url ? <span title={String(m.page_url).slice(0, 300)}>page inconnue</span> : null)}
           </div>
         </div>
       ))}
@@ -10412,10 +10499,25 @@ function FeedbackBubble() {
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState("");
 
+  // Email du compte connecté, rempli tout seul. Version 242 : il suit aussi une connexion ou une déconnexion faite sans
+  // recharger la page (avant : lu une seule fois), sans écraser un email tapé à la main.
+  const autoEmailRef = useRef("");
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user?.email) setEmail(user.email);
-    }).catch(() => {});
+    const apply = (user) => {
+      const next = user?.email || "";
+      const prevAuto = autoEmailRef.current;
+      autoEmailRef.current = next;
+      setEmail(cur => (cur === "" || cur === prevAuto ? next : cur));
+    };
+    supabase.auth.getUser().then(({ data: { user } }) => apply(user)).catch(() => {});
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => apply(session?.user || null));
+    return () => { try { data?.subscription?.unsubscribe(); } catch (e) {} };
+  }, []);
+  // Version 242 : le bouton « Écrire à Freeley » de la fenêtre d'aide ouvre la bulle
+  useEffect(() => {
+    const openIt = () => { setSent(false); setErr(""); setOpen(true); };
+    window.addEventListener("freeley-open-feedback", openIt);
+    return () => window.removeEventListener("freeley-open-feedback", openIt);
   }, []);
 
   const handleSend = async () => {
@@ -10423,11 +10525,12 @@ function FeedbackBubble() {
     setSending(true);
     setErr("");
     try {
+      // Version 242 : longueurs bornées (comme dans la base) ; adresse de la page sans la partie après « # »
       const { error } = await supabase.from("feedback_messages").insert({
         type,
-        message: message.trim(),
-        email: email.trim() || null,
-        page_url: window.location.href,
+        message: message.trim().slice(0, FEEDBACK_MAX),
+        email: email.trim().slice(0, 320) || null,
+        page_url: (window.location.origin + window.location.pathname + window.location.search).slice(0, 2000),
         created_at: new Date().toISOString(),
       });
       if (error) throw error;
@@ -10435,7 +10538,9 @@ function FeedbackBubble() {
       setMessage("");
       setTimeout(() => { setOpen(false); setSent(false); }, 2200);
     } catch (e) {
-      setErr("Envoi impossible, réessaie dans un instant.");
+      setErr(/trop de messages/i.test(String(e?.message || ""))
+        ? "Beaucoup de messages en ce moment : réessaie dans quelques minutes."
+        : "Envoi impossible, réessaie dans un instant.");
     } finally {
       setSending(false);
     }
@@ -10492,16 +10597,23 @@ function FeedbackBubble() {
                 onChange={e => setMessage(e.target.value)}
                 placeholder={type === "bug" ? "Décris le problème rencontré…" : "Décris ton idée d'amélioration…"}
                 rows={4}
+                maxLength={FEEDBACK_MAX}
                 style={{
                   width:"100%", boxSizing:"border-box", padding:10, borderRadius:8,
                   border:"1px solid #ddd", fontFamily:T.body, fontSize:13, resize:"none", marginBottom:8,
                 }}
               />
+              {message.length > FEEDBACK_MAX - 300 && (
+                <div data-testid="feedback-count" style={{ fontFamily:T.body, fontSize:11, color: message.length >= FEEDBACK_MAX ? "#DC2626" : "#888", textAlign:"right", marginTop:-4, marginBottom:8 }}>
+                  {message.length} / {FEEDBACK_MAX} caractères
+                </div>
+              )}
               <input
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="Ton email (pour te répondre)"
+                maxLength={320}
                 style={{
                   width:"100%", boxSizing:"border-box", padding:9, borderRadius:8,
                   border:"1px solid #ddd", fontFamily:T.body, fontSize:12.5, marginBottom:10,
@@ -10724,21 +10836,99 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
 const ALERTS_DATA = [];
 
 // ─── Système de brouillons (contrats non terminés) ───
+// Version 243 : les brouillons sont gardés sur le compte (table drafts, script SQL v243) : on les retrouve sur tous ses
+// appareils. Le navigateur en garde une copie, pour les afficher tout de suite et ne rien perdre sans connexion.
+// « pending » : pas encore enregistré sur le compte. freeley_drafts_deleted : effacés ici, pas encore sur le compte.
+// Sans le script SQL v243, tout marche comme avant (brouillons de cet appareil seulement).
+const DRAFTS_MAX = 30;
 const getDraftsList = () => {
-  try { return JSON.parse(localStorage.getItem("freeley_drafts_list") || "[]"); } catch(e) { return []; }
+  try { const l = JSON.parse(localStorage.getItem("freeley_drafts_list") || "[]"); return Array.isArray(l) ? l : []; } catch(e) { return []; }
 };
-const saveDraftToList = (form, step) => {
-  const drafts = getDraftsList();
-  const label = form.missionTitle || form.clientName || "Contrat sans titre";
-  const draft = { id: "draft_" + Date.now(), label, clientName: form.clientName || "", form, step, savedAt: Date.now() };
-  drafts.unshift(draft);
-  try { localStorage.setItem("freeley_drafts_list", JSON.stringify(drafts.slice(0, 30))); } catch(e) {}
+const writeDraftsList = (list) => {
+  try { localStorage.setItem("freeley_drafts_list", JSON.stringify(list.slice(0, DRAFTS_MAX))); } catch(e) {}
+};
+const getDeletedDraftIds = () => {
+  try { const l = JSON.parse(localStorage.getItem("freeley_drafts_deleted") || "[]"); return Array.isArray(l) ? l : []; } catch(e) { return []; }
+};
+const writeDeletedDraftIds = (ids) => {
+  try {
+    if (ids.length) localStorage.setItem("freeley_drafts_deleted", JSON.stringify(ids.slice(-200)));
+    else localStorage.removeItem("freeley_drafts_deleted");
+  } catch(e) {}
+};
+// Table ou fonction absente de la base : script SQL v243 pas encore lancé
+const isMissingDbObject = (error) => !!error && (["PGRST202", "PGRST205", "42P01", "42883"].includes(error.code)
+  || /could not find the (function|table)|does not exist/i.test(String(error.message || "")));
+// Envoie un brouillon au compte : « ok », « missing » (script SQL v243 pas lancé) ou « error » (pas de connexion…)
+const pushDraftRemote = async (draft) => {
+  try {
+    const { error } = await supabase.rpc("save_draft", {
+      p_local_id: draft.id, p_label: draft.label || "", p_client_name: draft.clientName || "",
+      p_step: Number(draft.step) || 0, p_form: draft.form || {}, p_saved_at: new Date(draft.savedAt || Date.now()).toISOString(),
+    });
+    if (error) return isMissingDbObject(error) ? "missing" : "error";
+    writeDraftsList(getDraftsList().map(d => (d.id === draft.id && d.savedAt === draft.savedAt ? { ...d, pending: false } : d)));
+    return "ok";
+  } catch(e) { return "error"; }
+};
+const deleteDraftRemote = async (id) => {
+  try {
+    const { error } = await supabase.rpc("delete_draft", { p_local_id: id });
+    if (error && !isMissingDbObject(error)) return "error";
+    writeDeletedDraftIds(getDeletedDraftIds().filter(x => x !== id));
+    return "ok";
+  } catch(e) { return "error"; }
+};
+// Enregistre un brouillon : un nouveau, ou la mise à jour de celui qu'on a repris (avant : un nouveau à chaque clic,
+// donc des doublons). Tout de suite dans le navigateur, puis sur le compte.
+const saveDraftToList = (form, step, id = null) => {
+  const draft = { id: id || "draft_" + Date.now(), label: form.missionTitle || form.clientName || "Contrat sans titre",
+    clientName: form.clientName || "", form, step, savedAt: Date.now(), pending: true };
+  writeDraftsList([draft, ...getDraftsList().filter(d => d.id !== draft.id)]);
+  writeDeletedDraftIds(getDeletedDraftIds().filter(x => x !== draft.id));
+  pushDraftRemote(draft);
   return draft;
 };
 const deleteDraftFromList = (id) => {
   const drafts = getDraftsList().filter(d => d.id !== id);
-  try { localStorage.setItem("freeley_drafts_list", JSON.stringify(drafts)); } catch(e) {}
+  writeDraftsList(drafts);
+  writeDeletedDraftIds(Array.from(new Set([...getDeletedDraftIds(), id])));
+  deleteDraftRemote(id);
   return drafts;
+};
+// Met d'accord le navigateur et le compte. Renvoie { list, where } : where = « account » (brouillons du compte),
+// « device » (script SQL v243 pas lancé : brouillons de cet appareil) ou « offline » (compte injoignable pour l'instant).
+// Le plus récent gagne ; un brouillon effacé sur un autre appareil disparaît aussi ici.
+const syncDrafts = async () => {
+  // Un autre compte s'est connecté sur cet appareil pendant la synchronisation : on s'arrête (rien d'un compte ne doit
+  // passer à l'autre)
+  const owner = readLocalOwner();
+  const stillSame = () => readLocalOwner() === owner;
+  for (const id of getDeletedDraftIds()) { if (!stillSame()) return { list: [], where: "offline" }; await deleteDraftRemote(id); }
+  for (const d of getDraftsList().filter(x => x.pending !== false)) {
+    if (!stillSame()) return { list: [], where: "offline" };
+    if (await pushDraftRemote(d) === "missing") break;
+  }
+  let res;
+  try {
+    res = await supabase.from("drafts").select("local_id, label, client_name, step, form, saved_at")
+      .order("saved_at", { ascending: false }).limit(DRAFTS_MAX);
+  } catch(e) { res = { error: { message: String(e && e.message || e) } }; }
+  if (!res || res.error) return { list: getDraftsList(), where: res && isMissingDbObject(res.error) ? "device" : "offline" };
+  const deleted = new Set(getDeletedDraftIds());
+  const local = getDraftsList();
+  const remote = (res.data || []).filter(r => !deleted.has(r.local_id)).map(r => ({
+    id: r.local_id, label: r.label || "Contrat sans titre", clientName: r.client_name || "", form: r.form || {},
+    step: Number(r.step) || 0, savedAt: Date.parse(r.saved_at) || Date.now(), pending: false,
+  }));
+  const remoteIds = new Set(remote.map(r => r.id));
+  const merged = [
+    ...remote.map(r => { const l = local.find(d => d.id === r.id); return l && l.pending !== false && (l.savedAt || 0) > r.savedAt ? l : r; }),
+    ...local.filter(d => d.pending !== false && !remoteIds.has(d.id)),
+  ].sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).slice(0, DRAFTS_MAX);
+  if (!stillSame()) return { list: [], where: "offline" };
+  writeDraftsList(merged);
+  return { list: merged, where: "account" };
 };
 
 // Persistance du statut "lu" des alertes : dans le navigateur, tout de suite, et (version 238) sur le compte, dans la
@@ -15363,6 +15553,13 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
 function DraftsPage({ onBack, onResume, onNewContract }) {
   const [drafts, setDrafts] = useState(() => getDraftsList());
   const [confirmDelete, setConfirmDelete] = useState(null);
+  // Version 243 : brouillons du compte (tous les appareils) ; ceux de cet appareil s'affichent en attendant
+  const [where, setWhere] = useState(null); // null (en cours) | "account" | "device" | "offline"
+  useEffect(() => {
+    let alive = true;
+    syncDrafts().then(({ list, where: w }) => { if (alive) { setDrafts(list); setWhere(w); } }).catch(() => { if (alive) setWhere("offline"); });
+    return () => { alive = false; };
+  }, []);
 
   const handleDelete = (id) => {
     setDrafts(deleteDraftFromList(id));
@@ -15381,6 +15578,12 @@ function DraftsPage({ onBack, onResume, onNewContract }) {
     <div style={{ maxWidth:760, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
       <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Mes brouillons</div>
+      <div data-testid="drafts-where" style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom:6, lineHeight:1.5 }}>
+        {where === "account" ? "☁️ Tes brouillons sont gardés sur ton compte : tu les retrouves sur tous tes appareils."
+          : where === "device" ? "📱 Tes brouillons sont gardés sur cet appareil."
+          : where === "offline" ? "Pas de connexion à ton compte pour l'instant : voici les brouillons de cet appareil."
+          : "Chargement de tes brouillons…"}
+      </div>
       <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:28 }}>Reprends un contrat en pause — utile quand le client n'a pas encore décidé.</div>
 
       {drafts.length === 0 ? (
@@ -21216,11 +21419,13 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
 }
 
 /* ══════════════════════════════════════════ PAGES LÉGALES ══ */
-function LegalPageLayout({ title, children }) {
+function LegalPageLayout({ title, children, onBack }) {
   return (
     <div style={{ minHeight:"100vh", background:C.cream, padding:"40px 20px" }}>
       <div style={{ maxWidth:720, margin:"0 auto", background:C.white, borderRadius:16, padding:"40px 32px", boxShadow:"0 2px 20px #1B2E4B10" }}>
-        <a href="/" style={{ fontFamily:T.body, fontSize:13, color:C.gold, textDecoration:"none", fontWeight:700 }}>← Retour à Freeley</a>
+        {/* Version 243 : dans l'application, le lien ramène à l'écran principal (avant : la page se rechargeait et
+            rouvrait les conditions d'utilisation) */}
+        <a href="/" onClick={onBack ? (e) => { e.preventDefault(); onBack(); } : undefined} style={{ fontFamily:T.body, fontSize:13, color:C.gold, textDecoration:"none", fontWeight:700 }}>← Retour à Freeley</a>
         <h1 style={{ fontFamily:T.display, fontSize:28, color:C.navy, margin:"20px 0 24px" }}>{title}</h1>
         <div style={{ fontFamily:T.body, fontSize:14, color:C.textM, lineHeight:1.75 }}>
           {children}
@@ -21374,7 +21579,7 @@ function PolitiqueConfidentialitePage() {
   );
   return (
     <LegalPageLayout title="Politique de confidentialité">
-      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : octobre 2026</p>
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : novembre 2026</p>
 
       <Section title="Qui est responsable de tes données">
         <p>
@@ -21402,7 +21607,7 @@ function PolitiqueConfidentialitePage() {
         <ul>
           <li>Compte : adresse email, nom, et mot de passe ou identifiant de connexion Google.</li>
           <li>Profil : nom, activité, SIRET, adresse, téléphone, numéro de TVA, coordonnées bancaires (IBAN et BIC), logo.</li>
-          <li>Documents : contrats, avenants, accords de confidentialité, factures, relances et analyses de contrats, avec les informations qu'ils contiennent sur toi et sur tes clients (nom, email, adresse, détails de mission, montants).</li>
+          <li>Documents : contrats, brouillons de contrats, avenants, accords de confidentialité, factures, relances et analyses de contrats, avec les informations qu'ils contiennent sur toi et sur tes clients (nom, email, adresse, détails de mission, montants).</li>
           <li>Signatures et preuves : image de la signature dessinée, dates et heures de signature, adresse IP et navigateur de l'appareil utilisé pour signer, empreinte numérique (SHA-256) du document signé, choix exprimés par un client particulier sur son droit de rétractation, et dates d'envoi des emails associés.</li>
           <li>Paiements : traités par Stripe. Freeley ne stocke aucun numéro de carte bancaire. Pour chaque lien de paiement par carte, Freeley garde le montant, le libellé, l'email du client s'il est connu et la date du paiement, pour que le lien reste valable et ne puisse pas être payé deux fois.</li>
           <li>Données techniques : journaux de connexion et de fonctionnement produits par nos prestataires d'hébergement.</li>
@@ -21513,7 +21718,7 @@ function PolitiqueConfidentialitePage() {
   );
 }
 
-function CguPage() {
+function CguPage({ onBack }) {
   const Section = ({ title, children }) => (
     <>
       <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
@@ -21521,8 +21726,8 @@ function CguPage() {
     </>
   );
   return (
-    <LegalPageLayout title="Conditions générales d'utilisation">
-      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : octobre 2026</p>
+    <LegalPageLayout title="Conditions générales d'utilisation" onBack={onBack}>
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : novembre 2026</p>
 
       <Section title="Article 1 — Objet et acceptation">
         <p>
@@ -21559,6 +21764,13 @@ function CguPage() {
           automatiquement à partir de modèles et des informations saisies par l'Utilisateur, à l'aide
           de procédés automatisés décrits dans la{" "}
           <a href="/?legal=confidentialite" style={{ color:C.gold }}>Politique de confidentialité</a>.
+        </p>
+        <p>
+          Lorsque l'Utilisateur propose à ses clients de payer en ligne, les paiements sont traités par la société Stripe,
+          sur le compte Stripe de l'Utilisateur et selon les conditions de Stripe, que l'Utilisateur accepte en ouvrant ce
+          compte. Les sommes sont versées directement à l'Utilisateur : Freeley ne reçoit, ne détient et ne transfère aucune
+          somme, et ne prélève aucune commission sur ces paiements. Les frais facturés par Stripe sont à la charge de
+          l'Utilisateur.
         </p>
       </Section>
 
