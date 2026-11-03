@@ -1047,7 +1047,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "244";
+const APP_VERSION = "245";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -5647,7 +5647,6 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     onDashboard: () => goToScreen("dashboard"),
     onDrafts: () => goToScreen("drafts"),
     onCGU: () => goToScreen("cgu"),
-    onLegal: (page) => goToScreen(page), // version 244 : « mentions » ou « confidentialite »
     onMyNdas: () => goToScreen("mes-ndas"),
     onProfile: () => goToScreen("profile"),
     // Version 237 : la fenêtre Recouvrement Ferme n'existe que sur l'écran principal : on y va (avant, depuis le
@@ -6004,7 +6003,8 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     </Shell>
   );
 
-  /* ── MENTIONS LÉGALES ET CONFIDENTIALITÉ, DANS L'APPLICATION (version 244) ── */
+  /* ── MENTIONS LÉGALES ET CONFIDENTIALITÉ, DANS L'APPLICATION (version 244) ──
+     Version 245 : ouvertes par la petite ligne en bas des écrans (plus par le menu du compte) */
   if (screen === "mentions") return (
     <Shell>
       {AuthModalEl}
@@ -11541,7 +11541,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onLegal, onDrafts, onMyNdas, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
+function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onDrafts, onMyNdas, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
   const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -11733,24 +11733,6 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
                 >📄 Conditions d'utilisation</button>
-                <button onClick={() => { setUserMenu(false); if(onLegal) onLegal("mentions"); }} style={{
-                  width:"100%", textAlign:"left",
-                  padding:"10px 16px", background:"none", border:"none",
-                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
-                  display:"flex", alignItems:"center", gap:8,
-                }}
-                  onMouseOver={e=>e.currentTarget.style.background=C.creamD}
-                  onMouseOut={e=>e.currentTarget.style.background="none"}
-                >⚖️ Mentions légales</button>
-                <button onClick={() => { setUserMenu(false); if(onLegal) onLegal("confidentialite"); }} style={{
-                  width:"100%", textAlign:"left",
-                  padding:"10px 16px", background:"none", border:"none",
-                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
-                  display:"flex", alignItems:"center", gap:8,
-                }}
-                  onMouseOver={e=>e.currentTarget.style.background=C.creamD}
-                  onMouseOut={e=>e.currentTarget.style.background="none"}
-                >🛡️ Confidentialité</button>
                 <button onClick={() => { setUserMenu(false); onSignOut(); }} style={{
                   display:"block", width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
