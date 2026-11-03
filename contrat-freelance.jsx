@@ -1047,7 +1047,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "243";
+const APP_VERSION = "244";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -3734,6 +3734,33 @@ const downloadSignedContractForClient = async (contractId) => {
   doc.save(fileName);
 };
 
+// Version 244 : les PDF rédigés avec l'aide de l'intelligence artificielle (contrat, avenant, lettre de relance,
+// rapport d'analyse) le disent dans leurs propriétés, de façon lisible par les logiciels (règlement européen sur
+// l'intelligence artificielle, article 50) : objet et mots-clés du fichier, et métadonnées XMP (vocabulaire IPTC
+// « trainedAlgorithmicMedia »). Rien ne change dans les pages. Pas pour les factures, le livre des recettes ni les NDA.
+const AI_PDF_SUBJECT = "Document rédigé avec l'aide d'un système d'intelligence artificielle";
+const AI_PDF_KEYWORDS = "AI-generated, intelligence artificielle, Freeley";
+const xmlEscape = (v) => String(v || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const markPdfAsAiGenerated = (doc, title = "") => {
+  try {
+    doc.setProperties({ subject: AI_PDF_SUBJECT, keywords: AI_PDF_KEYWORDS });
+    // XMP écrit tel quel : jsPDF 4 seulement (la version 2.5.1 de secours ne sait pas le faire : objet et mots-clés suffisent)
+    const version = parseInt(String((window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.version) || "0"), 10);
+    if (version >= 4 && typeof doc.addMetadata === "function") {
+      doc.addMetadata('<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+        + '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        + '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:pdf="http://ns.adobe.com/pdf/1.3/"'
+        + ' xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/">'
+        + '<Iptc4xmpExt:DigitalSourceType>http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia</Iptc4xmpExt:DigitalSourceType>'
+        + (title ? '<dc:title><rdf:Alt><rdf:li xml:lang="x-default">' + xmlEscape(title) + '</rdf:li></rdf:Alt></dc:title>' : '')
+        + '<dc:description><rdf:Alt><rdf:li xml:lang="x-default">' + xmlEscape(AI_PDF_SUBJECT) + '</rdf:li></rdf:Alt></dc:description>'
+        + '<pdf:Keywords>' + xmlEscape(AI_PDF_KEYWORDS) + '</pdf:Keywords>'
+        + '<xmp:CreatorTool>Freeley ' + xmlEscape(APP_VERSION) + '</xmp:CreatorTool>'
+        + '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="r"?>', true);
+    }
+  } catch (e) { /* le PDF reste valable sans ces propriétés */ }
+};
+
 // ── PDF du contrat ── (version 220 : fonction commune)
 // Le même PDF pour le freelance (écran du contrat, Mes contrats) et pour la page du client, qui peut
 // télécharger son exemplaire signé. jsPDF doit déjà être chargé (window.jspdf).
@@ -3766,6 +3793,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   doc.setProperties({ title: `Contrat — ${pForm.missionTitle || "Mission"}`, creator: `Freeley ${APP_VERSION}` });
+  markPdfAsAiGenerated(doc, `Contrat — ${pForm.missionTitle || "Mission"}`);
   const PW = 210, PH = 297;
   const ML = 22, MR = 22, cw = PW - ML - MR;
   const HEADER_H = 16, FOOTER_H = 14, BODY_TOP = HEADER_H + 8, BODY_BOT = PH - FOOTER_H - 6;
@@ -4416,7 +4444,7 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results","dashboard","cgu","drafts","mes-ndas","archives","recettes"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","dashboard","cgu","mentions","confidentialite","drafts","mes-ndas","archives","recettes"].includes(saved) ? saved : "app";
   });
   const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
@@ -4509,6 +4537,12 @@ function AppInner() {
     const handler = () => goToScreen("scan-results");
     window.addEventListener("freeley-goto-scan", handler);
     return () => window.removeEventListener("freeley-goto-scan", handler);
+  }, []);
+  // Version 244 : les liens vers les pages légales (petite ligne en bas des écrans, liens d'une page légale à l'autre)
+  // les ouvrent dans l'application, sans la recharger, comme le menu du compte
+  useEffect(() => {
+    openLegalInApp = (page) => goToScreen(page);
+    return () => { openLegalInApp = null; };
   }, []);
 
   // ── Caméra : gestion des permissions (simulation iOS/Android) ──
@@ -5437,7 +5471,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   }
 
   if (!authReady) return (
-    <Shell>
+    <Shell noFooter>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
         <div style={{ textAlign:"center" }}>
           <div style={{ width:40, height:40, border:`3px solid ${C.navy}`, borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.7s linear infinite", margin:"0 auto 16px" }} />
@@ -5613,6 +5647,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     onDashboard: () => goToScreen("dashboard"),
     onDrafts: () => goToScreen("drafts"),
     onCGU: () => goToScreen("cgu"),
+    onLegal: (page) => goToScreen(page), // version 244 : « mentions » ou « confidentialite »
     onMyNdas: () => goToScreen("mes-ndas"),
     onProfile: () => goToScreen("profile"),
     // Version 237 : la fenêtre Recouvrement Ferme n'existe que sur l'écran principal : on y va (avant, depuis le
@@ -5770,7 +5805,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
   /* ── PROFILE ── */
   if (screen === "profile") return (
-    <Shell>
+    <Shell footerSpace={96}>
       {AuthModalEl}
       {cameraLayer}
       <Header {...headerProps} />
@@ -5924,7 +5959,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     </Shell>);
   }
   if (screen === "reset-password") return (
-    <Shell>
+    <Shell noFooter>
       <div style={{ maxWidth:420, margin:"80px auto", padding:"0 20px" }}>
         <h2 style={{ fontFamily:"Georgia, serif", fontSize:24, color:"#1B2E4B", marginBottom:8 }}>Nouveau mot de passe</h2>
         <p style={{ fontSize:13, color:"#8A8780", marginBottom:24 }}>Choisis un nouveau mot de passe pour ton compte.</p>
@@ -5966,6 +6001,23 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       {AuthModalEl}
       <Header {...headerProps} />
       <CguPage onBack={() => goToScreen("app")} />
+    </Shell>
+  );
+
+  /* ── MENTIONS LÉGALES ET CONFIDENTIALITÉ, DANS L'APPLICATION (version 244) ── */
+  if (screen === "mentions") return (
+    <Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <MentionsLegalesPage onBack={() => goToScreen("app")} />
+    </Shell>
+  );
+
+  if (screen === "confidentialite") return (
+    <Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <PolitiqueConfidentialitePage onBack={() => goToScreen("app")} />
     </Shell>
   );
 
@@ -7120,6 +7172,10 @@ const downloadAvenantPDF = (avenantText, avenantNum, contractNum, freelanceName,
   try {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+    // Version 244 : propriétés du fichier, avec la mention lisible par machine (texte rédigé avec l'aide de l'IA)
+    const avenantPdfTitle = `Avenant n°${avenantNum}${contractNum ? ` au contrat ${contractNum}` : ""}`;
+    doc.setProperties({ title: avenantPdfTitle, creator: `Freeley ${APP_VERSION}` });
+    markPdfAsAiGenerated(doc, avenantPdfTitle);
     const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
     const NAVY = [26, 54, 93], GOLD = [180, 140, 70];
     const today = new Date().toLocaleDateString("fr-FR");
@@ -10377,10 +10433,14 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
     </div>
   );
 }
-function Shell({ children }) {
+// Version 244 : footerSpace, espace sous la petite ligne : le bas de l'écran reste dégagé des bulles (aide, message),
+// qui cachaient sur téléphone la fin de l'avertissement « Le document ne constitue pas une consultation juridique… »
+function Shell({ children, noFooter = false, footerSpace = 64 }) {
   return (
     <div style={{ minHeight:"100vh", background:C.cream, fontFamily:T.body, color:C.text }}>
       {children}
+      {/* Version 244 : mentions légales, confidentialité et CGU, en tout petit, en bas de l'écran */}
+      {!noFooter && <LegalFooter bottomSpace={footerSpace} />}
       <FeedbackBubble />
     </div>
   );
@@ -11481,7 +11541,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onDrafts, onMyNdas, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
+function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onLegal, onDrafts, onMyNdas, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
   const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -11673,6 +11733,24 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
                 >📄 Conditions d'utilisation</button>
+                <button onClick={() => { setUserMenu(false); if(onLegal) onLegal("mentions"); }} style={{
+                  width:"100%", textAlign:"left",
+                  padding:"10px 16px", background:"none", border:"none",
+                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
+                  display:"flex", alignItems:"center", gap:8,
+                }}
+                  onMouseOver={e=>e.currentTarget.style.background=C.creamD}
+                  onMouseOut={e=>e.currentTarget.style.background="none"}
+                >⚖️ Mentions légales</button>
+                <button onClick={() => { setUserMenu(false); if(onLegal) onLegal("confidentialite"); }} style={{
+                  width:"100%", textAlign:"left",
+                  padding:"10px 16px", background:"none", border:"none",
+                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
+                  display:"flex", alignItems:"center", gap:8,
+                }}
+                  onMouseOver={e=>e.currentTarget.style.background=C.creamD}
+                  onMouseOut={e=>e.currentTarget.style.background="none"}
+                >🛡️ Confidentialité</button>
                 <button onClick={() => { setUserMenu(false); onSignOut(); }} style={{
                   display:"block", width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
@@ -12854,6 +12932,10 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
 
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+      // Version 244 : propriétés du fichier, avec la mention lisible par machine (lettre rédigée avec l'aide de l'IA)
+      const letterPdfTitle = isSilence ? "Relance" : isPreventive ? "Rappel d'échéance" : isAmicable ? "Relance de paiement" : "Mise en demeure";
+      doc.setProperties({ title: letterPdfTitle, creator: `Freeley ${APP_VERSION}` });
+      markPdfAsAiGenerated(doc, letterPdfTitle);
       const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
       const NAVY = isSilence ? [30, 64, 175] : isPreventive ? [180, 140, 70] : isAmicable ? [154, 52, 18] : [26, 54, 93];
       const GOLD = [180, 140, 70];
@@ -13725,7 +13807,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
             flexWrap:"wrap",
           }}>
             {[
-              { icon:"📄", text:"Contrats juridiquement solides" },
+              { icon:"📄", text:"Contrats prêts en 2 minutes" },
               { icon:"🪄", text:"Scanner intégré" },
             ].map((item, i) => (
               <React.Fragment key={i}>
@@ -16430,6 +16512,12 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                 </div>
               </>
             )}
+            {/* Version 244 : information obligatoire (règlement européen sur l'intelligence artificielle, article 50),
+                en petit, discrète, visible avant même de poser la question. Gris assez foncé pour rester lisible : la loi
+                demande une information claire (contraste 5,5 pour 1 sur le blanc) */}
+            <div data-testid="assistant-ai-note" style={{ fontFamily:T.body, fontSize:10.5, color:"#6B6862", lineHeight:1.5, marginTop:14, textAlign:"center" }}>
+              Réponse rédigée automatiquement par une intelligence artificielle, à partir de ce contrat uniquement. Ce n'est pas un conseil juridique : en cas de doute, demande l'avis d'un professionnel du droit.
+            </div>
           </div>
         </div>
       )}
@@ -18076,6 +18164,7 @@ const downloadScanReport = (findings, { label = "" } = {}) => {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   doc.setProperties({ title: "Rapport d'analyse de contrat", creator: `Freeley ${APP_VERSION}` });
+  markPdfAsAiGenerated(doc, "Rapport d'analyse de contrat");
   const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR, BOTTOM = 280;
   const NAVY = [26, 54, 93], GOLD = [180, 140, 70], DARK = [44, 62, 80];
   const COLORS = { danger: [200, 60, 60], warning: [200, 150, 40], ok: [39, 119, 63] };
@@ -20867,6 +20956,7 @@ function ClientSignaturePage({ contractId }) {
           Gardez ce lien précieusement : il vous permet de revoir votre contrat et de télécharger votre exemplaire signé à tout moment. En cas de perte, vous pouvez le retrouver via freeley.fr/?trouver-contrat=1.
         </div>
       </div>
+      <ClientLegalNote who="prestataire" />
     </div>
   );
 
@@ -20967,6 +21057,7 @@ function ClientSignaturePage({ contractId }) {
               style={{ width:"100%", padding:"13px 18px", background:"#fff", border:"1.5px solid #DC2626", borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:700, color:"#DC2626" }}
             >Renoncer au contrat ici</button>
           )}
+          <ClientLegalNote who="prestataire" />
         </div>
       </div>
     );
@@ -21002,6 +21093,7 @@ function ClientSignaturePage({ contractId }) {
           </div>
           <button onClick={() => { setContractReadForGate(false); window.scrollTo(0, 0); }} style={{ display:"block", margin:"10px auto 0", background:"none", border:"none", color:"#1B2E4B", fontSize:12, textDecoration:"underline", cursor:"pointer" }}>← Relire le contrat</button>
         </div>
+        <ClientLegalNote who="prestataire" />
       </div>
     </div>
   );
@@ -21055,6 +21147,7 @@ function ClientSignaturePage({ contractId }) {
           </div>
         </div>
         )}
+        <ClientLegalNote who="prestataire" />
       </div>
     </div>
   );
@@ -21082,6 +21175,7 @@ function PaymentReturnPage({ status }) {
               : "Aucun montant n'a été débité. Pour payer plus tard, utilisez à nouveau le lien de paiement envoyé par votre prestataire."}
           </div>
         </div>
+        <ClientLegalNote />
       </div>
     </div>
   );
@@ -21145,6 +21239,7 @@ function FindMyContractPage() {
             </>
           )}
         </div>
+        <ClientLegalNote text="Votre adresse email sert uniquement à rechercher vos contrats signés et à vous envoyer leur lien." />
       </div>
     </div>
   );
@@ -21228,6 +21323,7 @@ function NdaSignaturePage({ ndaId }) {
         <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>Ce NDA a déjà été signé. Merci !</div>
         {copyButton}
       </div>
+      <ClientLegalNote who="partie" />
     </div>
   );
 
@@ -21248,6 +21344,7 @@ function NdaSignaturePage({ ndaId }) {
         <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
         {copyButton}
       </div>
+      <ClientLegalNote who="partie" />
     </div>
   );
 
@@ -21290,6 +21387,7 @@ function NdaSignaturePage({ ndaId }) {
             En signant, vous acceptez les termes de ce NDA. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
           </div>
         </div>
+        <ClientLegalNote who="partie" />
       </div>
     </div>
   );
@@ -21364,6 +21462,7 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
         <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Avenant signé !</div>
         <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
       </div>
+      <ClientLegalNote who="prestataire" />
     </div>
   );
 
@@ -21413,13 +21512,69 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
             En signant, vous acceptez les termes de cet avenant. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
           </div>
         </div>
+        <ClientLegalNote who="prestataire" />
       </div>
     </div>
   );
 }
 
 /* ══════════════════════════════════════════ PAGES LÉGALES ══ */
+// Version 244 : lien vers une page légale. Dans l'application connectée, il ouvre la page sans recharger l'application
+// (openLegalInApp, posé par AppInner) ; ailleurs (page légale seule), il mène simplement à son adresse.
+let openLegalInApp = null;
+function LegalLink({ page, style, children }) {
+  return (
+    <a
+      href={`/?legal=${page}`}
+      onClick={(e) => {
+        if (!openLegalInApp || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // nouvel onglet demandé
+        e.preventDefault();
+        openLegalInApp(page);
+      }}
+      style={style}
+    >{children}</a>
+  );
+}
+
+// Version 244 : en tout petit, en bas de chaque écran de l'application
+function LegalFooter({ bottomSpace = 64 }) {
+  const link = { color:C.textL, textDecoration:"none" };
+  return (
+    <nav data-testid="legal-footer" aria-label="Informations légales" style={{ textAlign:"center", padding:`20px 16px ${bottomSpace}px`, fontFamily:T.body, fontSize:10.5, color:C.textL, lineHeight:1.6 }}>
+      <LegalLink page="mentions" style={link}>Mentions légales</LegalLink>
+      <span aria-hidden="true">{" · "}</span>
+      <LegalLink page="confidentialite" style={link}>Confidentialité</LegalLink>
+      <span aria-hidden="true">{" · "}</span>
+      <LegalLink page="cgu" style={link}>CGU</LegalLink>
+    </nav>
+  );
+}
+
+// Version 244 : en bas des pages des clients, en petit : qui traite leurs données (Freeley, pour le compte de la
+// personne qui leur a envoyé le lien, qui en est responsable), et les liens vers les mentions légales et la politique
+// de confidentialité. Nouvel onglet : la page de signature reste ouverte, la signature en cours n'est pas perdue.
+const CLIENT_DATA_NOTES = {
+  prestataire: "Vos données sont traitées par Freeley pour le compte de votre prestataire, qui en est responsable. Pour toute question à leur sujet, adressez-vous à lui.",
+  partie: "Vos données sont traitées par Freeley pour le compte de l'autre partie, qui en est responsable. Pour toute question à leur sujet, adressez-vous à elle.",
+};
+function ClientLegalNote({ who = null, text = null }) {
+  const note = text || (who ? CLIENT_DATA_NOTES[who] : null);
+  const link = { color:"#9CA3AF", textDecoration:"underline" };
+  return (
+    <div data-testid="client-legal-note" style={{ width:"100%", maxWidth:560, margin:"18px auto 0", padding:"0 6px", boxSizing:"border-box", textAlign:"center", fontFamily:"'DM Sans', sans-serif", fontSize:10.5, color:"#9CA3AF", lineHeight:1.55 }}>
+      {note && <div>{note}</div>}
+      <div style={{ marginTop: note ? 4 : 0 }}>
+        <a href="/?legal=mentions" target="_blank" rel="noopener noreferrer" style={link}>Mentions légales</a>
+        <span aria-hidden="true">{" · "}</span>
+        <a href="/?legal=confidentialite" target="_blank" rel="noopener noreferrer" style={link}>Confidentialité</a>
+      </div>
+    </div>
+  );
+}
+
 function LegalPageLayout({ title, children, onBack }) {
+  // Version 244 : la page s'ouvre en haut (avant : ouverte depuis le bas d'un écran, elle restait en bas)
+  useEffect(() => { try { window.scrollTo(0, 0); } catch (e) {} }, []);
   return (
     <div style={{ minHeight:"100vh", background:C.cream, padding:"40px 20px" }}>
       <div style={{ maxWidth:720, margin:"0 auto", background:C.white, borderRadius:16, padding:"40px 32px", boxShadow:"0 2px 20px #1B2E4B10" }}>
@@ -21448,7 +21603,7 @@ function LandingPage({ onStart }) {
     meta.setAttribute("content", "Freeley génère tes contrats freelance, factures et NDA. Signature électronique, vérification d'entreprise, facturation électronique. Gratuit.");
   }, []);
   const features = [
-    { icon: "📝", title: "Contrats en 2 minutes", text: "Décris ta mission, ton contrat complet et juridiquement solide est prêt aussitôt." },
+    { icon: "📝", title: "Contrats en 2 minutes", text: "Décris ta mission, ton contrat complet et clair est prêt aussitôt." },
     { icon: "✍️", title: "Signature électronique", text: "Toi et ton client signez directement depuis votre téléphone, sans papier." },
     { icon: "💳", title: "Paiements sécurisés", text: "Lien de paiement automatique, suivi des acomptes et des soldes." },
     { icon: "🛡️", title: "Vérification client", text: "Vérifie en 30 secondes qu'une entreprise existe vraiment, avant de signer." },
@@ -21507,7 +21662,7 @@ function LandingPage({ onStart }) {
   );
 }
 
-function MentionsLegalesPage() {
+function MentionsLegalesPage({ onBack }) {
   const Section = ({ title, children }) => (
     <>
       <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
@@ -21515,8 +21670,8 @@ function MentionsLegalesPage() {
     </>
   );
   return (
-    <LegalPageLayout title="Mentions légales">
-      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : octobre 2026</p>
+    <LegalPageLayout title="Mentions légales" onBack={onBack}>
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : novembre 2026</p>
 
       <Section title="Éditeur du site">
         <p>
@@ -21537,7 +21692,7 @@ function MentionsLegalesPage() {
       <Section title="Hébergement du site">
         <p>
           Vercel Inc.<br/>
-          340 S Lemon Ave #4133, Walnut, CA 91789, États-Unis<br/>
+          440 N Barranca Avenue #4133, Covina, CA 91723, États-Unis<br/>
           Téléphone : +1 (559) 288-7060<br/>
           https://vercel.com
         </p>
@@ -21552,6 +21707,17 @@ function MentionsLegalesPage() {
         </p>
       </Section>
 
+      <Section title="Contact et signalement de contenus">
+        <p>
+          Pour toute question, pour signaler un contenu illicite ou pour toute demande d'une autorité :{" "}
+          <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.
+          C'est le point de contact unique de Freeley, pour les utilisateurs comme pour les autorités.
+          Les échanges ont lieu en français ou en anglais. La procédure de signalement est décrite à
+          l'article 14 des{" "}
+          <LegalLink page="cgu" style={{ color:C.gold }}>conditions générales d'utilisation</LegalLink>.
+        </p>
+      </Section>
+
       <Section title="Propriété intellectuelle">
         <p>
           L'ensemble des éléments composant ce site et l'application (textes, modèles, graphismes,
@@ -21563,14 +21729,14 @@ function MentionsLegalesPage() {
       <Section title="Données personnelles">
         <p>
           Le traitement des données personnelles est décrit dans la{" "}
-          <a href="/?legal=confidentialite" style={{ color:C.gold }}>Politique de confidentialité</a>.
+          <LegalLink page="confidentialite" style={{ color:C.gold }}>Politique de confidentialité</LegalLink>.
         </p>
       </Section>
     </LegalPageLayout>
   );
 }
 
-function PolitiqueConfidentialitePage() {
+function PolitiqueConfidentialitePage({ onBack }) {
   const Section = ({ title, children }) => (
     <>
       <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
@@ -21578,7 +21744,7 @@ function PolitiqueConfidentialitePage() {
     </>
   );
   return (
-    <LegalPageLayout title="Politique de confidentialité">
+    <LegalPageLayout title="Politique de confidentialité" onBack={onBack}>
       <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : novembre 2026</p>
 
       <Section title="Qui est responsable de tes données">
@@ -21599,57 +21765,81 @@ function PolitiqueConfidentialitePage() {
           confidentialité, signatures), Freeley agit comme sous-traitant, pour ton compte et selon tes
           instructions, au sens de l'article 28 du RGPD. C'est toi qui en es responsable, notamment
           pour informer tes clients. Les engagements de Freeley en tant que sous-traitant figurent
-          dans les <a href="/?legal=cgu" style={{ color:C.gold }}>CGU</a>.
+          dans les <LegalLink page="cgu" style={{ color:C.gold }}>CGU</LegalLink>.
         </p>
       </Section>
 
       <Section title="Quelles données sont traitées">
         <ul>
-          <li>Compte : adresse email, nom, et mot de passe ou identifiant de connexion Google.</li>
-          <li>Profil : nom, activité, SIRET, adresse, téléphone, numéro de TVA, coordonnées bancaires (IBAN et BIC), logo.</li>
-          <li>Documents : contrats, brouillons de contrats, avenants, accords de confidentialité, factures, relances et analyses de contrats, avec les informations qu'ils contiennent sur toi et sur tes clients (nom, email, adresse, détails de mission, montants).</li>
+          <li>Compte : adresse email, nom, et mot de passe ou identifiant de connexion Google ou LinkedIn.</li>
+          <li>Profil : nom, activité, SIRET, adresse, téléphone, numéro de TVA, coordonnées bancaires (IBAN et BIC), logo ou photo.</li>
+          <li>Documents : contrats, brouillons de contrats, avenants, accords de confidentialité, factures, livre des recettes, relances et analyses de contrats, avec les informations qu'ils contiennent sur toi et sur tes clients (nom, email, adresse, détails de mission, montants).</li>
+          <li>Suivi de tes clients : l'état des paiements, et les notes (étoiles et badges) que tu donnes à tes clients.</li>
           <li>Signatures et preuves : image de la signature dessinée, dates et heures de signature, adresse IP et navigateur de l'appareil utilisé pour signer, empreinte numérique (SHA-256) du document signé, choix exprimés par un client particulier sur son droit de rétractation, et dates d'envoi des emails associés.</li>
-          <li>Paiements : traités par Stripe. Freeley ne stocke aucun numéro de carte bancaire. Pour chaque lien de paiement par carte, Freeley garde le montant, le libellé, l'email du client s'il est connu et la date du paiement, pour que le lien reste valable et ne puisse pas être payé deux fois.</li>
+          <li>Documents et photos lus automatiquement : le contrat que tu fais analyser, et les photos ou fichiers qui servent à remplir les cases (carte de visite, devis, RIB, justificatif). Ils sont transmis pour en tirer les informations utiles. Freeley ne conserve pas ces fichiers.</li>
+          <li>Paiements : traités par Stripe. Freeley ne stocke aucun numéro de carte bancaire. Si tu connectes ton compte Stripe, Freeley garde son identifiant. Pour chaque lien de paiement par carte, Freeley garde le montant, le libellé, l'email du client s'il est connu et la date du paiement, pour que le lien reste valable et ne puisse pas être payé deux fois.</li>
+          <li>Facturation électronique : si tu connectes ton compte Super PDP, Freeley garde les identifiants que tu lui donnes, pour transmettre tes factures.</li>
+          <li>Messages : ceux que tu envoies avec la bulle 💬 (le message, l'adresse de la page concernée et, si tu la donnes, ton adresse email), et tes échanges avec le support.</li>
+          <li>Utilisation du service : les alertes déjà lues, et le nombre d'utilisations de la rédaction automatique dans la journée, qui est limité.</li>
           <li>Données techniques : journaux de connexion et de fonctionnement produits par nos prestataires d'hébergement.</li>
         </ul>
+        <p>
+          Certaines informations sont obligatoires : ton adresse email pour créer un compte, et les
+          mentions que la loi impose sur les contrats et les factures (nom, adresse, SIRET…). Sans
+          elles, le compte ou le document concerné ne peut pas être créé. Les autres informations sont
+          facultatives, mais certaines fonctions en ont besoin, comme les coordonnées bancaires pour
+          tes factures.
+        </p>
       </Section>
 
       <Section title="Pourquoi, et sur quelle base légale">
         <ul>
           <li>Fournir le service : créer et gérer ton compte, générer, faire signer, envoyer et conserver tes documents, t'envoyer les emails liés au service. Base légale : l'exécution du contrat qui nous lie, c'est-à-dire les CGU (article 6.1.b du RGPD).</li>
           <li>Respecter nos obligations légales, comme la comptabilité, la facturation ou les demandes des autorités. Base légale : l'obligation légale (article 6.1.c du RGPD).</li>
-          <li>Assurer la sécurité du service, prévenir la fraude et corriger les erreurs. Base légale : l'intérêt légitime de Freeley à proposer un service fiable et sûr (article 6.1.f du RGPD).</li>
+          <li>Assurer la sécurité du service, prévenir la fraude et les abus (par exemple avec la limite quotidienne de la rédaction automatique), corriger les erreurs et répondre à tes messages. Base légale : l'intérêt légitime de Freeley à proposer un service fiable et sûr (article 6.1.f du RGPD).</li>
         </ul>
         <p>Freeley ne vend aucune donnée et ne fait aucune publicité ciblée.</p>
+        <p>
+          Freeley ne prend aucune décision fondée uniquement sur un traitement automatisé qui
+          produirait des effets juridiques te concernant ou qui t'affecterait de façon importante.
+        </p>
       </Section>
 
       <Section title="Qui reçoit tes données">
-        <p>Seules les personnes et les prestataires qui en ont besoin y ont accès. Nos prestataires agissent comme sous-traitants de Freeley :</p>
+        <p>Seules les personnes et les prestataires qui en ont besoin y ont accès.</p>
+        <p>Ces prestataires agissent pour le compte de Freeley, comme sous-traitants, et sont tenus de protéger tes données :</p>
         <ul>
           <li>Supabase : base de données et authentification. Tes données sont stockées dans l'Union européenne, en Irlande.</li>
           <li>Vercel : hébergement du site et exécution des fonctions du serveur.</li>
-          <li>Stripe : traitement des paiements.</li>
           <li>Resend : envoi des emails automatiques.</li>
-          <li>Anthropic : génération et analyse de contenus à partir des informations que tu saisis.</li>
-          <li>Super PDP : transmission des factures électroniques, uniquement si tu utilises cette option.</li>
+          <li>Anthropic : rédaction et analyse de contenus, à partir des informations, des documents et des photos que tu lui soumets.</li>
+          <li>Cloudflare (service cdnjs) : seulement si l'outil qui fabrique les PDF ne se charge pas depuis Freeley. Une copie de secours est alors chargée depuis ce service, qui reçoit l'adresse IP de l'appareil.</li>
         </ul>
+        <p>Ces services traitent des données pour leur propre compte, selon leurs propres conditions, et seulement si tu les utilises :</p>
+        <ul>
+          <li>Stripe : paiements par carte sur ton compte Stripe, si tu proposes le paiement en ligne à tes clients.</li>
+          <li>Super PDP : transmission de tes factures électroniques, si tu connectes ton compte.</li>
+          <li>Google et LinkedIn : connexion avec ton compte Google ou LinkedIn, si tu la choisis.</li>
+          <li>L'API Recherche d'entreprises de l'État (recherche-entreprises.api.gouv.fr) : quand tu utilises le Radar Client, ton appareil l'interroge directement, avec le nom ou le numéro de l'entreprise recherchée.</li>
+        </ul>
+        <p>Tes clients reçoivent les documents que tu leur envoies. Les autorités peuvent recevoir des données quand la loi l'impose.</p>
       </Section>
 
       <Section title="Transferts hors de l'Union européenne">
         <p>
-          Certains de ces prestataires sont établis hors de l'Union européenne, notamment aux
-          États-Unis. Ces transferts sont encadrés soit par la décision d'adéquation de la Commission
-          européenne relative au cadre de protection des données UE–États-Unis (Data Privacy
-          Framework), lorsque le prestataire y est certifié, soit par les clauses contractuelles types
-          adoptées par la Commission européenne.
+          Certains de ces prestataires et services sont établis hors de l'Union européenne, notamment
+          aux États-Unis. Pour les prestataires de Freeley, ces transferts sont encadrés soit par la
+          décision d'adéquation de la Commission européenne relative au cadre de protection des
+          données UE–États-Unis (Data Privacy Framework), lorsque le prestataire y est certifié, soit
+          par les clauses contractuelles types adoptées par la Commission européenne.
         </p>
       </Section>
 
       <Section title="Combien de temps tes données sont conservées">
         <ul>
-          <li>Compte et profil : tant que ton compte est actif. Ils sont supprimés quand tu supprimes ton compte. Un compte inactif depuis trois ans peut être supprimé, après un avertissement par email.</li>
+          <li>Compte, profil et données d'utilisation : tant que ton compte est actif. Ils sont supprimés quand tu supprimes ton compte. Un compte inactif depuis trois ans peut être supprimé, après un avertissement par email.</li>
           <li>Documents, signatures et preuves : tant que ton compte est actif, pour que tu puisses les retrouver et prouver tes accords. Tu peux les supprimer à tout moment. Avant de supprimer ton compte, télécharge-les : tu dois toi-même conserver tes contrats et tes factures pendant les durées légales qui s'appliquent à ton activité, par exemple dix ans pour les factures.</li>
-          <li>Échanges avec le support : trois ans après le dernier échange.</li>
+          <li>Échanges avec le support, y compris les messages de la bulle 💬 : trois ans après le dernier échange.</li>
           <li>Journaux techniques : selon les durées de nos prestataires, et au plus un an.</li>
         </ul>
       </Section>
@@ -21670,6 +21860,24 @@ function PolitiqueConfidentialitePage() {
         <p>
           Tes clients doivent t'adresser leurs demandes, puisque tu es responsable de leurs données.
           Freeley t'aide à y répondre.
+        </p>
+      </Section>
+
+      <Section title="Vous êtes client d'un utilisateur de Freeley ?">
+        <p>
+          Si un professionnel vous a envoyé, par Freeley, un contrat, un avenant ou un accord de
+          confidentialité à signer, une facture ou un lien de paiement, vos données (identité,
+          coordonnées, informations de la mission, signature, adresse IP et navigateur au moment de la
+          signature) sont traitées par Freeley pour son compte. Ce professionnel en est responsable :
+          adressez-lui d'abord vos questions et vos demandes (accès, rectification, effacement…). Vous
+          pouvez aussi écrire à{" "}
+          <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a> :
+          Freeley lui transmettra votre demande et l'aidera à y répondre.
+        </p>
+        <p>
+          Si vous payez par carte, le paiement est traité par Stripe, selon sa propre politique de
+          confidentialité. Si vous utilisez « Retrouver mon contrat », votre adresse email sert
+          uniquement à rechercher vos contrats signés et à vous envoyer leur lien.
         </p>
       </Section>
 
@@ -21705,13 +21913,18 @@ function PolitiqueConfidentialitePage() {
 
       <Section title="Utilisation de l'intelligence artificielle">
         <p>
-          Certains contenus proposés par Freeley, notamment des contrats, des documents et des
-          analyses, sont produits à l'aide d'un système d'intelligence artificielle fourni par
-          Anthropic, à partir des informations que tu saisis. Ces informations lui sont transmises
-          pour produire le contenu demandé. Les clauses de protection ainsi que les clauses
+          Certains contenus proposés par Freeley, notamment des contrats, des avenants, des lettres de
+          relance, des analyses de contrats et les réponses de l'assistant « J'ai un problème », sont
+          produits à l'aide d'un système d'intelligence artificielle fourni par Anthropic, à partir des
+          informations que tu saisis et des documents que tu soumets. Ces informations lui sont
+          transmises pour produire le contenu demandé. Les clauses de protection ainsi que les clauses
           relatives à la propriété intellectuelle et aux garanties ont fait l'objet d'une revue
           juridique par une juriste en droit des affaires et du numérique. Tu restes responsable de
           la vérification du contenu généré et de son adéquation à ta situation.
+        </p>
+        <p>
+          Les fichiers PDF de ces documents l'indiquent dans leurs propriétés, sous une forme lisible
+          par les logiciels, sans rien changer à leur contenu.
         </p>
       </Section>
     </LegalPageLayout>
@@ -21743,7 +21956,7 @@ function CguPage({ onBack }) {
           Le Service est édité par Junayd Aissaoui, entrepreneur individuel (EI), exerçant sous le nom
           commercial Freeley, immatriculé au RCS d'Amiens sous le numéro 130 333 891 (ci-après
           « Freeley »). Ses coordonnées complètes figurent dans les{" "}
-          <a href="/?legal=mentions" style={{ color:C.gold }}>mentions légales</a>.
+          <LegalLink page="mentions" style={{ color:C.gold }}>mentions légales</LegalLink>.
         </p>
       </Section>
 
@@ -21762,8 +21975,8 @@ function CguPage({ onBack }) {
           contrats de prestation, des avenants, des accords de confidentialité, des factures et des
           relances, de les faire signer électroniquement et de les suivre. Les documents sont établis
           automatiquement à partir de modèles et des informations saisies par l'Utilisateur, à l'aide
-          de procédés automatisés décrits dans la{" "}
-          <a href="/?legal=confidentialite" style={{ color:C.gold }}>Politique de confidentialité</a>.
+          de procédés automatisés décrits à l'article 6 et dans la{" "}
+          <LegalLink page="confidentialite" style={{ color:C.gold }}>Politique de confidentialité</LegalLink>.
         </p>
         <p>
           Lorsque l'Utilisateur propose à ses clients de payer en ligne, les paiements sont traités par la société Stripe,
@@ -21771,6 +21984,17 @@ function CguPage({ onBack }) {
           compte. Les sommes sont versées directement à l'Utilisateur : Freeley ne reçoit, ne détient et ne transfère aucune
           somme, et ne prélève aucune commission sur ces paiements. Les frais facturés par Stripe sont à la charge de
           l'Utilisateur.
+        </p>
+        <p>
+          Les outils de gestion (factures, livre des recettes, tableau de bord, relances, Radar Client)
+          sont une aide, établie à partir des informations saisies par l'Utilisateur. L'Utilisateur
+          reste seul responsable de sa comptabilité, de ses déclarations fiscales et sociales, et de
+          ses obligations de facturation, y compris de facturation électronique et de transmission de
+          données à l'administration lorsqu'elles s'appliquent à lui. Freeley n'est pas une plateforme
+          agréée de facturation électronique : si l'Utilisateur le choisit, ses factures électroniques
+          sont transmises par la plateforme Super PDP, sur son propre compte et selon les conditions
+          de celle-ci. Les informations du Radar Client proviennent de sources publiques et sont
+          fournies sans garantie d'exactitude ni d'exhaustivité.
         </p>
       </Section>
 
@@ -21792,7 +22016,24 @@ function CguPage({ onBack }) {
         </p>
       </Section>
 
-      <Section title="Article 6 — Compte">
+      <Section title="Article 6 — Contenus produits avec l'intelligence artificielle">
+        <p>
+          Certaines fonctions du Service utilisent un système d'intelligence artificielle : la
+          rédaction des contrats et des avenants, les lettres de relance, l'analyse de contrats,
+          l'assistant « J'ai un problème » et le remplissage des cases à partir d'une photo. Les
+          contenus ainsi produits peuvent comporter des erreurs ou des omissions. Ils sont une aide à
+          la rédaction et ne constituent pas un conseil juridique. L'Utilisateur les relit, les vérifie
+          et les adapte avant de les utiliser, et il en reste seul responsable.
+        </p>
+        <p>
+          Les réponses de l'assistant se fondent uniquement sur le contrat concerné et sur la situation
+          décrite par l'Utilisateur : elles ne tiennent pas compte des circonstances qu'il n'a pas
+          indiquées. Les fichiers PDF des documents produits avec l'aide de l'intelligence
+          artificielle l'indiquent dans leurs propriétés, sous une forme lisible par les logiciels.
+        </p>
+      </Section>
+
+      <Section title="Article 7 — Compte">
         <p>
           L'Utilisateur fournit des informations exactes et les tient à jour. Il garde ses
           identifiants confidentiels, répond de toute utilisation de son compte et signale sans délai
@@ -21800,11 +22041,12 @@ function CguPage({ onBack }) {
         </p>
       </Section>
 
-      <Section title="Article 7 — Obligations de l'Utilisateur">
+      <Section title="Article 8 — Obligations de l'Utilisateur">
         <p>L'Utilisateur s'engage à :</p>
         <ul>
           <li>saisir des informations exactes, notamment sur lui-même et sur ses clients, dont il est seul responsable ;</li>
           <li>utiliser le Service conformément à la loi, sans fraude ni atteinte aux droits des tiers ;</li>
+          <li>ne pas perturber le Service, ni contourner ses limites d'utilisation ou ses mesures de sécurité ;</li>
           <li>respecter ses propres obligations envers ses clients, notamment en matière d'information précontractuelle, de droit de rétractation, de facturation et de conservation des documents, et, lorsqu'il contracte avec des consommateurs, adhérer à un dispositif de médiation de la consommation et leur communiquer les coordonnées du médiateur dont il relève ;</li>
           <li>disposer d'une base légale pour traiter les données de ses clients qu'il saisit dans le Service, et les informer de ce traitement.</li>
         </ul>
@@ -21814,7 +22056,7 @@ function CguPage({ onBack }) {
         </p>
       </Section>
 
-      <Section title="Article 8 — Signature électronique">
+      <Section title="Article 9 — Signature électronique">
         <p>
           Le Service permet de signer des documents au moyen d'une signature électronique simple, au
           sens du règlement (UE) n° 910/2014 dit « eIDAS », accompagnée d'un horodatage. Chaque signature
@@ -21825,34 +22067,37 @@ function CguPage({ onBack }) {
         </p>
       </Section>
 
-      <Section title="Article 9 — Données personnelles des clients de l'Utilisateur">
+      <Section title="Article 10 — Données personnelles des clients de l'Utilisateur">
         <p>
           Lorsque l'Utilisateur saisit des données personnelles concernant ses clients ou d'autres
           personnes, il agit en qualité de responsable du traitement et Freeley en qualité de
           sous-traitant, au sens de l'article 28 du RGPD. Ces données (identité, coordonnées,
-          informations de mission et de facturation, signatures) sont traitées pour fournir le
-          Service, pendant toute la durée de son utilisation. Freeley s'engage à :
+          informations de mission et de facturation, signatures) concernent les clients et prospects
+          de l'Utilisateur, leurs représentants et les signataires des documents. Elles sont traitées
+          pour fournir le Service, pendant toute la durée de son utilisation. Freeley s'engage à :
         </p>
         <ul>
-          <li>traiter ces données uniquement pour fournir le Service, selon les instructions de l'Utilisateur, qui résultent de son utilisation du Service ;</li>
-          <li>garantir leur confidentialité et mettre en œuvre des mesures de sécurité appropriées ;</li>
-          <li>ne recourir qu'aux sous-traitants ultérieurs listés dans la Politique de confidentialité, que l'Utilisateur autorise de manière générale, et l'informer de tout changement afin qu'il puisse s'y opposer en supprimant son compte ;</li>
-          <li>l'aider à répondre aux demandes des personnes concernées et à respecter ses obligations de sécurité ;</li>
+          <li>traiter ces données uniquement pour fournir le Service, selon les instructions de l'Utilisateur, qui résultent de son utilisation du Service, et l'informer si une instruction lui paraît contraire au RGPD ou à une autre règle de protection des données ;</li>
+          <li>garantir leur confidentialité, veiller à ce que les personnes autorisées à les traiter soient tenues au secret, et mettre en œuvre des mesures de sécurité appropriées ;</li>
+          <li>ne recourir qu'aux sous-traitants ultérieurs listés dans la Politique de confidentialité, que l'Utilisateur autorise de manière générale, leur imposer les mêmes obligations de protection des données, et informer l'Utilisateur de tout changement afin qu'il puisse s'y opposer en supprimant son compte ;</li>
+          <li>ne transférer ces données hors de l'Union européenne qu'avec les garanties prévues par le RGPD, décrites dans la Politique de confidentialité ;</li>
+          <li>l'aider, compte tenu des informations dont il dispose, à répondre aux demandes des personnes concernées et à respecter ses obligations de sécurité, de notification des violations, d'analyse d'impact et de consultation de la CNIL ;</li>
           <li>l'informer dans les meilleurs délais après avoir pris connaissance d'une violation de ces données ;</li>
           <li>supprimer ces données lors de la suppression du compte, sauf obligation légale de conservation, l'Utilisateur pouvant les télécharger auparavant ;</li>
           <li>mettre à sa disposition les informations nécessaires pour démontrer le respect de ces obligations, et contribuer aux audits dans des conditions raisonnables.</li>
         </ul>
       </Section>
 
-      <Section title="Article 10 — Disponibilité">
+      <Section title="Article 11 — Disponibilité">
         <p>
           Freeley s'efforce d'assurer l'accès au Service en continu, sans pouvoir le garantir. Le
           Service peut être interrompu, notamment pour maintenance ou en cas de défaillance d'un
-          prestataire. Freeley est tenu d'une obligation de moyens.
+          prestataire. Certaines fonctions, notamment la rédaction automatique, peuvent être limitées
+          à un nombre d'utilisations par jour. Freeley est tenu d'une obligation de moyens.
         </p>
       </Section>
 
-      <Section title="Article 11 — Responsabilité">
+      <Section title="Article 12 — Responsabilité">
         <p>
           Freeley n'est responsable que des dommages directs et prouvés résultant d'un manquement qui
           lui est imputable. Ne sont pas indemnisés les dommages indirects, notamment la perte de
@@ -21866,9 +22111,14 @@ function CguPage({ onBack }) {
           générateur, ou cent (100) euros. Ces limitations ne s'appliquent pas en cas de faute lourde
           ou dolosive de Freeley, ni aux dommages corporels.
         </p>
+        <p>
+          Freeley ne répond pas des services fournis par des tiers que l'Utilisateur choisit
+          d'utiliser, notamment Stripe, Super PDP, Google ou LinkedIn, qui relèvent de leurs propres
+          conditions.
+        </p>
       </Section>
 
-      <Section title="Article 12 — Propriété intellectuelle">
+      <Section title="Article 13 — Propriété intellectuelle">
         <p>
           Le Service, son code, ses modèles, ses textes et ses éléments graphiques sont la propriété
           de Freeley. L'Utilisateur peut utiliser, modifier et diffuser librement les documents qu'il
@@ -21880,17 +22130,48 @@ function CguPage({ onBack }) {
         </p>
       </Section>
 
-      <Section title="Article 13 — Durée, suspension et résiliation">
+      <Section title="Article 14 — Signalement de contenus illicites">
+        <p>
+          Toute personne peut signaler à Freeley un contenu conservé dans le Service qu'elle estime
+          illicite, en écrivant à{" "}
+          <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.
+          Le signalement indique, autant que possible : les raisons pour lesquelles le contenu est
+          jugé illicite, l'endroit précis où il se trouve (par exemple le lien reçu), le nom et
+          l'adresse email de son auteur, sauf lorsque la loi permet un signalement anonyme, et une
+          déclaration confirmant qu'il est fait de bonne foi et que ses informations sont exactes et
+          complètes.
+        </p>
+        <p>
+          Freeley accuse réception du signalement, l'examine rapidement, avec soin et objectivité,
+          puis informe son auteur de sa décision et des recours possibles. Les signalements sont
+          examinés par une personne, sans outil automatique de modération.
+        </p>
+        <p>
+          Lorsque Freeley retire un contenu, en restreint l'accès, ou suspend ou supprime un compte,
+          il en informe l'Utilisateur concerné et lui en donne les raisons, sauf si la loi s'y oppose.
+          L'Utilisateur peut contester la décision en écrivant à la même adresse ; il peut aussi
+          saisir les juridictions compétentes.
+        </p>
+        <p>
+          Cette adresse est le point de contact unique de Freeley, pour les Utilisateurs comme pour
+          les autorités des États membres, la Commission européenne et le Comité européen des services
+          numériques, au sens des articles 11 et 12 du règlement (UE) 2022/2065 sur les services
+          numériques. Les échanges ont lieu en français ou en anglais.
+        </p>
+      </Section>
+
+      <Section title="Article 15 — Durée, suspension et résiliation">
         <p>
           Les CGU s'appliquent pendant toute la durée d'utilisation du Service. L'Utilisateur peut
           supprimer son compte à tout moment depuis l'application. Freeley peut suspendre ou
           supprimer un compte en cas de manquement grave aux CGU, de fraude ou d'utilisation illicite,
-          après en avoir informé l'Utilisateur, sauf urgence. Avant la suppression de son compte,
+          après en avoir informé l'Utilisateur, sauf urgence, et en lui donnant les raisons de sa
+          décision dans les conditions de l'article 14. Avant la suppression de son compte,
           l'Utilisateur est invité à télécharger ses documents.
         </p>
       </Section>
 
-      <Section title="Article 14 — Prix">
+      <Section title="Article 16 — Prix">
         <p>
           Le Service est actuellement gratuit. Freeley pourra proposer des offres payantes. Aucune
           fonctionnalité payante ne sera facturée sans l'accord exprès de l'Utilisateur, et toute
@@ -21898,7 +22179,7 @@ function CguPage({ onBack }) {
         </p>
       </Section>
 
-      <Section title="Article 15 — Modification des CGU">
+      <Section title="Article 17 — Modification des CGU">
         <p>
           Freeley peut modifier les CGU. L'Utilisateur est informé des modifications importantes au
           moins quinze (15) jours avant leur entrée en vigueur. S'il ne les accepte pas, il peut
@@ -21906,7 +22187,45 @@ function CguPage({ onBack }) {
         </p>
       </Section>
 
-      <Section title="Article 16 — Droit applicable et litiges">
+      <Section title="Article 18 — Convention de preuve">
+        <p>
+          Conformément à l'article 1356 du Code civil, Freeley et l'Utilisateur conviennent que les
+          enregistrements du Service (dates et heures du serveur, journaux de connexion et d'envoi des
+          emails, adresses IP, empreintes numériques des documents) font preuve entre eux des
+          opérations qu'ils retracent, sauf preuve contraire.
+        </p>
+      </Section>
+
+      <Section title="Article 19 — Force majeure">
+        <p>
+          Aucune des parties n'est responsable d'un manquement causé par un cas de force majeure, au
+          sens de l'article 1218 du Code civil. Si l'empêchement dure plus de trente (30) jours, chaque
+          partie peut mettre fin aux CGU ; l'Utilisateur le fait en supprimant son compte.
+        </p>
+      </Section>
+
+      <Section title="Article 20 — Transfert">
+        <p>
+          Freeley peut transférer les CGU, avec les droits et obligations qui en découlent, à une
+          société qu'il constituerait pour exploiter le Service, ou à toute personne qui reprendrait
+          le Service, à condition que les engagements pris envers l'Utilisateur soient maintenus.
+          L'Utilisateur y consent dès à présent, conformément à l'article 1216 du Code civil. Il est
+          informé du transfert, qui prend effet à son égard à cette date, et reste libre de supprimer
+          son compte.
+        </p>
+      </Section>
+
+      <Section title="Article 21 — Dispositions diverses">
+        <p>
+          Si une clause des CGU est déclarée nulle ou inapplicable, les autres clauses restent en
+          vigueur. Le fait pour Freeley de ne pas se prévaloir d'un manquement ne vaut pas
+          renonciation à s'en prévaloir par la suite. Les CGU, complétées par la Politique de
+          confidentialité, forment l'ensemble de l'accord entre Freeley et l'Utilisateur sur
+          l'utilisation du Service.
+        </p>
+      </Section>
+
+      <Section title="Article 22 — Droit applicable et litiges">
         <p>
           Les CGU sont soumises au droit français. En cas de différend, les parties recherchent
           d'abord une solution amiable. À défaut, le litige est porté devant les juridictions
