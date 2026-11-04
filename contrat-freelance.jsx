@@ -1047,7 +1047,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "245";
+const APP_VERSION = "246";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -4520,6 +4520,21 @@ function AppInner() {
   // Invoice modal state
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceDepositPct, setInvoiceDepositPct] = useState(100);
+  // Version 246 : la facture libre (barre d'outils) travaille sur sa propre copie des informations, prise à
+  // l'ouverture : ce qu'on y tape, l'entreprise choisie avec Radar Client ou une facture reprise ne changent plus
+  // le contrat en cours (avant : la facture modifiait directement le formulaire du contrat).
+  const [freeInvoiceForm, setFreeInvoiceForm] = useState(null);
+  const freeInvoiceBaseRef = useRef(null); // la copie prise à l'ouverture (pour savoir si on a tapé quelque chose)
+  const openFreeInvoice = () => {
+    // Facture déjà commencée (fermée sans le vouloir, par exemple) : on la retrouve telle quelle. Sinon, copie du contrat en cours.
+    if (!freeInvoiceForm) { const copy = { ...form }; freeInvoiceBaseRef.current = copy; setFreeInvoiceForm(copy); }
+    setShowInvoiceModal(true);
+  };
+  const closeFreeInvoice = () => {
+    setShowInvoiceModal(false);
+    // Rien de changé dans la facture : la prochaine fois, elle repartira du contrat en cours
+    setFreeInvoiceForm(f => (f === freeInvoiceBaseRef.current ? null : f));
+  };
 
   // Scanner modal state
   const [showScannerModal, setShowScannerModal] = useState(false);
@@ -6227,8 +6242,8 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
           onSubscribe={handlePurchase}
         />
       )}
-      {showInvoiceModal && (
-        <InvoiceModal form={form} setForm={setForm} profile={profile} setProfile={setProfile} onClose={() => setShowInvoiceModal(false)} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} onConnectStripe={handleConnectStripe} connectingStripe={connectingStripe} />
+      {showInvoiceModal && freeInvoiceForm && (
+        <InvoiceModal form={freeInvoiceForm} setForm={setFreeInvoiceForm} profile={profile} setProfile={setProfile} onClose={closeFreeInvoice} depositPctProp={invoiceDepositPct} onDepositPctChange={setInvoiceDepositPct} onGoToProfileTva={goToProfileFacturation} authUser={authUser} stripeConnectAccountId={stripeConnectAccountId} stripeConnectReady={stripeConnectReady} onConnectStripe={handleConnectStripe} connectingStripe={connectingStripe} />
       )}
       {magicFillTarget && (
         <CameraCapture
@@ -6244,11 +6259,14 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
           onScanSaved={() => setHasScanResults(true)}
         />
       )}
+      {/* Version 246 : contrat déjà rédigé (ou en cours de rédaction) : son texte ne changerait pas, seulement les
+          cadres du PDF. Pas de « Utiliser cette entreprise pour ce contrat » ; on peut toujours copier les informations. */}
       {showRadarModal && (
         <RadarClientModal
           onClose={() => setShowRadarModal(false)}
           useLabel="✅ Utiliser cette entreprise pour ce contrat"
-          onSelectCompany={(c) => {
+          unavailableNote="Ton contrat est déjà rédigé : pour un autre client, commence un nouveau contrat. Tu peux copier ces informations."
+          onSelectCompany={(loading || step >= 3) ? undefined : (c) => {
             setForm(f => ({
               ...f,
               // Version 222 : le nom du contact déjà saisi est gardé ; sinon, le nom de l'entreprise
@@ -6284,7 +6302,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         onNda={() => setShowNdaModal(true)}
         onRecouvrement={() => setShowRecouvrementModal(true)}
         onScanner={() => setShowScannerModal(true)}
-        onInvoice={() => setShowInvoiceModal(true)}
+        onInvoice={openFreeInvoice}
         onProfile={() => goToScreen("profile")}
         onRadar={() => setShowRadarModal(true)}
       />
@@ -10701,51 +10719,100 @@ function FeedbackBubble() {
 /* ══════════════════════════════════════════════════════════ RADAR CLIENT ══ */
 // Vérifie l'existence et le statut d'une entreprise via l'API publique gratuite
 // de l'État (recherche-entreprises.api.gouv.fr) — aucune clé requise.
-function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser cette entreprise pour la facture" }) {
+// Version 246 (format de l'API vérifié dans son code officiel) :
+//  - le bouton « Chercher » tient dans l'écran du téléphone (avant : il sortait à droite) ;
+//  - moins de 3 caractères : message clair (l'État les refuse ; avant : « réessaie dans un instant ») ;
+//  - entreprises « non diffusibles » : l'État remplace le nom ou l'adresse par « [NON-DIFFUSIBLE] » ; ce texte n'est
+//    plus affiché tel quel, ni recopié dans le contrat ou la facture ;
+//  - le SIRET d'un établissement tapé dans la recherche est gardé, avec son adresse (avant : celui du siège) ;
+//  - date de création juste dans tous les fuseaux (avant : un jour de moins aux Antilles), âge avec une virgule ;
+//  - liste : statut de chaque entreprise et nombre total de résultats ;
+//  - entreprise fermée : « Utiliser quand même » (on prévient, on ne bloque pas) ;
+//  - lien vers la fiche officielle de l'État (dirigeants, procédures collectives), que l'API publique ne donne pas.
+const RADAR_ND = "[NON-DIFFUSIBLE]";
+const radarClean = (v) => { const s = String(v ?? "").trim(); return s && !s.includes(RADAR_ND) ? s : ""; };
+const radarAge = (iso) => {
+  if (!isIsoDay(iso)) return null;
+  const [y, m, d] = String(iso).split("-").map(Number);
+  const diff = Date.now() - new Date(y, m - 1, d).getTime();
+  return diff >= 0 ? diff / (1000 * 60 * 60 * 24 * 365.25) : null;
+};
+const radarAgeLabel = (age) => `${age.toFixed(1).replace(".", ",")} an${age >= 2 ? "s" : ""}`;
+function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser cette entreprise pour la facture", unavailableNote = "" }) {
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [query, setQuery] = useState("");
+  const [searchedSiret, setSearchedSiret] = useState(""); // SIRET tapé (14 chiffres) : on garde cet établissement
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
+  const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState(null);
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState(false);
 
   const handleSearch = async () => {
-    if (!query.trim() || loading) return;
+    const q = query.trim();
+    if (!q || loading) return;
+    if (q.replace(/\s/g, "").length < 3) {
+      setErr("Tape au moins 3 caractères, ou le numéro SIREN de l'entreprise.");
+      setResults(null);
+      setSelected(null);
+      return;
+    }
     setLoading(true);
     setErr("");
     setResults(null);
     setSelected(null);
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
     try {
       const res = await fetch(
-        `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(query.trim())}&per_page=6`
+        `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(q)}&per_page=6`,
+        ctrl ? { signal: ctrl.signal } : undefined
       );
+      if (res.status === 429) { setErr("Trop de recherches d'un coup : attends quelques secondes, puis réessaie."); return; }
+      if (res.status === 400) { setErr("Le service de l'État n'accepte pas cette recherche. Essaie avec le nom de l'entreprise ou son numéro SIREN."); return; }
       if (!res.ok) throw new Error("api");
       const data = await res.json();
-      setResults(data.results || []);
+      const list = Array.isArray(data.results) ? data.results : [];
+      const digits = q.replace(/\s/g, "");
+      setSearchedSiret(/^\d{14}$/.test(digits) ? digits : "");
+      setTotal(Number(data.total_results) || list.length);
+      setResults(list);
     } catch (e) {
       setErr("Recherche impossible pour le moment, réessaie dans un instant.");
     } finally {
+      if (timer) clearTimeout(timer);
       setLoading(false);
     }
   };
 
-  const yearsSince = (dateStr) => {
-    if (!dateStr) return null;
-    const diff = Date.now() - new Date(dateStr).getTime();
-    return diff / (1000 * 60 * 60 * 24 * 365.25);
+  // Ce qu'on affiche et ce qu'on recopie : jamais « [NON-DIFFUSIBLE] » ; l'établissement du SIRET tapé, s'il en existe un
+  const infoOf = (c) => {
+    const etabs = Array.isArray(c.matching_etablissements) ? c.matching_etablissements : [];
+    const typed = searchedSiret ? etabs.find(e => String(e?.siret || "") === searchedSiret) : null;
+    const place = typed && String(typed.siret) !== String(c.siege?.siret || "") ? typed : null; // pas le siège
+    const where = place || c.siege || {};
+    const rawName = String(c.nom_complet || ""), rawAddress = String(where.adresse || "");
+    return {
+      name: radarClean(rawName),
+      address: radarClean(rawAddress),
+      siret: String(where.siret || "").trim(),
+      place,
+      hidden: c.statut_diffusion === "P" || rawName.includes(RADAR_ND) || rawAddress.includes(RADAR_ND),
+      active: c.etat_administratif === "A",
+      tva: Array.isArray(c.tva) ? radarClean(c.tva[0]) : "",
+    };
   };
 
   const renderVerdict = (c) => {
-    const active = c.etat_administratif === "A";
-    const age = yearsSince(c.date_creation);
-    if (!active) {
+    const age = radarAge(c.date_creation);
+    if (c.etat_administratif !== "A") {
       return { color: "#DC2626", bg: "#FEF2F2", icon: "🔴", text: "Entreprise fermée / cessée d'activité" };
     }
     if (age !== null && age < 1) {
       return { color: "#D97706", bg: "#FFFBEB", icon: "🟠", text: "Entreprise active, mais créée il y a moins d'un an" };
     }
-    return { color: "#059669", bg: "#ECFDF5", icon: "🟢", text: "Entreprise active et établie" };
+    return { color: "#059669", bg: "#ECFDF5", icon: "🟢", text: "Entreprise active" };
   };
 
   return (
@@ -10758,12 +10825,12 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
         style={{
           background:"#fff", borderRadius:"20px 20px 0 0", padding:20,
           width:"100%", maxWidth:520, maxHeight:"88vh", overflowY:"auto",
-          fontFamily:T.body,
+          fontFamily:T.body, boxSizing:"border-box",
         }}
       >
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
           <div style={{ fontWeight:800, fontSize:18 }}>🛡️ Radar Client</div>
-          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:22, cursor:"pointer", color:"#999" }}>×</button>
+          <button onClick={onClose} aria-label="Fermer" style={{ background:"none", border:"none", fontSize:22, cursor:"pointer", color:"#999" }}>×</button>
         </div>
         <div style={{ fontSize:13, color:"#888", marginBottom:16 }}>
           Vérifie qu'une entreprise cliente existe vraiment et est toujours active, avant de signer.
@@ -10775,16 +10842,17 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleSearch()}
             placeholder="Nom de l'entreprise ou SIRET"
+            enterKeyHint="search"
             style={{
-              flex:1, padding:"12px 14px", borderRadius:10, border:"1px solid #ddd",
-              fontFamily:T.body, fontSize:14,
+              flex:1, minWidth:0, padding:"12px 14px", borderRadius:10, border:"1px solid #ddd",
+              fontFamily:T.body, fontSize:14, boxSizing:"border-box",
             }}
           />
           <button
             onClick={handleSearch}
             disabled={!query.trim() || loading}
             style={{
-              padding:"0 20px", borderRadius:10, border:"none",
+              flexShrink:0, padding:"0 16px", borderRadius:10, border:"none",
               background: !query.trim() || loading ? "#ccc" : "#7C3AED",
               color:"#fff", fontWeight:700, cursor: !query.trim() || loading ? "default" : "pointer",
             }}
@@ -10797,24 +10865,40 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
           <div style={{ textAlign:"center", color:"#aaa", padding:"20px 0" }}>Aucune entreprise trouvée avec ce nom.</div>
         )}
 
-        {!selected && results && results.map(c => (
-          <button
-            key={c.siren}
-            onClick={() => setSelected(c)}
-            style={{
-              display:"block", width:"100%", textAlign:"left",
-              background:"#fafafa", border:"1px solid #eee", borderRadius:10,
-              padding:12, marginBottom:8, cursor:"pointer",
-            }}
-          >
-            <div style={{ fontWeight:700, fontSize:14 }}>{c.nom_complet}</div>
-            <div style={{ fontSize:12, color:"#888", marginTop:2 }}>{c.siege?.adresse || "Adresse non renseignée"}</div>
-          </button>
-        ))}
+        {!selected && results && results.map(c => {
+          const i = infoOf(c);
+          return (
+            <button
+              key={c.siren}
+              onClick={() => setSelected(c)}
+              style={{
+                display:"block", width:"100%", textAlign:"left",
+                background:"#fafafa", border:"1px solid #eee", borderRadius:10,
+                padding:12, marginBottom:8, cursor:"pointer", boxSizing:"border-box",
+              }}
+            >
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                <div style={{ fontWeight:700, fontSize:14, minWidth:0, wordBreak:"break-word" }}>{i.name || "Nom non diffusé"}</div>
+                <span style={{ flexShrink:0, fontSize:11, fontWeight:700, color: i.active ? "#059669" : "#DC2626" }}>{i.active ? "🟢 Active" : "🔴 Fermée"}</span>
+              </div>
+              <div style={{ fontSize:12, color:"#888", marginTop:2 }}>{i.address || (i.hidden ? "Adresse non diffusée" : "Adresse non renseignée")}</div>
+              <div style={{ fontSize:11, color:"#aaa", marginTop:2 }}>SIREN {c.siren}</div>
+            </button>
+          );
+        })}
+        {!selected && results && results.length > 0 && total > results.length && (
+          <div style={{ fontSize:12, color:"#888", textAlign:"center", margin:"2px 0 8px", lineHeight:1.5 }}>
+            {total} entreprises trouvées : seules les {results.length} premières s'affichent. Ajoute la ville, ou cherche par numéro SIREN, pour affiner.
+          </div>
+        )}
 
         {selected && (() => {
           const v = renderVerdict(selected);
-          const age = yearsSince(selected.date_creation);
+          const i = infoOf(selected);
+          const age = radarAge(selected.date_creation);
+          const headOffice = radarClean(selected.siege?.adresse);
+          // Ce qui part dans le contrat ou la facture : les valeurs nettoyées (vide si non diffusé), le SIRET tapé
+          const toUse = { ...selected, nom_complet: i.name, siege: { ...(selected.siege || {}), adresse: i.address, siret: i.siret } };
           return (
             <div>
               <button onClick={() => setSelected(null)} style={{
@@ -10826,43 +10910,60 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
                 <div style={{ color:v.color, fontWeight:700, fontSize:14 }}>{v.icon} {v.text}</div>
               </div>
 
-              <div style={{ fontWeight:800, fontSize:17, marginBottom:4 }}>{selected.nom_complet}</div>
-              <div style={{ fontSize:13, color:"#888", marginBottom:14 }}>{selected.siege?.adresse}</div>
+              <div style={{ fontWeight:800, fontSize:17, marginBottom:4, wordBreak:"break-word" }}>{i.name || "Nom non diffusé"}</div>
+              <div style={{ fontSize:13, color:"#888", marginBottom: (i.place && headOffice) || i.hidden ? 6 : 14 }}>
+                {i.address || (i.hidden ? "Adresse non diffusée" : "Adresse non renseignée")}{i.place ? " (établissement recherché)" : ""}
+              </div>
+              {i.place && headOffice && (
+                <div style={{ fontSize:12, color:"#888", marginBottom: i.hidden ? 6 : 14 }}>Siège : {headOffice}</div>
+              )}
+              {i.hidden && (
+                <div style={{ fontSize:12, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:8, padding:"8px 10px", marginBottom:14, lineHeight:1.5 }}>
+                  Cette entreprise a demandé que certaines de ses informations ne soient pas publiques. Demande-les directement à ton client.
+                </div>
+              )}
 
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, fontSize:13 }}>
                 <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
-                  <div style={{ color:"#999", fontSize:11 }}>SIREN</div>
-                  <div style={{ fontWeight:700 }}>{selected.siren}</div>
+                  <div style={{ color:"#999", fontSize:11 }}>{i.place ? "SIRET" : "SIREN"}</div>
+                  <div style={{ fontWeight:700, wordBreak:"break-all" }}>{i.place ? i.siret : selected.siren}</div>
                 </div>
                 <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
                   <div style={{ color:"#999", fontSize:11 }}>Créée le</div>
                   <div style={{ fontWeight:700 }}>
-                    {selected.date_creation ? new Date(selected.date_creation).toLocaleDateString("fr-FR") : "—"}
-                    {age !== null && <span style={{ color:"#999", fontWeight:400 }}> ({age.toFixed(1)} an{age >= 2 ? "s" : ""})</span>}
+                    {isIsoDay(selected.date_creation) ? isoDayFr(selected.date_creation) : "—"}
+                    {age !== null && <span style={{ color:"#999", fontWeight:400 }}> ({radarAgeLabel(age)})</span>}
                   </div>
                 </div>
                 <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
                   <div style={{ color:"#999", fontSize:11 }}>Statut</div>
-                  <div style={{ fontWeight:700 }}>{selected.etat_administratif === "A" ? "Active" : "Fermée"}</div>
+                  <div style={{ fontWeight:700 }}>{i.active ? "Active" : "Fermée"}</div>
                 </div>
                 <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
                   <div style={{ color:"#999", fontSize:11 }}>N° TVA</div>
-                  <div style={{ fontWeight:700 }}>{selected.tva?.[0] || "Non communiqué"}</div>
+                  <div style={{ fontWeight:700, wordBreak:"break-all" }}>{i.tva || "Aucun numéro actif"}</div>
                 </div>
               </div>
 
-              <div style={{ fontSize:11, color:"#bbb", marginTop:16, marginBottom:12, textAlign:"center" }}>
+              <a
+                href={`https://annuaire-entreprises.data.gouv.fr/entreprise/${encodeURIComponent(selected.siren)}`}
+                target="_blank" rel="noopener noreferrer"
+                style={{ display:"block", marginTop:14, fontSize:12.5, color:"#7C3AED", fontWeight:600, textDecoration:"none", lineHeight:1.5 }}
+              >Voir la fiche officielle de l'État (dirigeants, procédures en cours) ↗</a>
+
+              <div style={{ fontSize:11, color:"#bbb", marginTop:12, marginBottom:12, textAlign:"center" }}>
                 Données publiques issues du répertoire Sirene (INSEE) via l'API officielle de l'État.
               </div>
 
               <button
                 onClick={() => {
                   const lines = [
-                    selected.nom_complet,
-                    selected.siege?.adresse,
-                    `SIRET : ${selected.siege?.siret || selected.siren}`,
-                    selected.tva?.[0] ? `TVA : ${selected.tva[0]}` : null,
+                    i.name,
+                    i.address,
+                    i.siret ? `SIRET : ${i.siret}` : `SIREN : ${selected.siren}`,
+                    i.tva ? `TVA : ${i.tva}` : null,
                   ].filter(Boolean).join("\n");
+                  if (!navigator.clipboard || !navigator.clipboard.writeText) return;
                   navigator.clipboard.writeText(lines).then(() => {
                     setCopied(true);
                     setTimeout(() => setCopied(false), 2000);
@@ -10874,16 +10975,18 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
                   color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer",
                 }}
               >{copied ? "✅ Copié !" : "📋 Copier les infos"}</button>
-              {onSelectCompany && (
+              {onSelectCompany ? (
                 <button
-                  onClick={() => { onSelectCompany(selected); onClose(); }}
+                  onClick={() => { onSelectCompany(toUse); onClose(); }}
                   style={{
                     width:"100%", padding:"12px 0", borderRadius:10, border:"none",
-                    background:"#059669", marginTop:8,
+                    background: i.active ? "#059669" : "#B45309", marginTop:8,
                     color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer",
                   }}
-                >{useLabel}</button>
-              )}
+                >{i.active ? useLabel : "⚠️ Utiliser quand même (entreprise fermée)"}</button>
+              ) : unavailableNote ? (
+                <div style={{ fontSize:12, color:"#888", marginTop:10, textAlign:"center", lineHeight:1.5 }}>{unavailableNote}</div>
+              ) : null}
             </div>
           );
         })()}
