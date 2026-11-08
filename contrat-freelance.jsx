@@ -416,12 +416,31 @@ const readContractForUpdate = async (contractId) => {
 // Textes exacts affichés au client au moment de sa demande de démarrage anticipé — figés ici pour que
 // le texte sauvegardé comme preuve soit toujours identique, mot pour mot, à ce que le client a vu et coché.
 // Deux cas distincts selon la nature du livrable :
-// - contenu numérique déjà existant (art. L221-28, 13° C.conso) : rédaction relue par une juriste, reprise mot pour mot ;
+// - contenu numérique déjà existant (art. L221-28, 13° C.conso) : version 250, formule d'Ordalie (voir plus bas) ;
 // - service sur mesure (art. L221-25 et L221-28, 1° C.conso) : rédaction interne, pas encore relue par une juriste.
-const RETRACTATION_WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la fourniture du contenu numérique commence avant l'expiration du délai de rétractation de quatorze (14) jours et je reconnais qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution.";
+// Version 250 : formule proposée par Ordalie (titre du contenu, « sans support matériel », renoncement exprès : art.
+// L221-28, 13°, L221-13 et L221-9 C. conso). Elle remplace le texte relu par la juriste : à lui faire valider. Le titre
+// fait partie du texte coché ; le serveur vérifie tout le reste mot pour mot.
+const RETRACTATION_DIGITAL_WAIVER_PREFIX = "Je consens expressément à ce que la fourniture du contenu numérique sans support matériel « ";
+const RETRACTATION_DIGITAL_WAIVER_SUFFIX = " » commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais expressément qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution et renonce expressément à exercer ce droit à compter de ce commencement.";
+const retractationWaiverTextDigital = (title) => RETRACTATION_DIGITAL_WAIVER_PREFIX + (String(title || "").replace(/\s+/g, " ").trim().slice(0, 200) || "objet du contrat") + RETRACTATION_DIGITAL_WAIVER_SUFFIX;
+// Titre repris d'un texte coché (version 250), pour que la confirmation dise exactement le même
+const digitalTitleFromWaiverText = (t) => {
+  const s = String(t || "");
+  return s.startsWith(RETRACTATION_DIGITAL_WAIVER_PREFIX) && s.endsWith(RETRACTATION_DIGITAL_WAIVER_SUFFIX)
+    ? s.slice(RETRACTATION_DIGITAL_WAIVER_PREFIX.length, s.length - RETRACTATION_DIGITAL_WAIVER_SUFFIX.length) : "";
+};
+// Version 250 : confirmation de l'accord (contenu numérique), avec la date, l'heure et le nom du prestataire. Même texte
+// que digitalWaiverConfirmation() dans api/retraction.js.
+const digitalWaiverConfirmationText = (waivedIso, freelanceName, title) => {
+  const d = new Date(waivedIso);
+  const date = d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" });
+  const time = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
+  return `À la suite de votre accord exprès donné le ${date} à ${time}, ${freelanceName || "votre prestataire"} vous confirme que vous avez expressément consenti à ce que la fourniture du contenu numérique sans support matériel « ${title || "objet du contrat"} » commence avant l'expiration du délai de rétractation de quatorze (14) jours, que vous avez expressément reconnu qu'en conséquence vous perdrez votre droit de rétractation dès le commencement de cette exécution et que vous avez expressément renoncé à exercer ce droit à compter de ce commencement.`;
+};
 // Version 247 : formule officielle du montant dû (proportionnel, art. L221-25 C. conso ; modèle de l'annexe à R221-3)
 const RETRACTATION_WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant proportionnel à ce qui m'aura été fourni jusqu'au moment où j'informe le prestataire de ma rétractation, par rapport à l'ensemble des prestations prévues par le contrat, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
-const getRetractationWaiverText = (isDigital) => isDigital ? RETRACTATION_WAIVER_TEXT_DIGITAL : RETRACTATION_WAIVER_TEXT_SERVICE;
+const getRetractationWaiverText = (isDigital, title) => isDigital ? retractationWaiverTextDigital(title) : RETRACTATION_WAIVER_TEXT_SERVICE;
 
 // ── Délais légaux, au jour près, heure de Paris (même calcul que dans api/retraction.js) ──
 // Rétractation : 14 jours après le jour de la signature, jusqu'à la fin de la journée ; prolongé au
@@ -528,8 +547,8 @@ const isConsumerLikeContract = (form, c) => (form || {}).typeClient === "particu
 // nécessaires, art. L221-28, 8° C. conso). Seulement pour les contrats signés en présence à partir de cette version
 // (« retractationExcluded », vérifié par le serveur) : les contrats déjà signés gardent les 14 jours qui leur ont été promis.
 const RETRACTATION_EXCLUDED_TEXT = {
-  locaux: "Contrat signé dans les locaux du prestataire, en face à face : la loi ne prévoit pas de droit de rétractation dans ce cas.",
-  urgence: "Réparation urgente demandée par le client à son domicile : la loi ne prévoit pas de droit de rétractation pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-28, 8°, du Code de la consommation).",
+  locaux: "Le contrat est conclu en présence des parties dans les locaux habituels du prestataire et n'a pas été conclu immédiatement après une sollicitation personnelle et individuelle du consommateur dans un autre lieu. Dans ces conditions, il ne s'agit ni d'un contrat à distance ni d'un contrat hors établissement au sens de l'article L. 221-1 du Code de la consommation, et le droit légal de rétractation prévu aux articles L. 221-18 et suivants ne s'applique pas.",
+  urgence: "Pour les travaux d'entretien ou de réparation à réaliser en urgence à votre domicile et que vous avez expressément sollicités, le droit de rétractation ne peut être exercé pour les pièces de rechange et les travaux strictement nécessaires pour répondre à l'urgence (article L. 221-28, 8°, du Code de la consommation).",
 };
 const retractationExcludedKey = (form, c) => (isConsumerLikeContract(form, c) && RETRACTATION_EXCLUDED_TEXT[(c || {}).retractationExcluded] ? (c || {}).retractationExcluded : null);
 const hasRetractationRight = (form, c) => isConsumerLikeContract(form, c) && !retractationExcludedKey(form, c);
@@ -596,6 +615,7 @@ const buildRetractationNotice = (f = {}, where = RETRACTATION_ONLINE_REF) => {
     "Le délai de rétractation expire quatorze jours après le jour de la conclusion du contrat.",
     `Pour exercer le droit de rétractation, vous devez nous notifier (${retractationCoords(f)}) votre décision de rétractation du présent contrat au moyen d'une déclaration dénuée d'ambiguïté (par exemple, lettre envoyée par la poste ou courrier électronique). Vous pouvez utiliser le modèle de formulaire de rétractation mais ce n'est pas obligatoire.`,
     `Vous pouvez également exercer votre droit de rétractation en ligne sur ${where}. Si vous utilisez cette fonctionnalité en ligne, nous vous enverrons, dans les meilleurs délais, un accusé de réception de la rétractation sur un support durable (par exemple, par courriel), y compris son contenu ainsi que la date et l'heure de sa soumission.`,
+    `Vous pouvez également remplir et transmettre le modèle de formulaire de rétractation ou toute autre déclaration dénuée d'ambiguïté sur notre site internet : ${where}. Si vous utilisez cette option, nous vous enverrons dans les meilleurs délais un accusé de réception de la rétractation sur un support durable (par exemple, par courriel).`,
     "Pour que le délai de rétractation soit respecté, il suffit que vous transmettiez votre communication relative à l'exercice du droit de rétractation avant l'expiration du délai de rétractation.",
     "Effets de rétractation",
     "En cas de rétractation de votre part du présent contrat, nous vous rembourserons tous les paiements reçus de vous, y compris les frais de livraison (à l'exception des frais supplémentaires découlant du fait que vous avez choisi, le cas échéant, un mode de livraison autre que le mode moins coûteux de livraison standard proposé par nous) sans retard excessif et, en tout état de cause, au plus tard quatorze jours à compter du jour où nous sommes informés de votre décision de rétractation du présent contrat. Nous procéderons au remboursement en utilisant le même moyen de paiement que celui que vous aurez utilisé pour la transaction initiale, sauf si vous convenez expressément d'un moyen différent ; en tout état de cause, ce remboursement n'occasionnera pas de frais pour vous.",
@@ -752,7 +772,7 @@ function ContentDeliveredModal({ saving, error, onCancel, onConfirm }) {
           Touche « Oui » seulement au moment où tu envoies vraiment le contenu à ton client : les fichiers, un lien de téléchargement ou un accès.
         </p>
         <p style={{ fontSize:12.5, color:C.textM, lineHeight:1.6, margin:"0 0 14px" }}>
-          La date et l'heure seront enregistrées et affichées sur la page de ton client. À partir de ce moment, il ne pourra plus se rétracter, comme il l'a accepté. Tu ne pourras pas annuler cette indication.
+          La date et l'heure seront enregistrées et affichées sur la page de ton client. À partir de ce moment, son droit de rétractation prend fin, comme il l'a accepté. Tu ne pourras pas annuler cette indication.
         </p>
         {error && <div style={{ fontSize:12, color:"#B91C1C", marginBottom:10, lineHeight:1.5 }}>{error}</div>}
         <div style={{ display:"flex", gap:10 }}>
@@ -1062,7 +1082,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "249";
+const APP_VERSION = "251";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -2170,6 +2190,46 @@ const resolveLegalStatus = (form, text) =>
     ? { ...form, freelanceLegalStatus: "" }
     : form;
 
+// ── Version 251 : clauses fixes des articles 1, 5, 7 et 10 ──
+// Avant, l'IA rédigeait ces passages à partir d'une consigne : leur texte changeait d'un contrat à l'autre. Ils sont
+// maintenant recopiés mot pour mot, comme les autres clauses fixes. Textes corrigés par Ordalie (IA juridique) le
+// 08/11/2026. Ils n'ont pas été relus par une juriste : la mention « revue juridique par une juriste » ne les couvre pas.
+// Retirés à cette occasion : la non-sollicitation de 24 mois (sans salarié, elle n'a pas d'objet), le « tarif horaire
+// du Prestataire » (Freeley ne le demande jamais, il n'apparaissait nulle part) et la citation de l'article L1221-1 du
+// Code du travail (il ne définit pas le lien de subordination).
+const FIXED_INDEPENDANCE = [
+  "Le Prestataire intervient en qualité de professionnel indépendant pour réaliser les prestations décrites au présent contrat et remettre les livrables convenus.",
+  "Sous réserve des contraintes de lieu, de délai, de coordination et de sécurité expressément convenues au présent contrat, le Prestataire organise librement son activité et choisit ses méthodes et ses moyens d'exécution.",
+  "Le Client peut préciser ses besoins, les caractéristiques attendues des livrables, le calendrier convenu, et vérifier la conformité des prestations au présent contrat. Il ne dirige pas l'activité quotidienne du Prestataire et ne lui impose pas ses méthodes d'exécution.",
+  "Les Parties entendent conclure un contrat de prestation de services et non un contrat de travail. Cette stipulation ne préjuge pas de la qualification qui pourrait résulter des conditions effectives d'exécution de la mission.",
+  "Le Prestataire peut exercer d'autres missions, simultanément, pour d'autres clients.",
+];
+const FIXED_HORS_PERIMETRE = [
+  "Toute demande du Client qui sort du périmètre de la mission décrite à l'article 2 fait l'objet, avant son exécution, d'un avenant écrit. L'avenant décrit les prestations supplémentaires, leur délai d'exécution et leur prix. Lorsque le Client est un consommateur, le prix est indiqué toutes taxes comprises ; s'il ne peut raisonnablement être calculé à l'avance, l'avenant précise son mode de calcul et les frais supplémentaires éventuels. Aucune prestation supplémentaire n'est exécutée ni facturée avant l'acceptation expresse et écrite de l'avenant par le Client.",
+];
+const FIXED_CONFIDENTIALITE = [
+  "Chacune des Parties s'engage à garder confidentielles les informations non publiques de l'autre Partie dont elle a connaissance à l'occasion de la mission, et à ne les utiliser que pour l'exécution du présent contrat.",
+  "Cette obligation ne s'applique pas aux informations que la Partie qui les reçoit connaissait déjà de façon licite, qui sont devenues publiques sans manquement à une obligation de confidentialité, qu'elle a reçues licitement d'un tiers ou qu'elle a développées indépendamment. Elle ne fait pas obstacle aux communications exigées par la loi ou une décision de justice, ni à celles qui sont nécessaires à l'exercice ou à la défense des droits d'une Partie, notamment auprès de ses conseils ou des autorités compétentes.",
+  "Elle s'applique pendant toute la durée de la mission et pendant trois (3) ans après sa fin.",
+  "La présente clause ne fait pas obstacle à la publication par le Client d'un avis ou d'un retour d'expérience sur la prestation. Elle ne l'autorise pas à divulguer des données personnelles de tiers ou des secrets protégés par la loi.",
+];
+const FIXED_FORCE_MAJEURE = [
+  "Aucune Partie n'est responsable de l'inexécution de l'obligation dont elle est empêchée par un cas de force majeure au sens de l'article 1218 du Code civil, c'est-à-dire un événement échappant à son contrôle, qui ne pouvait être raisonnablement prévu lors de la conclusion du contrat et dont les effets ne peuvent être évités par des mesures appropriées, et qui empêche l'exécution de cette obligation.",
+  "La Partie empêchée en informe l'autre Partie par écrit dans les meilleurs délais, en précisant la durée prévisible de l'empêchement.",
+  "Si l'empêchement est temporaire, l'exécution de l'obligation concernée est suspendue, sauf si le retard qui en résulte justifie la résolution du contrat. Si l'empêchement temporaire dure plus de trente (30) jours, chacune des Parties peut mettre fin au contrat par notification écrite, sans indemnité de résiliation. Si l'empêchement est définitif, le contrat est résolu de plein droit dans les conditions de l'article 1218 du Code civil.",
+  "À la date de prise d'effet de la fin du contrat, le Client reste redevable du prix correspondant aux prestations effectivement réalisées, calculé selon la répartition des prix prévue au contrat ou, à défaut, au prorata de leur avancement. Toute somme versée d'avance au-delà de ce montant est remboursée au Client. Le fait qu'aucune indemnité de résiliation ne soit due ne fait pas obstacle à ce paiement ou à ce remboursement.",
+];
+// Une ligne par paragraphe, au même format que les autres clauses imposées (« - "..." »)
+const fixedParagraphs = (list) => list.map((s) => `- "${s}"`).join("\n");
+const FIXED_CLAUSES_BY_ARTICLE = [[1, FIXED_INDEPENDANCE], [5, FIXED_HORS_PERIMETRE], [7, FIXED_CONFIDENTIALITE], [10, FIXED_FORCE_MAJEURE]];
+// Comparaison phrase par phrase : apostrophes courbes, espaces insécables et retours à la ligne rendus comparables.
+// (Pas de « lookbehind » dans l'expression : les anciens iPhone ne le connaissent pas.)
+const normFixed = (s) => String(s || "").replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, " ");
+const sentencesOf = (s) => {
+  const parts = normFixed(s).trim().split(". ");
+  return parts.map((p, i) => (i < parts.length - 1 ? p + "." : p));
+};
+
 // ── Contrôle automatique du contrat rédigé ──
 // Le texte du contrat est rédigé en partie par l'IA : il peut varier d'une fois sur l'autre. Après chaque
 // rédaction, Freeley relit le texte et liste ce qui ne va pas. Il prévient le freelance, il ne bloque rien.
@@ -2281,6 +2341,19 @@ const checkContractText = (text, form = {}, profile = {}) => {
   if (form.clauseSecurite && /^\s*ARTICLE\s+(?!8\b)\d+\s*[—–-][^\n]*ASSURANCE/im.test(t)) add("Le contrat parle de l'assurance dans un article à part, en plus de la clause d'assurance. Refais le contrat pour éviter le doublon.");
   // Version 233 : plus de 13 articles, c'est sans doute un sujet traité deux fois
   if (/ARTICLE\s+(1[4-9]|[2-9]\d)\s*[—–-]/.test(t)) add("Le contrat contient plus de 13 articles. Vérifie qu'aucun sujet n'est traité deux fois, ou refais le contrat.");
+
+  // Version 251 : clauses fixes des articles 1, 5, 7 et 10. On ne contrôle que les contrats qui en contiennent au
+  // moins une phrase : ceux faits avant la version 251 ont encore les anciens textes, rédigés par l'IA.
+  const tFixed = normFixed(t);
+  const fixedState = FIXED_CLAUSES_BY_ARTICLE.map(([n, list]) => {
+    const sentences = list.flatMap(sentencesOf);
+    return { n, total: sentences.length, missing: sentences.filter((s) => !tFixed.includes(s)).length };
+  });
+  if (fixedState.some((a) => a.missing < a.total)) {
+    const bad = fixedState.filter((a) => a.missing > 0).map((a) => a.n);
+    if (bad.length === 1) add(`La clause fixe de l'article ${bad[0]} n'a pas été recopiée telle quelle. Refais le contrat.`);
+    else if (bad.length > 1) add(`Les clauses fixes des articles ${bad.slice(0, -1).join(", ")} et ${bad[bad.length - 1]} n'ont pas été recopiées telles quelles. Refais le contrat.`);
+  }
 
   // Mot anglais oublié
   if (has(/\b(duly|scope creep|deliverables?|best effort)\b/i)) add("Le contrat contient un mot anglais.");
@@ -2461,13 +2534,8 @@ STRUCTURE OBLIGATOIRE — RESPECTE CET ORDRE EXACT
 EN-TÊTE : Titre "CONTRAT DE PRESTATION DE SERVICES INDÉPENDANT", puis la date suivante en toutes lettres, à utiliser EXACTEMENT telle quelle sans la modifier ni la recalculer : "${todayFull}". Numéro de contrat à utiliser EXACTEMENT tel quel, ne jamais en inventer un autre : ${contractRef}. Mention "ENTRE LES SOUSSIGNÉS".${!isCompany ? ` Le Prestataire est un entrepreneur individuel : écris son nom EXACTEMENT comme dans « Prestataire » ci-dessus, avec la mention « EI » juste après son nom (obligatoire sur ses contrats), dans la présentation des parties comme dans les signatures.` : form.freelanceCompanyName ? ` Le Prestataire est une société (${form.freelanceLegalStatus}) : présente-la sous sa dénomination « ${form.freelanceCompanyName} », avec sa forme juridique, représentée par ${form.freelanceName}, dans la présentation des parties comme dans les signatures.` : ` Le Prestataire exerce sous la forme d'une société (${form.freelanceLegalStatus}) : indique cette forme juridique dans la présentation des parties.`} Si un numéro SIRET ou un numéro de TVA est fourni ci-dessus, indique-le dans la présentation des parties. N'ajoute aucune civilité (Monsieur, Madame) devant le nom des parties.
 
 ARTICLE 1 — INDÉPENDANCE DU PRESTATAIRE ET ABSENCE DE LIEN DE SUBORDINATION
-Rédige une clause affirmant EXPLICITEMENT que :
-- Le Prestataire exerce son activité en toute indépendance et autonomie ;
-- Il conserve l'entière liberté de choix de ses horaires de travail, de son matériel, de ses méthodes et de son organisation ;
-- Le présent contrat ne crée en aucun cas un lien de subordination au sens du droit du travail (art. L1221-1 C.trav.) ;
-- Le Prestataire peut exercer d'autres missions simultanément pour d'autres clients ;
-- Le Client s'interdit expressément toute directive, instruction ou contrôle portant sur les moyens d'exécution.
-Cite l'article L1221-1 du Code du travail et la jurisprudence Soc. 13 nov. 1996 sur le faisceau d'indices.
+Inclus OBLIGATOIREMENT, mot pour mot, les paragraphes suivants, dans cet ordre, chacun dans son propre sous-paragraphe. N'ajoute rien d'autre dans cet article, ni article de loi, ni jurisprudence :
+${fixedParagraphs(FIXED_INDEPENDANCE)}
 
 ARTICLE 2 — OBJET DU CONTRAT ET DESCRIPTION DE LA MISSION
 Objet général, puis la description de la mission et des livrables, reprise FIDÈLEMENT depuis la description fournie par le Prestataire. Tu peux la reformuler dans un style juridique et la présenter en énumération, mais n'ajoute AUCUN livrable, AUCUNE prestation, AUCUNE exclusion, AUCUNE quantité, AUCUNE fréquence et AUCUN délai qui n'y figure pas. Si la description indique un nombre de révisions ou de corrections, un prix, un acompte, un délai de paiement, des dates de début ou de fin, ou une règle pour les demandes supplémentaires (devis, avenant, tarif), ne reprends pas ces passages dans l'article 2 : ces sujets sont réglés aux articles 3, 4 et 5 avec les données ci-dessus, et le contrat ne doit jamais se contredire.
@@ -2506,7 +2574,9 @@ ${pricing.b2c
 ${form.clauseSuspension ? `- Inclus OBLIGATOIREMENT la clause de suspension suivante : "En cas de retard de paiement de toute somme exigible au titre du présent contrat persistant plus de huit (8) jours après une mise en demeure adressée par lettre recommandée avec avis de réception ou par tout moyen électronique permettant d'en établir la réception, restée sans effet, le Prestataire peut suspendre l'exécution de la mission jusqu'au complet règlement des sommes dues. Cette suspension ne constitue pas une faute du Prestataire et n'ouvre pas droit à indemnité au profit du Client. Les délais d'exécution affectés par la suspension sont eux-mêmes suspendus et prorogés d'une durée correspondant à la période de suspension, sans que le retard qui en résulte puisse être imputé au Prestataire."` : ""}
 
 ARTICLE 5 — RÉVISIONS ET MODIFICATIONS DU PÉRIMÈTRE
-Inclus d'abord, mot pour mot : "${revisions}" C'est le seul endroit du contrat qui indique le nombre de révisions. Clause sur les demandes hors périmètre : toute demande hors périmètre fait l'objet d'un avenant écrit et facturé au tarif horaire du Prestataire${isB2C ? ", communiqué au Client avant l'établissement de l'avenant" : ""}.
+Inclus d'abord, mot pour mot : "${revisions}" C'est le seul endroit du contrat qui indique le nombre de révisions.
+Puis inclus OBLIGATOIREMENT, mot pour mot, dans son propre sous-paragraphe, le paragraphe suivant. N'ajoute rien d'autre dans cet article, et aucun tarif horaire :
+${fixedParagraphs(FIXED_HORS_PERIMETRE)}
 
 ARTICLE 6 — ${form.categorieMetier === "artisanat" ? "GARANTIE DE BONNE EXÉCUTION ET CONFORMITÉ AUX NORMES MÉTIER" : form.categorieMetier === "conseil" ? "PROPRIÉTÉ INTELLECTUELLE ET CONFIDENTIALITÉ" : "PROPRIÉTÉ INTELLECTUELLE ET CESSION DES DROITS SUSPENDUE AU PAIEMENT"}
 Inclus OBLIGATOIREMENT, mot pour mot et SANS reformuler ni raccourcir, la clause suivante :
@@ -2523,11 +2593,9 @@ ${form.categorieMetier === "artisanat"
 Lorsque le livrable comprend un logiciel ou des éléments logiciels protégés, la cession couvre, dans le périmètre défini ci-dessus et sous réserve des dispositions impératives, les droits d'exploitation visés à l'article L122-6 du Code de la propriété intellectuelle, notamment la reproduction permanente ou provisoire, la traduction, l'adaptation, l'arrangement ou toute autre modification, ainsi que la mise sur le marché des exemplaires dans les conditions convenues. Lorsque le Prestataire est l'auteur personne physique du logiciel, la rémunération correspondant à la cession des droits peut être évaluée forfaitairement, conformément au 5° de l'article L131-4 du Code de la propriété intellectuelle. Lorsque le prix global du contrat rémunère à la fois la prestation et cette cession, le contrat l'indique expressément. Les droits moraux de l'auteur du logiciel s'exercent dans les conditions particulières prévues à l'article L121-7 du Code de la propriété intellectuelle.
 Lorsque le Prestataire est l'auteur personne physique de créations protégées autres qu'un logiciel et qu'une cession de droits d'auteur est consentie, la rémunération attachée à cette cession respecte l'article L131-4 du Code de la propriété intellectuelle : elle est appropriée et proportionnelle aux recettes provenant de la vente ou de l'exploitation, sauf lorsqu'une rémunération forfaitaire est légalement admise. Lorsque l'article L131-5-1 est applicable, le cessionnaire respecte l'obligation de transparence et de reddition d'informations qu'il prévoit. En cas de cession exclusive, le droit de résiliation pour absence d'exploitation prévu à l'article L131-5-2 est applicable lorsque ses conditions sont réunies. La cession porte uniquement sur les droits patrimoniaux cessibles ; le droit moral de l'auteur demeure régi par l'article L121-1 du Code de la propriété intellectuelle."`}${existingContentLicence}
 
-${isB2C
-  ? `ARTICLE 7 — CONFIDENTIALITÉ
-Clause de confidentialité réciproque pendant la mission et 3 ans après. Le Client étant un particulier, n'écris AUCUNE clause de non-sollicitation, de non-débauchage ni de non-concurrence.`
-  : `ARTICLE 7 — CONFIDENTIALITÉ ET NON-SOLLICITATION
-Clause de confidentialité réciproque pendant la mission et 3 ans après. Clause de non-sollicitation du personnel du Prestataire pendant 24 mois.`}
+ARTICLE 7 — CONFIDENTIALITÉ
+Inclus OBLIGATOIREMENT, mot pour mot, les paragraphes suivants, dans cet ordre, chacun dans son propre sous-paragraphe. N'ajoute rien d'autre dans cet article : aucune clause de non-sollicitation, de non-débauchage ni de non-concurrence.
+${fixedParagraphs(FIXED_CONFIDENTIALITE)}
 
 ${isB2C
   ? `ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE
@@ -2559,7 +2627,8 @@ ${form.clausePreavis ? (form.typeClient === "particulier"
   : ""}
 
 ARTICLE 10 — FORCE MAJEURE
-Clause standard de force majeure conforme à l'art. 1218 du Code civil.
+Inclus OBLIGATOIREMENT, mot pour mot, les paragraphes suivants, dans cet ordre, chacun dans son propre sous-paragraphe. N'ajoute rien d'autre dans cet article :
+${fixedParagraphs(FIXED_FORCE_MAJEURE)}
 
 ARTICLE 11 — ${form.typeClient === "particulier" ? "DROIT APPLICABLE ET RÈGLEMENT DES LITIGES" : "DROIT APPLICABLE, MÉDIATION ET ATTRIBUTION DE JURIDICTION"}
 ${form.typeClient === "particulier"
@@ -3606,7 +3675,7 @@ async function callAi(body) {
     const type = data?.error?.type;
     if (type === "login_required" || type === "daily_limit") {
       const err = new Error(type === "daily_limit"
-        ? `Tu as atteint la limite de ${data?.limit || AI_DAILY_LIMIT} utilisations pour aujourd'hui (rédaction, assistant, scanner…). Tu pourras continuer demain.`
+        ? `Tu as atteint la limite de ${data?.limit || AI_DAILY_LIMIT} utilisations pour aujourd'hui (rédaction${CONTRACT_ASSISTANT_ENABLED ? ", assistant" : ""}, scanner…). Tu pourras continuer demain.`
         : "Ta session a expiré. Reconnecte-toi, puis réessaie.");
       err.aiAccess = true;
       err.status = res.status;
@@ -3743,7 +3812,7 @@ const downloadSignedContractForClient = async (contractId) => {
     freelanceSignature: c.freelanceSignature || null, clientSignature: c.clientSignature || null,
     signedAt: c.signedByClientAtServer || c.signedByClientAt || null,
     retractationWaivedAt: c.retractationWaivedAtServer || c.retractationWaivedAt || null,
-    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null, clientPetitPro: c.clientPetitPro === true, signatureProof: c.signatureProof || null, retractationExcluded: c.retractationExcluded || null },
+    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null, clientPetitPro: c.clientPetitPro === true, signatureProof: c.signatureProof || null, retractationExcluded: c.retractationExcluded || null, copyMedium: c.copyMedium || null, retractationWaiverText: c.retractationWaiverText || null },
     profile: { tvaNumber: tvaFromText },
   });
   doc.save(fileName);
@@ -4302,13 +4371,25 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   y += 68;
 
   // ── Mention renonciation au délai de rétractation (particulier, ou petite entreprise protégée : version 222) ──
+  // Version 250 : avec le texte complet coché par le client, sa date et son heure (exemplaire papier : art. L221-9, L221-25)
+  const pWaiverText = pRetractationWaivedAt && pExtra.retractationWaiverText ? String(pExtra.retractationWaiverText) : "";
   if (pConsumer && !pExcluded) {
+    doc.setFont("helvetica","italic"); doc.setFontSize(7);
+    const wtLines = pWaiverText
+      ? doc.splitTextToSize(`Texte coché par le client le ${new Date(pRetractationWaivedAt).toLocaleString("fr-FR", { day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit", timeZone:"Europe/Paris" })} (heure de Paris) : « ${pWaiverText} »`, cw - 7)
+      : [];
+    checkY(10 + wtLines.length * 3.2);
     if (pRetractationWaivedAt) {
       doc.setFillColor(...GREEN); doc.circle(ML + 2.5, y - 1.3, 2, "F");
       doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREEN);
       doc.text(pDigital
         ? `Perte du droit de rétractation acceptée le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`
         : `Démarrage avant la fin du délai de rétractation demandé le ${new Date(pRetractationWaivedAt).toLocaleDateString("fr-FR")}`, ML + 7, y);
+      if (wtLines.length) {
+        doc.setFont("helvetica","italic"); doc.setFontSize(7); doc.setTextColor(...DARK);
+        doc.text(wtLines, ML + 7, y + 4.5);
+        y += wtLines.length * 3.2 + 2;
+      }
     } else {
       doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
       doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
@@ -4318,9 +4399,11 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
     }
     y += 8;
   } else if (pExcluded) {
-    doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
-    doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
     const exLines = doc.splitTextToSize(RETRACTATION_EXCLUDED_TEXT[pExcluded], cw - 7);
+    checkY(8 + exLines.length * 3.4);
+    doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
+    doc.setTextColor(...DARK);
     doc.text(exLines, ML + 7, y);
     y += 8 + (exLines.length - 1) * 3.4;
   }
@@ -4336,6 +4419,26 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   if (pFreelanceSig && pClientSig && pExtra.signatureProof) {
     y += finalLines.length * 3.5 + 5;
     y = drawSignatureProofPdf(doc, pExtra.signatureProof, { x: ML, y, width: cw, docLabel: "du contrat", room: (h, yy) => { checkY(h); return y; } });
+  }
+  // Version 250 : le client a choisi l'exemplaire papier (contrat hors établissement) : cadre pour les signatures
+  // manuscrites des deux parties (art. L221-9 C. conso : exemplaire « sur papier signé par les parties »)
+  if (pExtra.copyMedium === "papier") {
+    y += (pFreelanceSig && pClientSig && pExtra.signatureProof) ? 4 : finalLines.length * 3.5 + 5;
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+    const paperLines = doc.splitTextToSize("Le client a choisi de recevoir son exemplaire sur papier (article L221-9 du Code de la consommation). Les deux parties signent ci-dessous, à la main, l'exemplaire qui lui est remis.", cw - 8);
+    const boxH = 12.5 + paperLines.length * 3.4 + 4 + 7 + 20;
+    checkY(boxH + 2);
+    const y0 = y;
+    doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.5); doc.roundedRect(ML, y0, cw, boxH, 2, 2);
+    doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.setTextColor(...NAVY);
+    doc.text("Exemplaire papier — signatures manuscrites", ML + 4, y0 + 7);
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
+    doc.text(paperLines, ML + 4, y0 + 12.5);
+    const yy = y0 + 12.5 + paperLines.length * 3.4 + 4;
+    doc.text("Fait à : ..................................................   le : ...... / ...... / ............", ML + 4, yy);
+    doc.text("Signature du prestataire :", ML + 4, yy + 7);
+    doc.text("Signature du client :", ML + cw / 2 + 2, yy + 7);
+    y = y0 + boxH + 4;
   }
 
   // ── Annexe : information officielle sur la rétractation + formulaire (particulier, ou petite entreprise
@@ -6096,7 +6199,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         historyView={historyView}
         setHistoryView={setHistoryView}
         onBack={() => goToScreen("app")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null })}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null, copyMedium: entry.copyMedium || null, retractationWaiverText: entry.retractationWaiverText || null })}
         onDelete={async (id) => { await deleteFromHistory(id); const hist = await getHistory(); setHistory(hist); if (historyView?.id === id) setHistoryView(null); }}
         onDuplicate={async (entry) => {
           const dupForm = { ...(entry.form || {}), missionTitle: (entry.missionTitle || entry.form?.missionTitle || "") + " (copie)" };
@@ -6171,7 +6274,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       <ArchivesPage
         history={history}
         onBack={() => goToScreen("history")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null })}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null, copyMedium: entry.copyMedium || null, retractationWaiverText: entry.retractationWaiverText || null })}
         profile={profile}
         authUser={authUser}
         onRestore={async (id) => {
@@ -8439,7 +8542,7 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
       tasks.push({ name: `Contrats/${cNum ? cNum + " - " : ""}${title} - ${who}${entry.deleted ? " (archivé)" : ""}.pdf`, make: () => buildContractPdfDoc({
         form, contract: entry.contract, freelanceSignature: entry.freelanceSignature, clientSignature: entry.clientSignature,
         signedAt: entry.signedByClientAt, retractationWaivedAt: entry.retractationWaivedAt,
-        extra: { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null },
+        extra: { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null, copyMedium: entry.copyMedium || null, retractationWaiverText: entry.retractationWaiverText || null },
         profile,
       }).doc });
     }
@@ -11392,7 +11495,7 @@ function buildAlertsFromHistory(history, profile = null) {
         badgeBg: "#EA580C",
         badgeText: "DEMANDE",
         title: "Demande de rétractation à examiner",
-        detail: `${c.clientName || "Ton client"} a demandé à se rétracter le ${frDate(c.retractationLateRequestAt)} pour la mission « ${c.missionTitle || "Sans titre"} », après la fourniture du contenu. Le contrat n'est pas annulé : c'est toi qui décides. Réponds-lui par email.`,
+        detail: `${c.clientName || "Ton client"} a demandé à se rétracter le ${frDate(c.retractationLateRequestAt)} pour la mission « ${c.missionTitle || "Sans titre"} », après la fourniture du contenu. Le contrat n'est pas annulé automatiquement : vérifie les faits, puis réponds-lui par email.`,
         action: "mission",
         contractId: c.id,
       });
@@ -12567,6 +12670,10 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 // CURRENT_PENALTY_RATE_B2B et CURRENT_LEGAL_RATE_B2C dans RecouvrementFermeModal.
 // Les relances amiables avant échéance et le message pour client silencieux restent disponibles.
 const FORMAL_LETTER_ENABLED = false;
+// Version 251 : assistant « J'ai un problème » masqué. D'après Ordalie, c'est la fonction la plus exposée à la loi du
+// 31/12/1971 (art. 54 : la consultation juridique est réservée aux professionnels autorisés). Le code reste : pour le
+// remettre, passer CONTRACT_ASSISTANT_ENABLED à true (les CGU et la politique de confidentialité suivent).
+const CONTRACT_ASSISTANT_ENABLED = false;
 // Version 229 : consigne de l'assistant « J'ai un problème » (avant : écrite dans askContractAssistant). Changements :
 // les outils sont nommés comme dans l'appli (avant : liste (a)…(o), et l'IA écrivait « l'option (o) ») ; la phrase sur
 // les preuves est reformulée (l'IA la recopiait en écrivant « seuls d'autres preuves ») ; « Recouvrement Ferme » est
@@ -16094,9 +16201,11 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
   const sendRetractationConfirmation = () => {
     if (!historyView) return;
     const clientEmail = historyView.form?.clientEmail || historyView.clientEmail || "";
-    const waivedDate = historyView.retractationWaivedAt ? new Date(historyView.retractationWaivedAt).toLocaleDateString("fr-FR") : "";
+    // Version 250 : même confirmation que l'email automatique (date et heure, nom du prestataire, renoncement exprès)
+    const freelanceNameC = contractFreelanceName(resolveLegalStatus(historyView.form || {}, historyView.contract)) || historyView.form?.freelanceName || "";
+    const titleC = digitalTitleFromWaiverText(historyView.retractationWaiverText) || historyView.missionTitle || "";
     const subject = `Confirmation de votre accord — ${historyView.missionTitle || "mission"}`;
-    const body = `Bonjour ${historyView.clientName || ""},\n\nÀ la suite de votre accord exprès donné le ${waivedDate}, nous vous confirmons que vous avez consenti à ce que la fourniture du contenu numérique “${historyView.missionTitle || ""}” commence avant l'expiration du délai de rétractation de quatorze (14) jours et que vous avez reconnu qu'en conséquence vous perdrez votre droit de rétractation dès le commencement de cette exécution.\n\nCordialement,\n${historyView.form?.freelanceName || ""}`;
+    const body = `Bonjour ${historyView.clientName || ""},\n\n${historyView.retractationWaivedAt ? digitalWaiverConfirmationText(historyView.retractationWaivedAt, freelanceNameC, titleC) : ""}\n\nCordialement,\n${freelanceNameC}`;
     setRetractMailOpenedFor(historyView.id);
     window.location.href = `mailto:${clientEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
@@ -16194,10 +16303,12 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             border:`1px solid ${copied ? "#2D6A4F" : "#354F6E"}`,
             borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, transition:"all .2s",
           }}>{copied ? "✓ Copié" : "Copier le texte"}</button>
+          {CONTRACT_ASSISTANT_ENABLED && (
           <button onClick={() => { setShowAssistantModal(true); setAssistantQuestion(""); setAssistantAnswer(""); }} style={{
             padding:"10px 20px", background:"#1E3A8A", color:"#fff",
             border:"1px solid #2563EB", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
           }}>🤖 J'ai un problème</button>
+          )}
           <button onClick={() => setConfirmDelete(historyView.id)} style={{
             padding:"10px 14px", background:"transparent", color:"#7A4A4A",
             border:"1px solid #5A3030", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body,
@@ -16208,7 +16319,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       {/* Version 249 : le client a choisi de recevoir son exemplaire sur papier (contrat signé chez lui ou ailleurs) */}
       {historyView.copyMedium === "papier" && historyView.signatureStatus === "signed" && historyView.signedByClientAt && Date.now() - new Date(historyView.signedByClientAt).getTime() < 15 * 86400000 && (
         <div data-testid="paper-copy-reminder" className="fade-up" style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, padding:"14px 18px", marginBottom:24, fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
-          📄 <strong>Ton client a choisi de recevoir son exemplaire sur papier.</strong> Remets-lui un exemplaire daté et signé du contrat{hasRetractationRight(historyView.form, historyView) ? ", avec le formulaire de rétractation" : ""} : imprime-le avec le bouton « Télécharger PDF », en haut de cette fiche.
+          📄 <strong>Ton client a choisi de recevoir son exemplaire sur papier.</strong> Imprime le contrat avec le bouton « Télécharger PDF », en haut de cette fiche{hasRetractationRight(historyView.form, historyView) ? ", avec le formulaire de rétractation qui est à la fin" : ""}. Signez-le tous les deux à la main, dans le cadre prévu, datez-le, puis remets-le-lui.
         </div>
       )}
 
@@ -16237,7 +16348,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
               : <>Ton client n'avait pas donné son accord avant : il garde son droit de rétractation{lastDay ? <> jusqu'au {frDate(lastDay)}</> : null}.</>}
             {lateAt && (
               <div data-testid="late-retract-request" style={{ marginTop:12, paddingTop:12, borderTop:"1px solid #FDBA74" }}>
-                📨 <strong>Le {fmtAt(lateAt)}, ton client a quand même envoyé une demande de rétractation.</strong> Le contrat n'est pas annulé automatiquement : c'est toi qui décides, et tu n'es pas obligé d'accepter. Réponds-lui par email{replyTo ? <> ({replyTo})</> : null}. Si le contenu lui a bien été fourni, joins la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement). Si tu acceptes sa demande, ou si le contenu ne lui avait pas vraiment été fourni, rembourse-lui les sommes reçues dans les 14 jours, par le même moyen de paiement que celui qu'il a utilisé (sauf s'il accepte expressément un autre moyen), sans frais pour lui.
+                📨 <strong>Le {fmtAt(lateAt)}, ton client a quand même envoyé une demande de rétractation.</strong> Le contrat n'est pas annulé automatiquement. Vérifie d'abord les faits, puis réponds-lui par email{replyTo ? <> ({replyTo})</> : null}. Si le contenu lui a bien été fourni à la date indiquée, joins la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement) : tu n'es alors pas obligé d'accepter. Si ce n'est pas le cas, ou en cas de doute, traite sa demande comme une rétractation : rembourse-lui les sommes reçues dans les 14 jours, par le même moyen de paiement que celui qu'il a utilisé (sauf s'il accepte expressément un autre moyen), sans frais pour lui.
               </div>
             )}
           </>);
@@ -16612,7 +16723,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         />
       )}
 
-      {showAssistantModal && (
+      {CONTRACT_ASSISTANT_ENABLED && showAssistantModal && (
         <div
           onClick={e => { if (e.target === e.currentTarget) setShowAssistantModal(false); }}
           style={{ position:"fixed", inset:0, background:"rgba(10,18,32,0.75)", zIndex:20000, display:"flex", alignItems:"center", justifyContent:"center", padding:"12px", backdropFilter:"blur(8px)" }}
@@ -19211,7 +19322,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     setTactileRetractationWaiving(true);
     // Petite entreprise : le serveur doit d'abord connaître le lieu et la réponse, enregistrés à la signature du freelance
     if (signContextSaveRef.current) { try { await signContextSaveRef.current; } catch (e) {} }
-    if (contractId) await submitRetractationWaiver(contractId, getRetractationWaiverText(isDigital));
+    if (contractId) await submitRetractationWaiver(contractId, getRetractationWaiverText(isDigital, form.missionTitle));
     setTactileRetractationWaiving(false);
     setTactileRetractationDone(true);
   };
@@ -19698,7 +19809,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     ))}
                     {copyChoice === "papier" && (
                       <div style={{ fontSize:11.5, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"10px 12px", marginBottom:8, lineHeight:1.55 }}>
-                        Le prestataire doit vous remettre {hasRight ? "le contrat et le formulaire de rétractation" : "le contrat"} sur papier avant que vous signiez, puis votre exemplaire signé.
+                        Le prestataire doit vous remettre {hasRight ? "le contrat et le formulaire de rétractation" : "le contrat"} sur papier avant que vous signiez. Ensuite, vous signerez tous les deux, à la main, l'exemplaire papier qu'il vous remettra.
                       </div>
                     )}
                     {copyError && (
@@ -19724,7 +19835,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(noticeForm, contractText))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(noticeForm, contractText))}</div>
                     <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
                       <input type="checkbox" checked={tactileRetractationChecked} onChange={e => setTactileRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
-                      <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(isDigital)}</span>
+                      <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(isDigital, form.missionTitle)}</span>
                     </label>
                     <button
                       onClick={handleTactileRetractationContinue}
@@ -19873,7 +19984,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               {/* Version 249 : le client a choisi le papier */}
               {offPremises && copyChoice === "papier" && (
                 <div data-testid="paper-copy-final" style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#92400E", textAlign:"left", lineHeight:1.55 }}>
-                  📄 <strong>Ton client a choisi le papier.</strong> Remets-lui maintenant un exemplaire daté et signé du contrat{hasRight ? ", avec le formulaire de rétractation" : ""}. Tu peux l'imprimer depuis « Mes contrats », avec le bouton « Télécharger PDF ».
+                  📄 <strong>Ton client a choisi le papier.</strong> Imprime le contrat avec le bouton « Télécharger PDF » de « Mes contrats »{hasRight ? " : le formulaire de rétractation est à la fin" : ""}. Signez-le tous les deux à la main, dans le cadre prévu, datez-le, puis remets-le-lui.
                 </div>
               )}
               {/* Big success badge */}
@@ -21066,7 +21177,7 @@ function ClientSignaturePage({ contractId }) {
   const handleContinueFromRetractationScreen = async () => {
     if (!retractationChecked) { setRetractationDoneLocally(true); return; }
     setRetractationWaiving(true);
-    const ok = await submitRetractationWaiver(contractId, getRetractationWaiverText(!!contractData?.content?.form?.contenuNumeriquePret));
+    const ok = await submitRetractationWaiver(contractId, getRetractationWaiverText(!!contractData?.content?.form?.contenuNumeriquePret, contractData?.content?.missionTitle || contractData?.content?.form?.missionTitle));
     setRetractationWaiving(false);
     if (ok) setRetractationDoneLocally(true);
     else setError("Votre choix n'a pas pu être enregistré. Réessayez dans quelques instants.");
@@ -21288,7 +21399,7 @@ function ClientSignaturePage({ contractId }) {
               <div style={{ fontSize:30, marginBottom:8 }}>📨</div>
               <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Demande de rétractation transmise</div>
               <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
-                Votre demande du {fmtLong(lateRequestAtC)} (heure de Paris) a été transmise au prestataire{deliveredAtC ? <>, qui a indiqué vous avoir fourni le contenu numérique le {fmtLong(deliveredAtC)}</> : null}. C'est lui qui vous répondra.{" "}{ackNote}
+                Votre demande du {fmtLong(lateRequestAtC)} (heure de Paris) a été transmise au prestataire{deliveredAtC ? <>, qui a indiqué vous avoir fourni le contenu numérique le {fmtLong(deliveredAtC)}</> : null}. Cette demande ne vaut pas résiliation du contrat. C'est lui qui vous répondra.{" "}{ackNote}
               </div>
               {content.form?.freelanceEmail && (
                 <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginTop:8 }}>Pour le contacter : {content.form.freelanceEmail}</div>
@@ -21407,7 +21518,7 @@ function ClientSignaturePage({ contractId }) {
           <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(content.form || {}, content.contract))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(content.form || {}, content.contract))}</div>
           <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
             <input type="checkbox" checked={retractationChecked} onChange={e => setRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
-            <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!content.form?.contenuNumeriquePret)}</span>
+            <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!content.form?.contenuNumeriquePret, content.missionTitle || content.form?.missionTitle)}</span>
           </label>
           <button
             onClick={handleContinueFromRetractationScreen}
@@ -22240,7 +22351,7 @@ function PolitiqueConfidentialitePage({ onBack }) {
       <Section title="Utilisation de l'intelligence artificielle">
         <p>
           Certains contenus proposés par Freeley, notamment des contrats, des avenants, des lettres de
-          relance, des analyses de contrats et les réponses de l'assistant « J'ai un problème », sont
+          relance{CONTRACT_ASSISTANT_ENABLED ? ", des analyses de contrats et les réponses de l'assistant « J'ai un problème »," : " et des analyses de contrats,"} sont
           produits à l'aide d'un système d'intelligence artificielle fourni par Anthropic, à partir des
           informations que tu saisis et des documents que tu soumets. Ces informations lui sont
           transmises pour produire le contenu demandé. Les clauses de protection ainsi que les clauses
@@ -22345,16 +22456,15 @@ function CguPage({ onBack }) {
       <Section title="Article 6 — Contenus produits avec l'intelligence artificielle">
         <p>
           Certaines fonctions du Service utilisent un système d'intelligence artificielle : la
-          rédaction des contrats et des avenants, les lettres de relance, l'analyse de contrats,
-          l'assistant « J'ai un problème » et le remplissage des cases à partir d'une photo. Les
+          rédaction des contrats et des avenants, les lettres de relance, l'analyse de
+          contrats{CONTRACT_ASSISTANT_ENABLED ? ", l'assistant « J'ai un problème »" : ""} et le remplissage des cases à partir d'une photo. Les
           contenus ainsi produits peuvent comporter des erreurs ou des omissions. Ils sont une aide à
           la rédaction et ne constituent pas un conseil juridique. L'Utilisateur les relit, les vérifie
           et les adapte avant de les utiliser, et il en reste seul responsable.
         </p>
         <p>
-          Les réponses de l'assistant se fondent uniquement sur le contrat concerné et sur la situation
-          décrite par l'Utilisateur : elles ne tiennent pas compte des circonstances qu'il n'a pas
-          indiquées. Les fichiers PDF des documents produits avec l'aide de l'intelligence
+          {CONTRACT_ASSISTANT_ENABLED && "Les réponses de l'assistant se fondent uniquement sur le contrat concerné et sur la situation décrite par l'Utilisateur : elles ne tiennent pas compte des circonstances qu'il n'a pas indiquées. "}
+          Les fichiers PDF des documents produits avec l'aide de l'intelligence
           artificielle l'indiquent dans leurs propriétés, sous une forme lisible par les logiciels.
         </p>
       </Section>
