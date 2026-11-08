@@ -61,6 +61,12 @@
 // client s'il vit dans un territoire français, jamais plus court qu'à l'heure de Paris ; rappel au freelance :
 // rembourser par le même moyen de paiement que le client, sans frais pour lui (art. L221-24).
 //
+// Version 248 : déclaration de rétractation (art. L221-21 et D221-5 C. conso). La page du client envoie le nom et
+// l'adresse email qu'il a confirmés ou corrigés ; l'accusé de réception part à cette adresse, avec le contenu de la
+// déclaration, la date et l'heure (copie à l'adresse du contrat si elle est différente). Il ne dit plus que le
+// contrat est « annulé ». Contenu numérique déjà fourni : la demande est enregistrée à part (retractationLateRequestAt)
+// et transmise au freelance, qui décide ; le contrat n'est pas annulé automatiquement.
+//
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
 
@@ -424,8 +430,18 @@ async function getFreelanceAuthEmail(userId) {
   }
 }
 
-// ── action: "confirm" — accusé de réception client + notification freelance ──
-async function handleConfirm(contractId, tz) {
+// ── action: "confirm" — déclaration de rétractation du client : accusé de réception + notification freelance ──
+// Version 248 : déclaration (art. L221-21 et D221-5 C. conso). La page envoie le nom et l'adresse email que le client a
+// confirmés ou corrigés ; sans eux (onglet resté ouvert sur une ancienne version), ceux du contrat. L'accusé de
+// réception reprend le contenu de la déclaration, avec la date et l'heure. Contenu numérique déjà fourni (le droit a
+// pris fin, art. L221-28, 13°) : la demande est enregistrée à part et transmise au freelance, qui décide.
+const RETRACT_EMAIL_RE = /^[^\s@<>()[\],;:"\u0000-\u001f\u007f]+@[^\s@<>()[\],;:"\u0000-\u001f\u007f]+\.[^\s@<>()[\],;:"\u0000-\u001f\u007f]{2,}$/;
+const isValidEmail = (v) => { const s = String(v || "").trim(); return s.length <= 254 && RETRACT_EMAIL_RE.test(s); };
+const cleanLine = (v, max) => String(v == null ? "" : v).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+const sameEmail = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+const fmtParis = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
+
+async function handleConfirm(contractId, tz, declared = {}) {
   const { data: row, error } = await supabase
     .from("contracts")
     .select("content, user_id, status")
@@ -435,38 +451,99 @@ async function handleConfirm(contractId, tz) {
 
   const content = parseContent(row.content);
   const already = content.retractationExercisedAtServer || content.retractationExercisedAt;
-  if (already) return { status: 200, body: { ok: true, alreadyConfirmed: true, exercisedAt: already } };
+  if (already) return { status: 200, body: { ok: true, alreadyConfirmed: true, exercisedAt: already, ackEmail: content.retractationAckEmail || "" } };
   const form = resolveStatus(content.form || {}, content.contract);
   if (row.status !== "signed") return { status: 400, body: { error: "not_signed" } };
   if (!isConsumerLike(form, content)) return { status: 400, body: { error: "not_particulier" } };
   const deadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt, tz); // version 247 : fuseau du client
   if (deadline && Date.now() > deadline.getTime()) return { status: 400, body: { error: "deadline_passed" } };
-  // Contenu numérique fourni après l'accord du client et la confirmation : le droit a pris fin (version 208)
-  const ended = digitalRightEnded(content, form);
-  if (ended) return { status: 400, body: { error: "right_lost", ...ended } };
-  const clientEmail = String(form.clientEmail || content.clientEmail || "").trim();
+
+  // Déclaration du client (version 248) : son nom et l'adresse de l'accusé de réception, ou à défaut ceux du contrat
+  const contractEmail = String(form.clientEmail || content.clientEmail || "").trim();
   const clientName = String(form.clientName || content.clientName || "").trim();
+  const emailIn = String(declared.ackEmail || "").trim();
+  if (emailIn && !isValidEmail(emailIn)) return { status: 400, body: { error: "invalid_email" } };
+  const ackEmail = emailIn || (isValidEmail(contractEmail) ? contractEmail : "");
+  const declaredName = cleanLine(declared.declaredName, 120) || clientName;
   const freelanceName = legalFreelanceName(form) || "votre prestataire";
   const missionTitle = content.missionTitle || form.missionTitle || "votre mission";
-  const exercisedAt = new Date().toISOString(); // horloge du serveur, au moment où la demande arrive
-  const dateStr = new Date(exercisedAt).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
+  const contractNum = (String(content.contract || "").match(/CP-\d{4}-\d{3,5}/) || [])[0] || "";
+  const signedIso = content.signedByClientAtServer || content.signedByClientAt;
+  const signedStr = signedIso ? new Date(signedIso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" }) : "";
+  const declarationText = [
+    "Contenu de votre déclaration :",
+    `- Nom : ${declaredName || "non indiqué"}`,
+    `- Contrat : « ${missionTitle} »${contractNum ? `, n° ${contractNum}` : ""}, conclu avec ${freelanceName}${signedStr ? ` le ${signedStr}` : ""}`,
+    `- Adresse email pour l'accusé de réception : ${ackEmail || "non indiquée"}`,
+    "- Décision : rétractation de ce contrat",
+  ].join("\n");
+  const declarationForFreelance = `Sa déclaration : nom indiqué « ${declaredName || "non indiqué"} », adresse email indiquée ${ackEmail || "(aucune)"}.`;
+  const nowIso = new Date().toISOString(); // horloge du serveur, au moment où la demande arrive
+  const dateStr = fmtParis(nowIso);
+  const signOff = `Cordialement,\n${freelanceName}\n(message envoyé par Freeley pour le compte de ${freelanceName})`;
+
+  // Accusé de réception à l'adresse indiquée, et copie à l'adresse du contrat si le client en a indiqué une autre
+  const sendAck = async (subject, text) => {
+    const r = { clientEmailSent: false, clientCopySent: false };
+    if (ackEmail) {
+      try { await sendMail({ from: FROM, to: ackEmail, subject, text }); r.clientEmailSent = true; }
+      catch (e) { console.error("retraction/confirm: échec accusé de réception", e); }
+    }
+    if (isValidEmail(contractEmail) && !sameEmail(contractEmail, ackEmail)) {
+      try {
+        await sendMail({ from: FROM, to: contractEmail, subject: `Copie — ${subject}`, text: `Copie de l'accusé de réception envoyé à ${ackEmail || "l'adresse indiquée"}.\n\n${text}` });
+        r.clientCopySent = true;
+      } catch (e) { console.error("retraction/confirm: échec copie à l'adresse du contrat", e); }
+    }
+    return r;
+  };
+  const ackLine = (r, what) => (r.clientEmailSent || r.clientCopySent)
+    ? "Un accusé de réception lui a été envoyé automatiquement."
+    : `Attention : l'accusé de réception automatique n'a pas pu lui être envoyé. Envoie-lui toi-même, dès maintenant, un email confirmant que tu as bien reçu ${what}, avec la date et l'heure ci-dessus.`;
+
+  // Contenu numérique fourni après l'accord du client et la confirmation : le droit a pris fin (version 208).
+  // Version 248 : la demande est quand même enregistrée (à part) et transmise au freelance, qui décide. Le contrat
+  // n'est pas annulé automatiquement.
+  const ended = digitalRightEnded(content, form);
+  if (ended) {
+    const prev = content.retractationLateRequestAtServer || content.retractationLateRequestAt;
+    if (prev) return { status: 200, body: { ok: true, lateRequest: true, alreadyRequested: true, requestedAt: prev, ackEmail: content.retractationAckEmail || "", ...ended } };
+    const savedLate = await saveContent(contractId, { ...content, retractationLateRequestAt: nowIso, retractationLateRequestAtServer: nowIso, retractationDeclaredName: declaredName, retractationAckEmail: ackEmail }, row.status, "retractationLateRequestAtServer");
+    if (!savedLate) return { status: 500, body: { error: "save_failed" } };
+    const deliveredStr = fmtParis(ended.deliveredAt);
+    const waivedStr = fmtParis(ended.waivedAt);
+    const lateResults = await sendAck(
+      `Accusé de réception de votre demande de rétractation — ${missionTitle}`,
+      `Bonjour${declaredName ? " " + declaredName : ""},\n\nNous accusons réception de votre demande de rétractation, déclarée en ligne le ${dateStr} (heure de Paris).\n\n${declarationText}\n\n${freelanceName} a indiqué vous avoir fourni le contenu numérique le ${deliveredStr}, après votre accord du ${waivedStr}. Dans ce cas, la loi prévoit que le droit de rétractation prend fin au début de la fourniture (article L221-28, 13°, du Code de la consommation). Votre demande est transmise à ${freelanceName}, qui vous répondra.\n\nCet email constitue votre accusé de réception sur un support durable. Gardez-le.\n\n${signOff}`
+    );
+    lateResults.freelanceEmailSent = false;
+    const freelanceEmailLate = (await getFreelanceAuthEmail(row.user_id)) || form.freelanceEmail || null;
+    if (freelanceEmailLate) {
+      try {
+        await sendMail({
+          from: FROM, to: freelanceEmailLate,
+          subject: `Demande de rétractation à examiner — ${missionTitle}`,
+          text: `Bonjour,\n\n${clientName || "Ton client"} a envoyé une demande de rétractation le ${dateStr} pour la mission « ${missionTitle} ».\n${declarationForFreelance}\n\nTu avais indiqué dans Freeley lui avoir fourni le contenu numérique le ${deliveredStr}, après son accord du ${waivedStr} et l'envoi de la confirmation. Dans ce cas, son droit de rétractation a pris fin au début de la fourniture (article L221-28, 13°, du Code de la consommation). Le contrat n'est donc pas annulé automatiquement : c'est toi qui décides, et tu n'es pas obligé d'accepter.\n\nRéponds-lui par email. Si le contenu lui a bien été fourni à cette date, joins la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement). Si tu acceptes sa demande, ou si le contenu ne lui avait pas vraiment été fourni, rembourse-lui les sommes reçues dans les 14 jours, ${REFUND_HOW}.\n\n${ackLine(lateResults, "sa demande")}\n\nCordialement,\nFreeley`,
+        });
+        lateResults.freelanceEmailSent = true;
+      } catch (e) { console.error("retraction/confirm: échec email freelance (demande après fourniture)", e); }
+    }
+    return { status: 200, body: { ok: true, saved: true, lateRequest: true, requestedAt: nowIso, ackEmail, ...lateResults, ...ended } };
+  }
+
+  const exercisedAt = nowIso;
   // La date en base est la preuve légale : elle est enregistrée AVANT les emails, et vérifiée
-  const saved = await saveContent(contractId, { ...content, retractationExercisedAt: exercisedAt, retractationExercisedAtServer: exercisedAt }, row.status, "retractationExercisedAtServer");
+  const saved = await saveContent(contractId, { ...content, retractationExercisedAt: exercisedAt, retractationExercisedAtServer: exercisedAt, retractationDeclaredName: declaredName, retractationAckEmail: ackEmail }, row.status, "retractationExercisedAtServer");
   if (!saved) return { status: 500, body: { error: "save_failed" } };
 
   const freelanceEmail = (await getFreelanceAuthEmail(row.user_id)) || form.freelanceEmail || null;
-  const results = { clientEmailSent: false, freelanceEmailSent: false };
-
-  if (clientEmail) {
-    try {
-      await sendMail({
-        from: FROM, to: clientEmail,
-        subject: `Accusé de réception de votre rétractation — ${missionTitle}`,
-        text: `Bonjour${clientName ? " " + clientName : ""},\n\nNous accusons réception de votre rétractation, soumise en ligne le ${dateStr}.\n\nContenu de votre demande : rétractation du contrat « ${missionTitle} » conclu avec ${freelanceName}.\n\nCet email constitue votre accusé de réception sur un support durable. Le contrat est annulé à compter de cette date.\n\nCordialement,\n${freelanceName}\n(message envoyé par Freeley pour le compte de ${freelanceName})`,
-      });
-      results.clientEmailSent = true;
-    } catch (e) { console.error("retraction/confirm: échec email client", e); }
-  }
+  // Version 248 : accusé de réception avec le contenu de la déclaration, la date et l'heure. Il ne dit plus que le
+  // contrat est « annulé » : les effets de la rétractation sont ceux prévus par la loi.
+  const results = await sendAck(
+    `Accusé de réception de votre rétractation — ${missionTitle}`,
+    `Bonjour${declaredName ? " " + declaredName : ""},\n\nNous accusons réception de votre rétractation, déclarée en ligne le ${dateStr} (heure de Paris).\n\n${declarationText}\n\nCet email constitue votre accusé de réception sur un support durable. Gardez-le.\n\n${signOff}`
+  );
+  results.freelanceEmailSent = false;
 
   if (freelanceEmail) {
     // Conseils adaptés : prestation de services, ou contenu numérique (version 208)
@@ -482,13 +559,13 @@ async function handleConfirm(contractId, tz) {
       await sendMail({
         from: FROM, to: freelanceEmail,
         subject: `Un client s'est rétracté — ${missionTitle}`,
-        text: `Bonjour,\n\n${clientName || "Votre client"} a exercé son droit de rétractation le ${dateStr} pour la mission « ${missionTitle} ».\n\n${results.clientEmailSent ? "Un accusé de réception lui a été envoyé automatiquement." : "Attention : l'accusé de réception automatique n'a pas pu lui être envoyé. Envoie-lui toi-même, dès maintenant, un email confirmant que tu as bien reçu sa rétractation, avec la date et l'heure ci-dessus."}\n\n${advice}\n\nCordialement,\nFreeley`,
+        text: `Bonjour,\n\n${clientName || "Votre client"} a exercé son droit de rétractation le ${dateStr} pour la mission « ${missionTitle} ».\n${declarationForFreelance}\n\n${ackLine(results, "sa rétractation")}\n\n${advice}\n\nCordialement,\nFreeley`,
       });
       results.freelanceEmailSent = true;
     } catch (e) { console.error("retraction/confirm: échec email freelance", e); }
   }
 
-  return { status: 200, body: { ok: true, saved: true, exercisedAt, ...results } };
+  return { status: 200, body: { ok: true, saved: true, exercisedAt, ackEmail, ...results } };
 }
 
 // ── action: "stamp-waiver" — date serveur de la case cochée par le client ──
@@ -872,14 +949,18 @@ async function handleSendLink(contractId) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { action, contractId, email, waiverText, signature, textSha256, avenantNum, ndaId, tz } = req.body || {};
+  const { action, contractId, email, waiverText, signature, textSha256, avenantNum, ndaId, tz, declaredName, ackEmail } = req.body || {};
   // Jeton de connexion du freelance, seulement pour ses propres actions (version 208)
   const token = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "").trim();
   let result;
 
   if (action === "confirm") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
-    result = await handleConfirm(contractId, typeof tz === "string" ? tz : "");
+    // Version 248 : déclaration du client (nom, adresse de l'accusé de réception)
+    result = await handleConfirm(contractId, typeof tz === "string" ? tz : "", {
+      declaredName: typeof declaredName === "string" ? declaredName : "",
+      ackEmail: typeof ackEmail === "string" ? ackEmail : "",
+    });
   } else if (action === "find") {
     result = await handleFind(email);
   } else if (action === "stamp-waiver") {

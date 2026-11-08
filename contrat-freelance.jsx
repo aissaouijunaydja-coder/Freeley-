@@ -278,6 +278,9 @@ const getHistory = async () => {
       retractationWaiverText: content.retractationWaiverText || contenu.retractationWaiverText || null,
       retractationConfirmationSentAt: content.retractationConfirmationSentAt || contenu.retractationConfirmationSentAt || null,
       retractationExercisedAt: content.retractationExercisedAtServer || content.retractationExercisedAt || null,
+      // Version 248 : demande de rétractation envoyée après la fourniture du contenu numérique (le freelance décide)
+      retractationLateRequestAt: content.retractationLateRequestAtServer || content.retractationLateRequestAt || null,
+      retractationAckEmail: content.retractationAckEmail || null,
       contentDeliveredAt: content.contentDeliveredAtServer || content.contentDeliveredAt || null,
       signatureLocation: content.signatureLocation || null,
       clientPetitPro: content.clientPetitPro === true ? true : content.clientPetitPro === false ? false : null,
@@ -829,9 +832,15 @@ const submitRetractationConfirmationSent = async (contractId) => {
 // Tout passe par le serveur : il vérifie le délai, enregistre la date en base (la preuve légale), relit
 // pour vérifier, puis envoie l'accusé de réception au client et l'alerte au freelance (art. D221-5 C. conso).
 // Avant, la page du client écrivait elle-même en base, et la base le lui refusait (contrat déjà signé).
-const submitRetractationExercise = async (contractId) => {
-  const r = await callRetractionApi({ action: "confirm", contractId, tz: browserTimeZone() }); // version 247 : fuseau du client
-  if (r.ok) return { ok: true, exercisedAt: r.data.exercisedAt || new Date().toISOString() };
+// Version 248 : adresse de l'accusé de réception, même contrôle que le serveur (api/retraction.js)
+const RETRACT_EMAIL_RE = /^[^\s@<>()[\],;:"\u0000-\u001f\u007f]+@[^\s@<>()[\],;:"\u0000-\u001f\u007f]+\.[^\s@<>()[\],;:"\u0000-\u001f\u007f]{2,}$/;
+const isValidRetractEmail = (v) => { const s = String(v || "").trim(); return s.length <= 254 && RETRACT_EMAIL_RE.test(s); };
+// Version 248 : la page envoie la déclaration du client (nom, adresse de l'accusé de réception), art. D221-5 C. conso.
+// Contenu numérique déjà fourni : le serveur enregistre une demande (lateRequest), transmise au freelance qui décide.
+const submitRetractationExercise = async (contractId, declaration = {}) => {
+  const r = await callRetractionApi({ action: "confirm", contractId, tz: browserTimeZone(), declaredName: declaration.declaredName || "", ackEmail: declaration.ackEmail || "" }); // version 247 : fuseau du client
+  if (r.ok && r.data.lateRequest) return { ok: true, lateRequest: true, requestedAt: r.data.requestedAt || new Date().toISOString(), ackEmail: r.data.ackEmail || "", clientEmailSent: r.data.clientEmailSent, deliveredAt: r.data.deliveredAt || null, waivedAt: r.data.waivedAt || null, confirmationSentAt: r.data.confirmationSentAt || null };
+  if (r.ok) return { ok: true, exercisedAt: r.data.exercisedAt || new Date().toISOString(), ackEmail: r.data.ackEmail || "", clientEmailSent: r.data.clientEmailSent };
   console.error("Rétractation refusée par le serveur:", r.status, r.data);
   // right_lost (version 221) : le serveur renvoie les dates qui ont mis fin au droit, pour mettre la page à jour
   return { ok: false, reason: r.data.error || "", deliveredAt: r.data.deliveredAt || null, waivedAt: r.data.waivedAt || null, confirmationSentAt: r.data.confirmationSentAt || null };
@@ -1026,7 +1035,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "247";
+const APP_VERSION = "248";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -11324,6 +11333,26 @@ function buildAlertsFromHistory(history, profile = null) {
         contractId: c.id,
       });
     }
+
+    // Alerte 5 (version 248) : demande de rétractation envoyée après la fourniture du contenu numérique. Le contrat
+    // n'est pas annulé automatiquement : le freelance décide (et répond au client).
+    if (!c.deleted && !c.retractationExercisedAt && c.retractationLateRequestAt) {
+      retractAlerts.push({
+        id: "retract_req_" + c.id,
+        at: c.retractationLateRequestAt,
+        read: false,
+        icon: "📨",
+        accentBg: "#FFF7ED",
+        accentIcon: "#FFEDD5",
+        accentBorder: "#FDBA74",
+        badgeBg: "#EA580C",
+        badgeText: "DEMANDE",
+        title: "Demande de rétractation à examiner",
+        detail: `${c.clientName || "Ton client"} a demandé à se rétracter le ${frDate(c.retractationLateRequestAt)} pour la mission « ${c.missionTitle || "Sans titre"} », après la fourniture du contenu. Le contrat n'est pas annulé : c'est toi qui décides. Réponds-lui par email.`,
+        action: "mission",
+        contractId: c.id,
+      });
+    }
   });
   return [...retractAlerts, ...alerts];
 }
@@ -16147,11 +16176,19 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         );
         if (deliveredAt) {
           const ended = !!waivedAt && confirmed && new Date(waivedAt) <= new Date(deliveredAt);
-          return box("#F0FDF4", "#86EFAC", "#166534", <>
+          // Version 248 : le client a quand même envoyé une demande de rétractation. Le contrat n'est pas annulé : tu décides.
+          const lateAt = historyView.retractationLateRequestAt;
+          const replyTo = historyView.retractationAckEmail || historyView.form?.clientEmail || "";
+          return box(lateAt ? "#FFF7ED" : "#F0FDF4", lateAt ? "#FDBA74" : "#86EFAC", lateAt ? "#9A3412" : "#166534", <>
             ✓ <strong>Contenu fourni le {fmtAt(deliveredAt)}.</strong>{" "}
             {ended
               ? <>Comme ton client l'avait accepté le {new Date(waivedAt).toLocaleDateString("fr-FR")}, son droit de rétractation a pris fin à ce moment-là.</>
               : <>Ton client n'avait pas donné son accord avant : il garde son droit de rétractation{lastDay ? <> jusqu'au {frDate(lastDay)}</> : null}.</>}
+            {lateAt && (
+              <div data-testid="late-retract-request" style={{ marginTop:12, paddingTop:12, borderTop:"1px solid #FDBA74" }}>
+                📨 <strong>Le {fmtAt(lateAt)}, ton client a quand même envoyé une demande de rétractation.</strong> Le contrat n'est pas annulé automatiquement : c'est toi qui décides, et tu n'es pas obligé d'accepter. Réponds-lui par email{replyTo ? <> ({replyTo})</> : null}. Si le contenu lui a bien été fourni, joins la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement). Si tu acceptes sa demande, ou si le contenu ne lui avait pas vraiment été fourni, rembourse-lui les sommes reçues dans les 14 jours, par le même moyen de paiement que celui qu'il a utilisé (sauf s'il accepte expressément un autre moyen), sans frais pour lui.
+              </div>
+            )}
           </>);
         }
         if (!waivedAt) return box("#FFFBEB", "#FCD34D", "#92400E", <>
@@ -20880,6 +20917,11 @@ function ClientSignaturePage({ contractId }) {
   const [textChangedNotice, setTextChangedNotice] = useState(false); // version 232 : le prestataire a changé le contrat pendant la lecture
   const [retractConfirming, setRetractConfirming] = useState(false);
   const [retractSubmitting, setRetractSubmitting] = useState(false);
+  // Version 248 : déclaration de rétractation (nom et adresse de l'accusé de réception, déjà remplis, modifiables)
+  const [retractName, setRetractName] = useState("");
+  const [retractEmail, setRetractEmail] = useState("");
+  const [retractError, setRetractError] = useState("");
+  const [retractAckFailed, setRetractAckFailed] = useState(false);
   // Exemplaire signé en PDF, le même que celui du prestataire (version 220)
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const handleDownloadSignedPdf = async () => {
@@ -20910,12 +20952,37 @@ function ClientSignaturePage({ contractId }) {
   };
 
   const handleConfirmRetractationExercise = async () => {
+    if (retractSubmitting) return;
+    const declaredName = retractName.trim();
+    const ackEmail = retractEmail.trim();
+    if (declaredName.length < 2 || !isValidRetractEmail(ackEmail)) { setRetractError("Indiquez votre nom et une adresse email valide."); return; }
+    setRetractError("");
     setRetractSubmitting(true);
-    const r = await submitRetractationExercise(contractId);
+    const r = await submitRetractationExercise(contractId, { declaredName, ackEmail });
     setRetractSubmitting(false);
-    if (r.ok) {
-      setContractData(prev => ({ ...prev, content: { ...prev.content, retractationExercisedAt: r.exercisedAt, retractationExercisedAtServer: r.exercisedAt } }));
+    if (r.ok && r.lateRequest) {
+      // Version 248 : contenu numérique déjà fourni. La demande est transmise au prestataire, qui décide.
+      setContractData(prev => {
+        const c = prev.content || {};
+        return { ...prev, content: {
+          ...c,
+          retractationLateRequestAt: r.requestedAt,
+          retractationLateRequestAtServer: r.requestedAt,
+          retractationDeclaredName: declaredName,
+          retractationAckEmail: r.ackEmail || ackEmail,
+          contentDeliveredAtServer: r.deliveredAt || c.contentDeliveredAtServer || c.contentDeliveredAt,
+          retractationWaivedAtServer: r.waivedAt || c.retractationWaivedAtServer || c.retractationWaivedAt,
+          retractationConfirmationSentAt: r.confirmationSentAt || c.retractationConfirmationSentAt,
+        } };
+      });
+      setRetractAckFailed(r.clientEmailSent === false);
       setRetractConfirming(false);
+    } else if (r.ok) {
+      setContractData(prev => ({ ...prev, content: { ...prev.content, retractationExercisedAt: r.exercisedAt, retractationExercisedAtServer: r.exercisedAt, retractationDeclaredName: declaredName, retractationAckEmail: r.ackEmail || ackEmail } }));
+      setRetractAckFailed(r.clientEmailSent === false);
+      setRetractConfirming(false);
+    } else if (r.reason === "invalid_email") {
+      setRetractError("Cette adresse email n'a pas été acceptée. Vérifiez-la, puis réessayez.");
     } else if (r.reason === "deadline_passed") {
       setError("Le délai de rétractation de 14 jours est dépassé : la rétractation en ligne n'est plus possible.");
     } else if (r.reason === "right_lost") {
@@ -20931,7 +20998,7 @@ function ClientSignaturePage({ contractId }) {
       });
       setRetractConfirming(false);
     } else {
-      setError("Votre rétractation n'a pas pu être enregistrée. Réessayez dans quelques instants. Si le problème continue, envoyez votre décision au prestataire par email, avec le formulaire de rétractation reçu par email.");
+      setRetractError("Votre rétractation n'a pas pu être enregistrée. Réessayez dans quelques instants. Si le problème continue, envoyez votre décision au prestataire par email, avec le formulaire de rétractation reçu par email.");
     }
   };
 
@@ -21045,8 +21112,32 @@ function ClientSignaturePage({ contractId }) {
     // Version 222 : aussi pour une petite entreprise signée hors établissement (art. L221-3 C. conso)
     const isConsumer = isConsumerLikeContract(content.form, content);
     const rightEndedByDelivery = isParticulier && isDigital &&!!waivedAtC && !!content.retractationConfirmationSentAt && !!deliveredAtC && new Date(waivedAtC) <= new Date(deliveredAtC);
-    const canRetract = isConsumer && withinRetractDeadline && !retractationExercised && !rightEndedByDelivery;
+    // Version 248 : le bouton reste affiché pendant tout le délai (art. L221-21), même après la fourniture du contenu
+    // numérique. La demande est alors transmise au prestataire, qui décide : le contrat n'est pas annulé automatiquement.
+    const lateRequestAtC = content.retractationLateRequestAtServer || content.retractationLateRequestAt || null;
+    const canRetract = isConsumer && withinRetractDeadline && !retractationExercised && !lateRequestAtC;
     const fmtLong = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
+    // Déclaration de rétractation (version 248, art. D221-5 C. conso) : le client confirme ou corrige son nom et l'adresse
+    // de l'accusé de réception ; la page identifie le contrat
+    const ackEmailC = content.retractationAckEmail || content.form?.clientEmail || "";
+    const retractMission = content.missionTitle || content.form?.missionTitle || "Sans titre";
+    const retractNum = (String(contractText).match(/CP-\d{4}-\d{3,5}/) || [])[0] || "";
+    const retractSignedAt = content.signedByClientAtServer || content.signedByClientAt;
+    const retractFreelance = contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract)) || "le prestataire";
+    const retractNameOk = retractName.trim().length >= 2;
+    const retractEmailOk = isValidRetractEmail(retractEmail);
+    const retractCanSend = !retractSubmitting && retractNameOk && retractEmailOk;
+    const openRetractDeclaration = () => {
+      setRetractName(String(content.form?.clientName || content.clientName || content.form?.clientCompany || "").trim());
+      setRetractEmail(String(content.form?.clientEmail || "").trim());
+      setRetractError("");
+      setRetractConfirming(true);
+    };
+    const retractInput = { width:"100%", padding:"11px 12px", border:"1.5px solid #E8E0D0", borderRadius:10, fontSize:16, fontFamily:"'DM Sans', sans-serif", color:"#1B2E4B", background:"#fff", boxSizing:"border-box", marginBottom:12 };
+    const retractLabel = { display:"block", fontSize:12, fontWeight:600, color:"#5A6B80", marginBottom:5 };
+    const ackNote = retractAckFailed
+      ? "L'accusé de réception n'a pas pu vous être envoyé par email : gardez une capture de cet écran comme preuve de votre demande."
+      : ackEmailC ? `Un accusé de réception vous a été envoyé à ${ackEmailC}.` : "Gardez une capture de cet écran comme preuve de votre demande.";
 
     return (
       <div style={wrap}>
@@ -21061,37 +21152,37 @@ function ClientSignaturePage({ contractId }) {
               <div style={{ fontSize:30, marginBottom:8 }}>✓</div>
               <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Rétractation enregistrée</div>
               <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
-                Votre demande a été reçue le {new Date(content.retractationExercisedAtServer || content.retractationExercisedAt).toLocaleDateString("fr-FR")}.{" "}{content.form?.clientEmail ? "Un email de confirmation vous a été envoyé." : "Gardez une capture de cet écran comme preuve de votre demande."}
+                Votre rétractation a été reçue le {fmtLong(content.retractationExercisedAtServer || content.retractationExercisedAt)} (heure de Paris).{" "}{ackNote}
               </div>
             </div>
           )}
 
-          {/* Contenu numérique fourni, avec l'accord du client : le droit de rétractation a pris fin (version 221) */}
-          {rightEndedByDelivery && !retractationExercised && (
+          {/* Version 248 : demande envoyée après la fourniture du contenu numérique, transmise au prestataire qui décide */}
+          {lateRequestAtC && !retractationExercised && (
+            <div data-testid="retract-late-done" style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
+              <div style={{ fontSize:30, marginBottom:8 }}>📨</div>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Demande de rétractation transmise</div>
+              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
+                Votre demande du {fmtLong(lateRequestAtC)} (heure de Paris) a été transmise au prestataire{deliveredAtC ? <>, qui a indiqué vous avoir fourni le contenu numérique le {fmtLong(deliveredAtC)}</> : null}. C'est lui qui vous répondra.{" "}{ackNote}
+              </div>
+              {content.form?.freelanceEmail && (
+                <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginTop:8 }}>Pour le contacter : {content.form.freelanceEmail}</div>
+              )}
+            </div>
+          )}
+
+          {/* Contenu numérique fourni, avec l'accord du client : le droit de rétractation a pris fin (version 221).
+              Version 248 : le bouton reste affiché, la demande est transmise au prestataire. */}
+          {rightEndedByDelivery && !retractationExercised && !lateRequestAtC && (
             <div style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", border:"1px solid #BFDBFE" }}>
               <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:8 }}>📦 Contenu numérique fourni</div>
               <div style={{ fontSize:12.5, color:"#2C3E50", lineHeight:1.6 }}>
                 Le prestataire a indiqué vous avoir fourni le contenu numérique le {fmtLong(deliveredAtC)}. Comme vous l'aviez accepté le {fmtLong(waivedAtC)}, votre droit de rétractation a pris fin au début de cette fourniture (article L221-28, 13°, du Code de la consommation).
               </div>
               <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginTop:8 }}>
-                Si vous n'avez rien reçu, contactez le prestataire{content.form?.freelanceEmail ? ` : ${content.form.freelanceEmail}` : ""}.
-              </div>
-            </div>
-          )}
-
-          {canRetract && retractConfirming && (
-            <div style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:8 }}>Confirmer la rétractation ?</div>
-              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginBottom:14 }}>
-                Cette action annule le contrat. Elle est définitive et le prestataire en sera informé immédiatement.
-              </div>
-              <div style={{ display:"flex", gap:10 }}>
-                <button onClick={() => setRetractConfirming(false)} style={{ flex:"0 0 auto", padding:"11px 16px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:12.5, color:"#5A6B80", fontWeight:500 }}>Annuler</button>
-                <button
-                  onClick={handleConfirmRetractationExercise}
-                  disabled={retractSubmitting}
-                  style={{ flex:1, padding:"11px 16px", background: !retractSubmitting ? "#DC2626" : "#D1D5DB", border:"none", borderRadius:10, cursor: !retractSubmitting ? "pointer" : "not-allowed", fontSize:13, fontWeight:700, color:"#fff" }}
-                >{retractSubmitting ? "Envoi…" : "Confirmer la rétractation"}</button>
+                {canRetract
+                  ? <>Si vous n'avez rien reçu, ou si vous souhaitez quand même vous rétracter, vous pouvez envoyer une demande avec le bouton « Renoncer au contrat ici », plus bas. Elle sera transmise au prestataire, qui vous répondra.{content.form?.freelanceEmail ? ` Vous pouvez aussi le contacter : ${content.form.freelanceEmail}.` : ""}</>
+                  : <>Si vous n'avez rien reçu, contactez le prestataire{content.form?.freelanceEmail ? ` : ${content.form.freelanceEmail}` : ""}.</>}
               </div>
             </div>
           )}
@@ -21107,7 +21198,7 @@ function ClientSignaturePage({ contractId }) {
           {signedPdfButton}
 
           {/* Contenu numérique accepté mais pas encore fourni : le client peut encore se rétracter (version 221) */}
-          {canRetract && !retractConfirming && isDigital && !!waivedAtC && !!content.retractationConfirmationSentAt && (
+          {canRetract && !retractConfirming && isDigital && !!waivedAtC && !!content.retractationConfirmationSentAt && !rightEndedByDelivery && (
             <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, background:"#fff", border:"1px solid #E8E0D0", borderRadius:10, padding:"12px 14px", marginBottom:10 }}>
               Vous avez accepté, le {fmtLong(waivedAtC)}, que le contenu numérique vous soit fourni avant la fin du délai de rétractation. Votre droit de rétractation prendra fin dès le début de cette fourniture. Tant que le contenu ne vous a pas été fourni, vous pouvez encore vous rétracter.
             </div>
@@ -21115,9 +21206,49 @@ function ClientSignaturePage({ contractId }) {
 
           {canRetract && !retractConfirming && (
             <button
-              onClick={() => setRetractConfirming(true)}
+              onClick={openRetractDeclaration}
               style={{ width:"100%", padding:"13px 18px", background:"#fff", border:"1.5px solid #DC2626", borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:700, color:"#DC2626" }}
             >Renoncer au contrat ici</button>
+          )}
+
+          {/* Version 248 : déclaration de rétractation (art. L221-21 et D221-5 C. conso), à la place du bouton. Nom et email
+              déjà remplis et modifiables, contrat identifié, puis « Confirmer la rétractation ». */}
+          {canRetract && retractConfirming && (
+            <div data-testid="retract-declaration" style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", border:"1.5px solid #FCA5A5" }}>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Déclaration de rétractation</div>
+              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginBottom:14 }}>Vérifiez ces informations et corrigez-les si besoin, puis confirmez.</div>
+              <label htmlFor="retract-name" style={retractLabel}>Votre nom</label>
+              <input id="retract-name" value={retractName} onChange={e => setRetractName(e.target.value)} maxLength={120} autoComplete="name" style={retractInput} />
+              <div style={retractLabel}>Contrat concerné</div>
+              <div data-testid="retract-contract-id" style={{ fontSize:12.5, color:"#2C3E50", lineHeight:1.6, background:"#FAF8F3", border:"1px solid #E8E0D0", borderRadius:10, padding:"10px 12px", marginBottom:12 }}>
+                « {retractMission} »{retractNum ? <> · n° {retractNum}</> : null}<br />
+                {retractSignedAt
+                  ? <>Signé le {new Date(retractSignedAt).toLocaleDateString("fr-FR", { day:"numeric", month:"long", year:"numeric", timeZone:"Europe/Paris" })} avec {retractFreelance}</>
+                  : <>Avec {retractFreelance}</>}
+              </div>
+              <label htmlFor="retract-email" style={retractLabel}>Email pour recevoir l'accusé de réception</label>
+              <input id="retract-email" type="email" value={retractEmail} onChange={e => setRetractEmail(e.target.value)} maxLength={254} autoComplete="email" inputMode="email" placeholder="votre@email.com"
+                style={{ ...retractInput, ...(retractEmail.trim() && !retractEmailOk ? { border:"1.5px solid #DC2626" } : {}) }} />
+              {retractEmail.trim() && !retractEmailOk && (
+                <div style={{ fontSize:11.5, color:"#B91C1C", marginTop:-6, marginBottom:10 }}>Cette adresse email ne semble pas valide.</div>
+              )}
+              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginBottom:14 }}>
+                {rightEndedByDelivery
+                  ? "Le prestataire a indiqué vous avoir déjà fourni le contenu numérique : votre demande lui sera transmise, et c'est lui qui vous répondra. Vous recevrez un accusé de réception par email, avec la date et l'heure de votre demande."
+                  : "En confirmant, vous informez le prestataire que vous exercez votre droit de rétractation pour ce contrat. Vous recevrez un accusé de réception par email, avec la date et l'heure de votre demande."}
+              </div>
+              {retractError && (
+                <div role="alert" style={{ fontSize:12, color:"#991B1B", background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:8, padding:"10px 12px", marginBottom:12, lineHeight:1.5 }}>{retractError}</div>
+              )}
+              <div style={{ display:"flex", gap:10 }}>
+                <button onClick={() => { setRetractConfirming(false); setRetractError(""); }} style={{ flex:"0 0 auto", padding:"11px 16px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:12.5, color:"#5A6B80", fontWeight:500 }}>Annuler</button>
+                <button
+                  onClick={handleConfirmRetractationExercise}
+                  disabled={!retractCanSend}
+                  style={{ flex:1, padding:"11px 16px", background: retractCanSend ? "#DC2626" : "#D1D5DB", border:"none", borderRadius:10, cursor: retractCanSend ? "pointer" : "not-allowed", fontSize:13, fontWeight:700, color:"#fff" }}
+                >{retractSubmitting ? "Envoi…" : "Confirmer la rétractation"}</button>
+              </div>
+            </div>
           )}
           <ClientLegalNote who="prestataire" />
         </div>
