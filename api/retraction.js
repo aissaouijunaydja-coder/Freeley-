@@ -9,6 +9,8 @@
 //   - action: "client-sign"  → le client signe à distance (enregistrée par le serveur, puis confirmation)
 //   - action: "stamp-early-payment" → heure serveur de la réponse du freelance qui demande un paiement
 //                           pendant les 7 jours d'un contrat hors établissement (art. L221-10)
+//   - action: "precontract-info" → signature en présence hors établissement, le client choisit l'email au lieu du
+//                           papier : informations sur le contrat envoyées avant la signature (version 249)
 //   - action: "send-link" → juste après la signature du client (en présence OU à distance) :
 //                           envoi automatique de la CONFIRMATION DU CONTRAT sur support durable (email),
 //                           avec le texte du contrat, et pour un client particulier l'information officielle
@@ -60,6 +62,12 @@
 // accepté pour un onglet resté ouvert sur une ancienne version) ; délai de rétractation compté dans le fuseau du
 // client s'il vit dans un territoire français, jamais plus court qu'à l'heure de Paris ; rappel au freelance :
 // rembourser par le même moyen de paiement que le client, sans frais pour lui (art. L221-24).
+//
+// Version 249 : on suit la loi. Pas de droit de rétractation pour un contrat signé en face à face dans les locaux du
+// freelance, ni pour une réparation urgente demandée par le client (art. L221-28, 8°) : l'appli l'envoie avec la
+// signature en présence (« retractationExcluded »), le serveur vérifie le lieu ; les contrats déjà signés gardent leurs
+// 14 jours. Hors établissement : le client choisit papier ou email (art. L221-8 et L221-9) ; par email, action
+// « precontract-info » : informations envoyées avant la signature, accord daté par le serveur.
 //
 // Version 248 : déclaration de rétractation (art. L221-21 et D221-5 C. conso). La page du client envoie le nom et
 // l'adresse email qu'il a confirmés ou corrigés ; l'accusé de réception part à cette adresse, avec le contenu de la
@@ -388,6 +396,15 @@ function isConsumerLike(form = {}, content = {}) {
   return form.typeClient === "particulier"
     || (content.signatureLocation === "hors_etablissement" && content.clientPetitPro === true);
 }
+// Version 249 : pas de droit de rétractation (signé dans les locaux du freelance, ou réparation urgente). Mêmes textes que
+// RETRACTATION_EXCLUDED_TEXT dans contrat-freelance.jsx.
+const EXCLUDED_TEXT = {
+  locaux: "Contrat signé dans les locaux du prestataire, en face à face : la loi ne prévoit pas de droit de rétractation dans ce cas.",
+  urgence: "Réparation urgente demandée par le client à son domicile : la loi ne prévoit pas de droit de rétractation pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-28, 8°, du Code de la consommation).",
+};
+const excludedKey = (form = {}, content = {}) => (isConsumerLike(form, content) && EXCLUDED_TEXT[content.retractationExcluded] ? content.retractationExcluded : null);
+// Accord du client pour l'email au lieu du papier (même texte que COPY_MEDIUM_TEXT.email dans contrat-freelance.jsx)
+const copyEmailConsentText = (email) => `J'accepte de recevoir par email, à l'adresse ${email}, les informations sur ce contrat et mon exemplaire signé, au lieu du papier.`;
 // Contenu numérique déjà existant : l'appli ne le propose que pour un particulier. Un contrat pro peut garder la case
 // d'un essai précédent : elle ne compte pas (le contrat pro est toujours écrit comme une prestation). Version 209.
 function isDigitalContent(form = {}) {
@@ -455,6 +472,7 @@ async function handleConfirm(contractId, tz, declared = {}) {
   const form = resolveStatus(content.form || {}, content.contract);
   if (row.status !== "signed") return { status: 400, body: { error: "not_signed" } };
   if (!isConsumerLike(form, content)) return { status: 400, body: { error: "not_particulier" } };
+  if (excludedKey(form, content)) return { status: 400, body: { error: "no_right" } }; // version 249
   const deadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt, tz); // version 247 : fuseau du client
   if (deadline && Date.now() > deadline.getTime()) return { status: 400, body: { error: "deadline_passed" } };
 
@@ -681,6 +699,16 @@ function cleanSignContext(ctx) {
     out.clientPetitProLabel = str(c.clientPetitProLabel, 300);
     out.clientPetitProDeclaredAt = str(c.clientPetitProDeclaredAt, 40);
   }
+  // Version 249 : pas de droit de rétractation, seulement s'il correspond au lieu déclaré (locaux, réparation urgente)
+  if ((c.signatureLocation === "locaux" || c.signatureLocation === "urgence") && c.retractationExcluded === c.signatureLocation) {
+    out.retractationExcluded = c.signatureLocation;
+  }
+  // Version 249 : papier ou email, au choix du client, pour un contrat signé hors établissement
+  if ((c.signatureLocation === "hors_etablissement" || c.signatureLocation === "urgence") && (c.copyMedium === "email" || c.copyMedium === "papier")) {
+    out.copyMedium = c.copyMedium;
+    out.copyMediumLabel = str(c.copyMediumLabel, 300);
+    out.copyMediumChosenAt = str(c.copyMediumChosenAt, 40);
+  }
   Object.keys(out).forEach((k) => out[k] === undefined && delete out[k]);
   return out;
 }
@@ -717,6 +745,64 @@ async function handleSignInPerson(contractId, token, body, req) {
   let confirmation = null;
   try { confirmation = (await handleSendLink(contractId)).body; } catch (e) { console.error("retraction/sign-in-person: confirmation", e); }
   return { status: 200, body: { ok: true, saved: true, signedAt: nowIso, confirmation } };
+}
+
+// ── action: "precontract-info" — signature en présence hors établissement (version 249) ──
+// Sur l'écran de signature, le client accepte de recevoir par email, au lieu du papier, les informations sur le contrat
+// et son exemplaire signé (art. L221-8 et L221-9 C. conso). Réservé au freelance propriétaire du contrat (jeton vérifié),
+// avant la signature. Le serveur envoie tout de suite les informations (texte du contrat, information et formulaire de
+// rétractation, ou absence de droit pour une réparation urgente) et enregistre l'accord avec son heure.
+async function handlePrecontractInfo(contractId, token, body) {
+  const userId = await userIdFromToken(token);
+  if (!userId) return { status: 401, body: { error: "unauthorized" } };
+  const { data: row, error } = await supabase.from("contracts").select("content, user_id, status").eq("id", contractId).single();
+  if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
+  if (row.user_id !== userId) return { status: 403, body: { error: "forbidden" } };
+  if (row.status === "signed") return { status: 400, body: { error: "already_signed" } };
+  const content = parseContent(row.content);
+  const ctx = cleanSignContext(body.signContext);
+  if (ctx.signatureLocation !== "hors_etablissement" && ctx.signatureLocation !== "urgence") return { status: 400, body: { error: "not_off_premises" } };
+  const form = { ...resolveStatus(content.form || {}, content.contract) };
+  if (!isConsumerLike(form, { ...content, ...ctx })) return { status: 400, body: { error: "not_consumer" } };
+  const clientEmail = String(form.clientEmail || content.clientEmail || "").trim();
+  if (!isValidEmail(clientEmail)) return { status: 400, body: { error: "no_client_email" } };
+  if (!form.freelanceEmail) form.freelanceEmail = (await getFreelanceAuthEmail(row.user_id)) || "";
+  const clientName = String(form.clientName || content.clientName || "").trim();
+  const freelanceName = legalFreelanceName(form) || "votre prestataire";
+  const missionTitle = content.missionTitle || form.missionTitle || "votre mission";
+  const link = `${SITE_URL}/?sign=${contractId}`;
+  const nowIso = new Date().toISOString();
+  const consentText = copyEmailConsentText(clientEmail);
+  const who = coords(form);
+  const blocks = [
+    `Bonjour${clientName ? " " + clientName : ""},`,
+    `Vous avez accepté, le ${fmtParis(nowIso)} (heure de Paris), de recevoir par email plutôt que sur papier les informations sur ce contrat et votre exemplaire signé :\n« ${consentText} »`,
+    `Voici les informations à connaître avant de signer le contrat « ${missionTitle} » avec ${freelanceName}${who ? ` (${who})` : ""}. Votre exemplaire signé vous sera envoyé par email juste après la signature.`,
+    "────────────────────────────",
+  ];
+  if (ctx.signatureLocation === "urgence") {
+    blocks.push(EXCLUDED_TEXT.urgence);
+  } else {
+    if (form.typeClient !== "particulier") blocks.push("Votre prestataire a indiqué que votre entreprise emploie cinq salariés au plus et que ce contrat, signé hors de ses locaux, n'entre pas dans votre activité principale. Vous bénéficiez donc, comme un particulier, du droit de rétractation (article L221-3 du Code de la consommation).");
+    blocks.push(buildNotice({ ...form, contenuNumeriquePret: isDigitalContent(form) }, link));
+    blocks.push("────────────────────────────");
+    blocks.push(buildForm(form));
+  }
+  const contractText = (content.contract || "").trim();
+  if (contractText) {
+    blocks.push("────────────────────────────");
+    blocks.push(`TEXTE DU CONTRAT PROPOSÉ\n\n${contractText}`);
+  }
+  blocks.push(`Cordialement,\n${freelanceName}\n(message envoyé par Freeley pour le compte de ${freelanceName})`);
+  try {
+    await sendMail({ from: FROM, to: clientEmail, subject: `Informations avant la signature de votre contrat — ${missionTitle}`, text: blocks.join("\n\n") });
+  } catch (e) {
+    console.error("retraction/precontract-info: échec envoi email", e);
+    return { status: 500, body: { error: "send_failed" } };
+  }
+  const saved = await saveContent(contractId, { ...content, copyMedium: "email", copyMediumConsentText: consentText, copyMediumConsentAt: nowIso, precontractInfoSentAt: nowIso, precontractInfoEmail: clientEmail }, row.status, "precontractInfoSentAt");
+  if (!saved) return { status: 500, body: { error: "save_failed" } };
+  return { status: 200, body: { ok: true, sentAt: nowIso } };
 }
 
 // ── Avenants (version 232) : à distance (le client, sans compte) ou en présence (freelance connecté) ──
@@ -888,6 +974,16 @@ async function handleSendLink(contractId) {
     `Ce courriel constitue la confirmation, sur un support durable, de votre contrat « ${missionTitle} » conclu avec ${freelanceName} et signé le ${signedStr}.`,
     `Vous pouvez consulter votre contrat et télécharger votre exemplaire signé (PDF) à tout moment sur cette page :\n${link}`,
   ];
+  // Version 249 : signé en présence hors établissement, papier ou email au choix du client
+  if (content.signatureProof && content.signatureProof.mode === "presence") {
+    if (content.copyMedium === "email") {
+      blocks.push(`Comme vous l'avez accepté${content.copyMediumConsentAt ? " le " + fmt(content.copyMediumConsentAt) : ""}, cet email vous est envoyé à la place de l'exemplaire papier : gardez-le.`);
+    } else if (content.copyMedium === "papier") {
+      blocks.push("Vous avez choisi de recevoir votre exemplaire sur papier : le prestataire vous le remet. Cet email vous donne en plus le lien vers votre contrat.");
+    }
+  }
+  // Version 249 : pas de droit de rétractation (signé dans les locaux du freelance, ou réparation urgente)
+  const excluded = excludedKey(form, content);
 
   if (isParticulier && waivedAt && content.retractationWaiverText) {
     // Contenu numérique : le client a donné son accord (version 208) ; prestation : il l'a demandé
@@ -899,7 +995,10 @@ async function handleSendLink(contractId) {
     }
   }
 
-  if (isParticulier) {
+  if (excluded) {
+    blocks.push("────────────────────────────");
+    blocks.push(EXCLUDED_TEXT[excluded]);
+  } else if (isParticulier) {
     blocks.push("────────────────────────────");
     if (isPetitPro) {
       blocks.push("Votre prestataire a indiqué que votre entreprise emploie cinq salariés au plus et que ce contrat, signé hors de ses locaux, n'entre pas dans votre activité principale. Vous bénéficiez donc, comme un particulier, du droit de rétractation (article L221-3 du Code de la consommation).");
@@ -981,6 +1080,9 @@ export default async function handler(req, res) {
   } else if (action === "content-delivered") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
     result = await handleContentDelivered(contractId, token);
+  } else if (action === "precontract-info") {
+    if (!contractId) return res.status(400).json({ error: "contractId manquant" });
+    result = await handlePrecontractInfo(contractId, token, req.body || {});
   } else if (action === "sign-in-person") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
     result = await handleSignInPerson(contractId, token, req.body || {}, req);

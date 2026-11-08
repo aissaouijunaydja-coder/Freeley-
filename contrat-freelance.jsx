@@ -283,6 +283,8 @@ const getHistory = async () => {
       retractationAckEmail: content.retractationAckEmail || null,
       contentDeliveredAt: content.contentDeliveredAtServer || content.contentDeliveredAt || null,
       signatureLocation: content.signatureLocation || null,
+      retractationExcluded: content.retractationExcluded || null, // version 249 : pas de droit de rétractation (locaux, urgence)
+      copyMedium: content.copyMedium || null, // version 249 : papier ou email, au choix du client (hors établissement)
       clientPetitPro: content.clientPetitPro === true ? true : content.clientPetitPro === false ? false : null,
       signatureProof: content.signatureProof || null, // version 232
       acompteInvoiceNumber: content.acompteInvoiceNumber || null, // version 232 : référence des virements
@@ -521,6 +523,23 @@ const PETIT_PRO_ANSWERS = {
 // « c » : le contenu enregistré du contrat (ou une fiche de Mes contrats). Même règle dans api/retraction.js.
 const isConsumerLikeContract = (form, c) => (form || {}).typeClient === "particulier"
   || ((c || {}).signatureLocation === "hors_etablissement" && (c || {}).clientPetitPro === true);
+// Version 249 : on suit la loi. Pas de droit de rétractation pour un contrat signé en face à face dans les locaux du
+// freelance, ni pour une réparation urgente demandée par le client à son domicile (pièces et travail strictement
+// nécessaires, art. L221-28, 8° C. conso). Seulement pour les contrats signés en présence à partir de cette version
+// (« retractationExcluded », vérifié par le serveur) : les contrats déjà signés gardent les 14 jours qui leur ont été promis.
+const RETRACTATION_EXCLUDED_TEXT = {
+  locaux: "Contrat signé dans les locaux du prestataire, en face à face : la loi ne prévoit pas de droit de rétractation dans ce cas.",
+  urgence: "Réparation urgente demandée par le client à son domicile : la loi ne prévoit pas de droit de rétractation pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-28, 8°, du Code de la consommation).",
+};
+const retractationExcludedKey = (form, c) => (isConsumerLikeContract(form, c) && RETRACTATION_EXCLUDED_TEXT[(c || {}).retractationExcluded] ? (c || {}).retractationExcluded : null);
+const hasRetractationRight = (form, c) => isConsumerLikeContract(form, c) && !retractationExcludedKey(form, c);
+// Version 249 : contrat signé hors établissement (chez le client ou ailleurs, ou réparation urgente). La loi prévoit le
+// papier pour les informations et l'exemplaire signé, et l'email seulement avec l'accord du client (art. L221-8 et
+// L221-9 C. conso). Le client choisit sur l'écran de signature : son choix est daté et enregistré dans le contrat.
+const COPY_MEDIUM_TEXT = {
+  email: (email) => `J'accepte de recevoir par email, à l'adresse ${email}, les informations sur ce contrat et mon exemplaire signé, au lieu du papier.`,
+  papier: () => "Je souhaite recevoir sur papier, remis par le prestataire, les informations sur ce contrat et mon exemplaire signé.",
+};
 
 // SIRET (14 chiffres) ou SIREN (9 chiffres) écrit par groupes : 130 333 891 00013. Tout autre format reste tel quel.
 const fmtSiret = (v) => {
@@ -882,6 +901,14 @@ const submitInPersonSignature = async (contractId, payload) => {
   console.error("[Freeley] Signature en présence refusée par le serveur :", r.status, r.data);
   return { ok: false, fallback: r.status === 0 || r.status >= 500, reason: r.data.error || "" };
 };
+// Version 249 : signature en présence hors établissement. Le client accepte l'email au lieu du papier : le serveur lui
+// envoie tout de suite les informations sur le contrat (texte, information et formulaire de rétractation) et date son accord.
+const sendPrecontractInfo = async (contractId, ctx) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const r = await callRetractionApi({ action: "precontract-info", contractId, signContext: ctx }, session?.access_token);
+  if (!r.ok) console.error("[Freeley] Informations avant signature non envoyées :", r.status, r.data);
+  return { ok: r.ok, reason: r.data.error || "" };
+};
 const submitAvenantInPersonSignature = async (contractId, avenantNum, payload) => {
   const { data: { session } } = await supabase.auth.getSession();
   const r = await callRetractionApi({ action: "avenant-sign-in-person", contractId, avenantNum, ...payload }, session?.access_token);
@@ -1035,7 +1062,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "248";
+const APP_VERSION = "249";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -3716,7 +3743,7 @@ const downloadSignedContractForClient = async (contractId) => {
     freelanceSignature: c.freelanceSignature || null, clientSignature: c.clientSignature || null,
     signedAt: c.signedByClientAtServer || c.signedByClientAt || null,
     retractationWaivedAt: c.retractationWaivedAtServer || c.retractationWaivedAt || null,
-    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null, clientPetitPro: c.clientPetitPro === true, signatureProof: c.signatureProof || null },
+    extra: { signatureLocation: c.signatureLocation || null, signedByFreelanceAt: c.signedByFreelanceAt || null, clientPetitPro: c.clientPetitPro === true, signatureProof: c.signatureProof || null, retractationExcluded: c.retractationExcluded || null },
     profile: { tvaNumber: tvaFromText },
   });
   doc.save(fileName);
@@ -3772,6 +3799,8 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   const pFreelanceSignedAt = pExtra.signedByFreelanceAt || null;
   // Client protégé comme un consommateur : particulier, ou petite entreprise signée hors établissement (version 222)
   const pConsumer = isConsumerLikeContract(pForm, pExtra);
+  // Version 249 : contrat signé dans les locaux du freelance ou réparation urgente : pas de droit de rétractation
+  const pExcluded = retractationExcludedKey(pForm, pExtra);
   // Contenu numérique déjà existant : seulement avec un particulier (un contrat pro peut garder la case d'un essai)
   const pDigital = pForm.typeClient === "particulier" && !!pForm.contenuNumeriquePret;
   const pPayFrom = pConsumer && pExtra.signatureLocation === "hors_etablissement" && pSignedAt
@@ -4273,7 +4302,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   y += 68;
 
   // ── Mention renonciation au délai de rétractation (particulier, ou petite entreprise protégée : version 222) ──
-  if (pConsumer) {
+  if (pConsumer && !pExcluded) {
     if (pRetractationWaivedAt) {
       doc.setFillColor(...GREEN); doc.circle(ML + 2.5, y - 1.3, 2, "F");
       doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...GREEN);
@@ -4288,6 +4317,12 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
         : "Démarrage avant la fin du délai de rétractation non demandé à ce jour", ML + 7, y);
     }
     y += 8;
+  } else if (pExcluded) {
+    doc.setDrawColor(...AMBER_BORDER); doc.setLineWidth(0.6); doc.circle(ML + 2.5, y - 1.3, 2);
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...DARK);
+    const exLines = doc.splitTextToSize(RETRACTATION_EXCLUDED_TEXT[pExcluded], cw - 7);
+    doc.text(exLines, ML + 7, y);
+    y += 8 + (exLines.length - 1) * 3.4;
   }
 
   // Mention finale
@@ -4305,7 +4340,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
 
   // ── Annexe : information officielle sur la rétractation + formulaire (particulier, ou petite entreprise
   // signée hors établissement, art. L221-3 C. conso : version 222) ──
-  if (pConsumer) {
+  if (pConsumer && !pExcluded) {
     const annexTitles = ["Droit de rétractation", "Effets de rétractation", "Perte du droit de rétractation", "Modèle de formulaire de rétractation"];
     const writeAnnex = (txt) => {
       txt.split("\n\n").forEach(par => {
@@ -6061,7 +6096,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         historyView={historyView}
         setHistoryView={setHistoryView}
         onBack={() => goToScreen("app")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null })}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null })}
         onDelete={async (id) => { await deleteFromHistory(id); const hist = await getHistory(); setHistory(hist); if (historyView?.id === id) setHistoryView(null); }}
         onDuplicate={async (entry) => {
           const dupForm = { ...(entry.form || {}), missionTitle: (entry.missionTitle || entry.form?.missionTitle || "") + " (copie)" };
@@ -6136,7 +6171,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       <ArchivesPage
         history={history}
         onBack={() => goToScreen("history")}
-        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null })}
+        onDownloadPDF={(entry) => downloadPDF(entry.form, entry.contract, entry.freelanceSignature, entry.clientSignature, entry.signedByClientAt, entry.retractationWaivedAt, { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null })}
         profile={profile}
         authUser={authUser}
         onRestore={async (id) => {
@@ -8404,7 +8439,7 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
       tasks.push({ name: `Contrats/${cNum ? cNum + " - " : ""}${title} - ${who}${entry.deleted ? " (archivé)" : ""}.pdf`, make: () => buildContractPdfDoc({
         form, contract: entry.contract, freelanceSignature: entry.freelanceSignature, clientSignature: entry.clientSignature,
         signedAt: entry.signedByClientAt, retractationWaivedAt: entry.retractationWaivedAt,
-        extra: { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null },
+        extra: { signatureLocation: entry.signatureLocation, signedByFreelanceAt: entry.signedByFreelanceAt, clientPetitPro: entry.clientPetitPro === true, signatureProof: entry.signatureProof || null, retractationExcluded: entry.retractationExcluded || null },
         profile,
       }).doc });
     }
@@ -9574,7 +9609,7 @@ const latePaymentClauseKind = (line) => {
   return null;
 };
 
-function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, signedByFreelanceAt, retractationWaivedAt, consumerLike }) {
+function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSignature, clientSignature, signedByClientAt, signedByFreelanceAt, retractationWaivedAt, consumerLike, retractationExcluded }) {
   // Formulaire sans statut juridique : on suit le texte du contrat (« Nom EI »)
   const form = resolveLegalStatus(rawForm, text);
   if (!text) return null;
@@ -9844,8 +9879,17 @@ function MarkdownContract({ text, form: rawForm, signatureStatus, freelanceSigna
                   <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#B45309" }}>En attente de signature…</span>
                 </div>
               )}
+              {/* Version 249 : signé dans les locaux du freelance, ou réparation urgente : pas de droit de rétractation */}
+              {retractationExcluded && (
+                <div style={{ marginTop: 10 }}>
+                  <div data-testid="no-retract-pill" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: 20, padding: "5px 12px" }}>
+                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#64748B" }} />
+                    <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#334155" }}>{retractationExcluded === "urgence" ? "Sans droit de rétractation : réparation urgente" : "Sans droit de rétractation : signé dans tes locaux"}</span>
+                  </div>
+                </div>
+              )}
               {/* Particulier, ou petite entreprise protégée (art. L221-3 C. conso, version 222) */}
-              {(form?.typeClient === "particulier" || consumerLike) && (
+              {(form?.typeClient === "particulier" || consumerLike) && !retractationExcluded && (
                 <div style={{ marginTop: 10 }}>
                   {retractationWaivedAt ? (
                     <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 20, padding: "5px 12px" }}>
@@ -16161,8 +16205,15 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         </div>
       </div>
 
+      {/* Version 249 : le client a choisi de recevoir son exemplaire sur papier (contrat signé chez lui ou ailleurs) */}
+      {historyView.copyMedium === "papier" && historyView.signatureStatus === "signed" && historyView.signedByClientAt && Date.now() - new Date(historyView.signedByClientAt).getTime() < 15 * 86400000 && (
+        <div data-testid="paper-copy-reminder" className="fade-up" style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, padding:"14px 18px", marginBottom:24, fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
+          📄 <strong>Ton client a choisi de recevoir son exemplaire sur papier.</strong> Remets-lui un exemplaire daté et signé du contrat{hasRetractationRight(historyView.form, historyView) ? ", avec le formulaire de rétractation" : ""} : imprime-le avec le bouton « Télécharger PDF », en haut de cette fiche.
+        </div>
+      )}
+
       {/* Contenu numérique déjà existant : fourniture du contenu et fin du droit de rétractation (version 221) */}
-      {historyView.form?.typeClient === "particulier" && historyView.form?.contenuNumeriquePret && historyView.signatureStatus === "signed" && !historyView.retractationExercisedAt && (() => {
+      {historyView.form?.typeClient === "particulier" && historyView.form?.contenuNumeriquePret && historyView.signatureStatus === "signed" && !historyView.retractationExercisedAt && !retractationExcludedKey(historyView.form, historyView) && (() => {
         const waivedAt = historyView.retractationWaivedAt;
         const confirmed = !!historyView.retractationConfirmationSentAt;
         const deliveredAt = historyView.contentDeliveredAt;
@@ -16389,7 +16440,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
       {/* Contract text — rendered Markdown */}
       <div className="fade-up fade-up-2">
-        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} signedByFreelanceAt={historyView.signedByFreelanceAt} retractationWaivedAt={historyView.retractationWaivedAt} consumerLike={isConsumerLikeContract(historyView.form, historyView)} />
+        <MarkdownContract text={historyView.contract} form={historyView.form} signatureStatus={historyView.signatureStatus} freelanceSignature={historyView.freelanceSignature} clientSignature={historyView.clientSignature} signedByClientAt={historyView.signedByClientAt} signedByFreelanceAt={historyView.signedByFreelanceAt} retractationWaivedAt={historyView.retractationWaivedAt} consumerLike={isConsumerLikeContract(historyView.form, historyView)} retractationExcluded={retractationExcludedKey(historyView.form, historyView)} />
         {/* Version 232 : preuve de signature et verrouillage du contrat signé */}
         <SignatureProofBlock proof={historyView.signatureProof} signed={historyView.signatureStatus === "signed" && !historyView.isStandaloneInvoice} />
       </div>
@@ -19094,6 +19145,18 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const choosePetitPro = (key) => { setPetitPro(key); setPetitProAt(new Date().toISOString()); };
   const petitProProtege = !isParticulier && signLocation === "hors_etablissement" && petitPro === "oui";
   const consumerLike = isParticulier || petitProProtege;
+  // Version 249 : dans les locaux du freelance, ou réparation urgente : pas de droit de rétractation (on suit la loi)
+  const retractExcludedKey = consumerLike && (signLocation === "locaux" || signLocation === "urgence") ? signLocation : null;
+  const hasRight = consumerLike && !retractExcludedKey;
+  // Version 249 : hors établissement (chez le client ou ailleurs, ou réparation urgente) : papier ou email, au choix du client
+  const offPremises = consumerLike && (signLocation === "hors_etablissement" || signLocation === "urgence");
+  const clientEmailOk = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(form.clientEmail || "").trim());
+  const [copyChoice, setCopyChoice] = useState(null); // "email" | "papier"
+  const [copyChoiceAt, setCopyChoiceAt] = useState(null);
+  const [copyStepDone, setCopyStepDone] = useState(false);
+  const [copySending, setCopySending] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  const chooseCopy = (key) => { setCopyChoice(key); setCopyChoiceAt(new Date().toISOString()); setCopyError(""); };
   // Contenu numérique déjà existant : proposé seulement pour un particulier. Un contrat pro peut garder la case d'un
   // essai précédent : elle ne compte pas (le contrat pro est toujours écrit comme une prestation).
   const isDigital = isParticulier && !!form.contenuNumeriquePret;
@@ -19104,6 +19167,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     ...(!isParticulier && signLocation === "hors_etablissement" && petitPro
       ? { clientPetitPro: petitPro === "oui", clientPetitProLabel: PETIT_PRO_ANSWERS[petitPro], clientPetitProDeclaredAt: petitProAt }
       : {}),
+    // Version 249 : pas de droit de rétractation (le serveur vérifie que cela correspond au lieu déclaré)
+    ...(retractExcludedKey ? { retractationExcluded: retractExcludedKey } : {}),
+    // Version 249 : papier ou email, au choix du client
+    ...(offPremises && copyChoice ? { copyMedium: copyChoice, copyMediumLabel: COPY_MEDIUM_TEXT[copyChoice](String(form.clientEmail || "").trim()), copyMediumChosenAt: copyChoiceAt } : {}),
   } : {});
   const signContextSaveRef = useRef(null);
   const paymentNotBefore = consumerLike && signLocation === "hors_etablissement" ? paymentAllowedFrom(new Date().toISOString()) : null;
@@ -19113,7 +19180,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const startPlanned = form.startDate ? new Date(form.startDate).getTime() : null;
   const startsBeforePayment = !!(startPlanned && paymentNotBefore && !payAfterDelivery && startPlanned < new Date(paymentNotBefore).getTime());
   const contractPostponesStart = /le démarrage est reporté au jour du versement/.test(contractText || "");
-  const retractLastDay = consumerLike ? retractationLastDay(new Date().toISOString()) : null;
+  const retractLastDay = hasRight ? retractationLastDay(new Date().toISOString()) : null;
   const startsBeforeRetractationEnd = !!(startPlanned && retractLastDay && startPlanned <= retractLastDay.getTime());
   // Le lieu est demandé à tous (version 222) ; pour un pro signé hors des locaux, la réponse « petite entreprise » aussi
   const canValidateFreelance = freelanceHasStrokes && !!signLocation && (isParticulier || signLocation !== "hors_etablissement" || !!petitPro);
@@ -19125,6 +19192,19 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const [tactileRetractationChecked, setTactileRetractationChecked] = useState(false);
   const [tactileRetractationWaiving, setTactileRetractationWaiving] = useState(false);
   const [tactileRetractationDone, setTactileRetractationDone] = useState(false);
+
+  // Version 249 : choix papier ou email. Par email, les informations partent tout de suite, avant la signature.
+  const handleCopyContinue = async () => {
+    if (!copyChoice || copySending) return;
+    setCopyError("");
+    if (copyChoice === "papier") { setCopyStepDone(true); return; }
+    setCopySending(true);
+    if (signContextSaveRef.current) { try { await signContextSaveRef.current; } catch (e) {} }
+    const r = contractId ? await sendPrecontractInfo(contractId, signContext()) : { ok: false };
+    setCopySending(false);
+    if (r.ok) setCopyStepDone(true);
+    else setCopyError("L'email n'a pas pu être envoyé. Vérifiez la connexion et réessayez, ou choisissez le papier.");
+  };
 
   const handleTactileRetractationContinue = async () => {
     if (!tactileRetractationChecked) { setTactileRetractationDone(true); return; }
@@ -19414,9 +19494,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     : "Ton client est un professionnel. Si tu signes ailleurs que dans tes locaux, une petite entreprise peut avoir les mêmes droits qu'un particulier. Choisis la réponse qui correspond à la réalité : elle sera enregistrée dans le contrat, avec la date et l'heure, et elle engage ta responsabilité."}
                 </div>
                 {(isParticulier ? [
-                  { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement. Si tu es allé voir ton client ailleurs pour lui proposer tes services, et qu'il signe juste après dans tes locaux, choisis plutôt « Chez le client ou ailleurs ».", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
-                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander, et bloquera ses boutons de paiement jusque-là." },
-                  { key:"urgence", title:"Chez le client, pour une réparation urgente qu'il m'a demandée", sub:"Par exemple un dépannage urgent à son domicile, à sa demande.", rule:"La loi autorise alors le paiement tout de suite, mais seulement pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-10, 4°, du Code de la consommation). Si ta mission comprend autre chose, comme un contrat d'entretien, choisis plutôt « Chez le client ou ailleurs »." },
+                  { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement. Si tu es allé voir ton client ailleurs pour lui proposer tes services, et qu'il signe juste après dans tes locaux, choisis plutôt « Chez le client ou ailleurs ».", rule: (payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite.") + " Pas de délai de rétractation : la loi ne le prévoit pas pour un contrat signé dans tes locaux." },
+                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander, et bloquera ses boutons de paiement jusque-là. Ton client aura 14 jours pour se rétracter, et choisira de recevoir ses documents sur papier ou par email." },
+                  { key:"urgence", title:"Chez le client, pour une réparation urgente qu'il m'a demandée", sub:"Par exemple un dépannage urgent à son domicile, à sa demande.", rule:"La loi autorise alors le paiement tout de suite, mais seulement pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-10, 4°, du Code de la consommation). Pour ces pièces et ce travail, ton client n'a pas non plus de délai de rétractation (article L221-28, 8°). Si ta mission comprend autre chose, comme un contrat d'entretien, choisis plutôt « Chez le client ou ailleurs ». Ton client choisira de recevoir ses documents sur papier ou par email." },
                 ] : [
                   { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement. Si tu es allé voir ton client ailleurs pour lui proposer tes services, et qu'il signe juste après dans tes locaux, choisis plutôt « Chez le client ou ailleurs ».", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
                   { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Dans les locaux du client, dans un café, sur un chantier…", rule:"Une question de plus juste en dessous : une petite entreprise peut avoir les mêmes droits qu'un particulier." },
@@ -19601,7 +19681,36 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   </div>
                 )}
 
-                {consumerLike && !tactileRetractationDone ? (
+                {offPremises && !copyStepDone ? (
+                  <div data-testid="copy-choice">
+                    <div style={{ fontSize:12.5, fontWeight:700, color:"#1E3A8A", marginBottom:6 }}>Comment voulez-vous recevoir vos documents ?</div>
+                    <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
+                      Ce contrat est signé hors des locaux du prestataire. La loi prévoit qu'il vous remette sur papier les informations sur ce contrat et votre exemplaire signé. Vous pouvez choisir de les recevoir par email à la place.
+                    </div>
+                    {[
+                      { key:"email", title:"Par email", text: clientEmailOk ? COPY_MEDIUM_TEXT.email(String(form.clientEmail).trim()) : "Pas d'adresse email dans le contrat : choisissez le papier, ou demandez au prestataire d'ajouter votre adresse au contrat.", disabled: !clientEmailOk },
+                      { key:"papier", title:"Sur papier", text: COPY_MEDIUM_TEXT.papier() },
+                    ].map(opt => (
+                      <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor: opt.disabled ? "not-allowed" : "pointer", opacity: opt.disabled ? 0.6 : 1, background: copyChoice === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${copyChoice === opt.key ? "#6366F1" : "#DBEAFE"}` }}>
+                        <input type="radio" name="copyMedium" value={opt.key} disabled={!!opt.disabled} checked={copyChoice === opt.key} onChange={() => chooseCopy(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
+                        <span style={{ fontSize:11.5, color:"#1F2937", lineHeight:1.55 }}><strong>{opt.title}</strong><br />{opt.text}</span>
+                      </label>
+                    ))}
+                    {copyChoice === "papier" && (
+                      <div style={{ fontSize:11.5, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"10px 12px", marginBottom:8, lineHeight:1.55 }}>
+                        Le prestataire doit vous remettre {hasRight ? "le contrat et le formulaire de rétractation" : "le contrat"} sur papier avant que vous signiez, puis votre exemplaire signé.
+                      </div>
+                    )}
+                    {copyError && (
+                      <div role="alert" style={{ fontSize:11.5, color:"#991B1B", background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:10, padding:"10px 12px", marginBottom:8, lineHeight:1.5 }}>{copyError}</div>
+                    )}
+                    <button
+                      onClick={handleCopyContinue}
+                      disabled={!copyChoice || copySending}
+                      style={{ width:"100%", marginTop:4, padding:"11px 16px", background: copyChoice && !copySending ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:8, cursor: copyChoice && !copySending ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
+                    >{copySending ? "Envoi…" : copyChoice === "email" ? "Recevoir les informations par email et continuer" : "Continuer"}</button>
+                  </div>
+                ) : hasRight && !tactileRetractationDone ? (
                   <div>
                     <div style={{ fontSize:11.5, color:"#1E3A8A", lineHeight:1.6, marginBottom:12 }}>
                       {/* Version 221 : pour un contenu numérique, la conséquence de la case est dite dès cette phrase.
@@ -19628,6 +19737,12 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   </div>
                 ) : (
                 <>
+                {/* Version 249 : pas de droit de rétractation (locaux du freelance, ou réparation urgente) */}
+                {retractExcludedKey && (
+                  <div data-testid="no-retract-info" style={{ background:C.white, border:"1.5px solid #CBD5E1", borderRadius:10, padding:"10px 13px", marginBottom:12, fontFamily:T.body, fontSize:11, color:"#334155", lineHeight:1.55 }}>
+                    ℹ️ <strong>Pas de droit de rétractation.</strong> {RETRACTATION_EXCLUDED_TEXT[retractExcludedKey]}
+                  </div>
+                )}
                 {/* ── Bandeau d'information du client ── */}
                 <div style={{
                   background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)",
@@ -19637,7 +19752,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 }}>
                   <span style={{ fontSize:16, flexShrink:0 }}>🛡️</span>
                   <div style={{ fontFamily:T.body, fontSize:10.5, color:"#4338CA", lineHeight:1.55, fontWeight:500 }}>
-                    Signature horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de cet appareil, comme preuve.{form.clientEmail ? " Vous recevrez une copie du contrat par email." : ""}
+                    Signature horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de cet appareil, comme preuve.{offPremises && copyChoice === "papier" ? ` Le prestataire vous remet votre exemplaire sur papier.${form.clientEmail ? " Vous recevrez aussi par email le lien vers votre contrat." : ""}` : form.clientEmail ? " Vous recevrez une copie du contrat par email." : ""}
                   </div>
                 </div>
 
@@ -19753,6 +19868,12 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               {!saveSignatureError && (
                 <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#1D4ED8", textAlign:"left", lineHeight:1.5 }}>
                   📧 Un email de confirmation avec le contrat vient d'être envoyé à ton client. S'il ne le voit pas d'ici quelques minutes, dis-lui de regarder dans ses spams.
+                </div>
+              )}
+              {/* Version 249 : le client a choisi le papier */}
+              {offPremises && copyChoice === "papier" && (
+                <div data-testid="paper-copy-final" style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#92400E", textAlign:"left", lineHeight:1.55 }}>
+                  📄 <strong>Ton client a choisi le papier.</strong> Remets-lui maintenant un exemplaire daté et signé du contrat{hasRight ? ", avec le formulaire de rétractation" : ""}. Tu peux l'imprimer depuis « Mes contrats », avec le bouton « Télécharger PDF ».
                 </div>
               )}
               {/* Big success badge */}
@@ -19877,7 +19998,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               {/* Quand la mission peut commencer : d'après le contrat, la case cochée et la règle des 7 jours.
                   Version 220 : si la date de démarrage prévue au contrat tombe trop tôt, on le rappelle ici aussi. */}
               {(() => {
-                const notWaived = consumerLike && !tactileRetractationChecked;
+                const notWaived = hasRight && !tactileRetractationChecked;
                 const amber = notWaived || startsBeforePayment;
                 return (
                   <div style={{
@@ -20983,6 +21104,8 @@ function ClientSignaturePage({ contractId }) {
       setRetractConfirming(false);
     } else if (r.reason === "invalid_email") {
       setRetractError("Cette adresse email n'a pas été acceptée. Vérifiez-la, puis réessayez.");
+    } else if (r.reason === "no_right") {
+      setRetractError("Ce contrat ne prévoit pas de droit de rétractation.");
     } else if (r.reason === "deadline_passed") {
       setError("Le délai de rétractation de 14 jours est dépassé : la rétractation en ligne n'est plus possible.");
     } else if (r.reason === "right_lost") {
@@ -21110,7 +21233,9 @@ function ClientSignaturePage({ contractId }) {
     const waivedAtC = content.retractationWaivedAtServer || content.retractationWaivedAt;
     const deliveredAtC = content.contentDeliveredAtServer || content.contentDeliveredAt;
     // Version 222 : aussi pour une petite entreprise signée hors établissement (art. L221-3 C. conso)
-    const isConsumer = isConsumerLikeContract(content.form, content);
+    // Version 249 : pas de droit de rétractation pour un contrat signé dans les locaux du prestataire ou une réparation urgente
+    const retractExcludedC = retractationExcludedKey(content.form, content);
+    const isConsumer = isConsumerLikeContract(content.form, content) && !retractExcludedC;
     const rightEndedByDelivery = isParticulier && isDigital &&!!waivedAtC && !!content.retractationConfirmationSentAt && !!deliveredAtC && new Date(waivedAtC) <= new Date(deliveredAtC);
     // Version 248 : le bouton reste affiché pendant tout le délai (art. L221-21), même après la fourniture du contenu
     // numérique. La demande est alors transmise au prestataire, qui décide : le contrat n'est pas annulé automatiquement.
@@ -21184,6 +21309,14 @@ function ClientSignaturePage({ contractId }) {
                   ? <>Si vous n'avez rien reçu, ou si vous souhaitez quand même vous rétracter, vous pouvez envoyer une demande avec le bouton « Renoncer au contrat ici », plus bas. Elle sera transmise au prestataire, qui vous répondra.{content.form?.freelanceEmail ? ` Vous pouvez aussi le contacter : ${content.form.freelanceEmail}.` : ""}</>
                   : <>Si vous n'avez rien reçu, contactez le prestataire{content.form?.freelanceEmail ? ` : ${content.form.freelanceEmail}` : ""}.</>}
               </div>
+            </div>
+          )}
+
+          {/* Version 249 : pas de droit de rétractation (locaux du prestataire, ou réparation urgente) */}
+          {retractExcludedC && (
+            <div data-testid="no-retract-notice" style={{ background:"#fff", borderRadius:14, padding:"16px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", border:"1px solid #E8E0D0" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Pas de droit de rétractation</div>
+              <div style={{ fontSize:12.5, color:"#2C3E50", lineHeight:1.6 }}>{RETRACTATION_EXCLUDED_TEXT[retractExcludedC]}</div>
             </div>
           )}
 
