@@ -281,7 +281,6 @@ const getHistory = async () => {
       contentDeliveredAt: content.contentDeliveredAtServer || content.contentDeliveredAt || null,
       signatureLocation: content.signatureLocation || null,
       clientPetitPro: content.clientPetitPro === true ? true : content.clientPetitPro === false ? false : null,
-      earlyPaymentAck: content.earlyPaymentAck ? { ...content.earlyPaymentAck, atServer: content.earlyPaymentAckAtServer || null } : null,
       signatureProof: content.signatureProof || null, // version 232
       acompteInvoiceNumber: content.acompteInvoiceNumber || null, // version 232 : référence des virements
       soldeInvoiceNumber: content.soldeInvoiceNumber || null,
@@ -415,7 +414,8 @@ const readContractForUpdate = async (contractId) => {
 // - contenu numérique déjà existant (art. L221-28, 13° C.conso) : rédaction relue par une juriste, reprise mot pour mot ;
 // - service sur mesure (art. L221-25 et L221-28, 1° C.conso) : rédaction interne, pas encore relue par une juriste.
 const RETRACTATION_WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la fourniture du contenu numérique commence avant l'expiration du délai de rétractation de quatorze (14) jours et je reconnais qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution.";
-const RETRACTATION_WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
+// Version 247 : formule officielle du montant dû (proportionnel, art. L221-25 C. conso ; modèle de l'annexe à R221-3)
+const RETRACTATION_WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant proportionnel à ce qui m'aura été fourni jusqu'au moment où j'informe le prestataire de ma rétractation, par rapport à l'ensemble des prestations prévues par le contrat, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
 const getRetractationWaiverText = (isDigital) => isDigital ? RETRACTATION_WAIVER_TEXT_DIGITAL : RETRACTATION_WAIVER_TEXT_SERVICE;
 
 // ── Délais légaux, au jour près, heure de Paris (même calcul que dans api/retraction.js) ──
@@ -448,15 +448,53 @@ const retractationLastDay = (signedIso) => {
   while ([0, 6].includes(new Date(day).getUTCDay()) || isFrenchHoliday(day)) day += 86400000;
   return new Date(day + 12 * 3600000);
 };
-// Fin exacte du délai : fin de ce dernier jour à Paris (calcul généreux, jamais plus court)
-const retractationDeadline = (signedIso) => {
-  const d = retractationLastDay(signedIso);
-  return d ? new Date(d.getTime() + 11 * 3600000) : null;
+// Version 247 : fuseaux horaires des territoires français. Le délai de rétractation se compte dans le fuseau du
+// client (celui de son navigateur) et n'est jamais plus court qu'à l'heure de Paris. Même règle des deux côtés
+// (contrat-freelance.jsx et api/retraction.js).
+const FRENCH_TIME_ZONES = ["Europe/Paris", "America/Guadeloupe", "America/Martinique", "America/Cayenne", "America/St_Barthelemy", "America/Marigot", "America/Miquelon", "Indian/Reunion", "Indian/Mayotte", "Indian/Kerguelen", "Pacific/Noumea", "Pacific/Wallis", "Pacific/Tahiti", "Pacific/Marquesas", "Pacific/Gambier"];
+const safeFrenchTimeZone = (tz) => (FRENCH_TIME_ZONES.includes(tz) ? tz : "Europe/Paris");
+// Date (minuit UTC de ce jour-là) d'un instant vu dans un fuseau, plus N jours
+const tzDayUtc = (iso, plusDays, tz) => {
+  const s = new Date(iso);
+  if (isNaN(s.getTime())) return null;
+  const [y, mo, d] = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(s).split("-").map(Number);
+  return Date.UTC(y, mo - 1, d + plusDays);
 };
-// Contrat signé hors établissement : premier jour où un paiement peut être reçu (le 8e jour)
+// Avance d'un fuseau sur l'heure UTC, en millisecondes, à un instant donné
+const tzOffsetMs = (tz, utcMs) => {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(utcMs));
+  const g = (t) => Number((p.find((x) => x.type === t) || {}).value);
+  return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second")) - utcMs;
+};
+// Fin d'un jour (minuit UTC de cette date) dans un fuseau : l'instant du minuit local suivant
+const tzEndOfDay = (dayUtc, tz) => {
+  const next = dayUtc + 86400000;
+  const first = next - tzOffsetMs(tz, next);
+  return next - tzOffsetMs(tz, first);
+};
+const browserTimeZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { return ""; } };
+// Fin exacte du délai : fin du dernier jour (prolongé après un week-end ou un jour férié) à l'heure de Paris, calcul
+// généreux comme avant ; version 247 : plus tard encore si le client vit dans un territoire français où ce jour
+// finit après (Antilles, Guyane, Polynésie...), ou s'il y a signé à une date locale plus tardive (Réunion...).
+const retractationDeadline = (signedIso, tz) => {
+  const d = retractationLastDay(signedIso);
+  if (!d) return null;
+  const paris = d.getTime() + 11 * 3600000;
+  const zone = safeFrenchTimeZone(tz);
+  if (zone === "Europe/Paris") return new Date(paris);
+  let day = tzDayUtc(signedIso, 14, zone);
+  if (day == null) return new Date(paris);
+  while ([0, 6].includes(new Date(day).getUTCDay()) || isFrenchHoliday(day)) day += 86400000;
+  return new Date(Math.max(paris, tzEndOfDay(day, zone)));
+};
+// Contrat signé hors établissement : premier jour où un paiement peut être reçu (le 8e jour). Version 247 : jamais
+// avant le 8e jour à l'heure de Paris, ni avant le 8e jour à l'heure de l'appareil (freelance en outre-mer).
 const paymentAllowedFrom = (signedIso) => {
   const d = signedIso ? parisDayUtc(signedIso, 8) : null;
-  return d == null ? null : new Date(d);
+  if (d == null) return null;
+  const s = new Date(signedIso);
+  const local = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 8).getTime();
+  return new Date(Math.max(d, Number.isFinite(local) ? local : d));
 };
 const frDate = (d) => d ? new Date(d).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" }) : "";
 
@@ -589,40 +627,9 @@ const callRetractionApi = async (payload, token) => {
   }
 };
 
-// ── Paiement demandé avant la fin des 7 jours (contrat signé hors établissement, art. L221-10) ──
-// Freeley ne bloque pas : il rappelle la loi, le freelance décide, et sa réponse est enregistrée dans
-// le contrat avec la date et l'heure (heure de son appareil, puis heure du serveur en plus).
-const EARLY_PAYMENT_ACK_TEXT = "J'ai compris, je demande quand même le paiement, sous ma responsabilité.";
-
-const saveEarlyPaymentAck = async (contractId, { action, allowedFrom }) => {
-  if (!contractId) return null;
-  try {
-    const { data: existing, error: e1 } = await supabase.from("contracts").select("content, status").eq("id", contractId).single();
-    if (e1 || !existing) throw e1 || new Error("Contrat introuvable");
-    const content = parseContent(existing.content);
-    if (content.earlyPaymentAck) return content.earlyPaymentAck; // déjà accepté pour ce contrat
-    const ack = {
-      at: new Date().toISOString(),
-      text: EARLY_PAYMENT_ACK_TEXT,
-      action: action || "",
-      paymentAllowedFrom: allowedFrom ? new Date(allowedFrom).toISOString() : null,
-    };
-    const { error: e2 } = await supabase.rpc("update_contract_content", {
-      p_contract_id: contractId,
-      p_new_content: JSON.stringify({ ...content, earlyPaymentAck: ack }),
-      p_new_status: existing.status,
-    });
-    if (e2) throw e2;
-    callRetractionApi({ action: "stamp-early-payment", contractId }); // heure du serveur, en plus
-    return ack;
-  } catch (e) {
-    console.error("[Freeley] Enregistrement de l'accord pour un paiement avant 7 jours :", e);
-    return null;
-  }
-};
-
-// Date et heure lisibles, heure de Paris : « 13 octobre 2026 à 15:30 »
-const frDateTime = (d) => d ? `${frDate(d)} à ${new Date(d).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}` : "";
+// ── Paiement avant la fin des 7 jours (contrat signé hors établissement, art. L221-10) ──
+// Version 247 : Freeley bloque les boutons de paiement pendant ces 7 jours (voir useEarlyPaymentBlock). Avant, il
+// prévenait seulement et enregistrait l'accord du freelance : un avertissement ne lève pas l'interdiction.
 
 // ── Preuve de signature (version 232) ──
 // Le serveur de Freeley enregistre chaque signature avec une preuve : son heure, l'adresse IP et le navigateur de
@@ -684,16 +691,16 @@ const drawSignatureProofPdf = (doc, proof, { x, y, width, docLabel = "du contrat
   return y + 2;
 };
 
-// Fenêtre de confirmation, affichée par-dessus tout le reste (portail vers le body)
-function EarlyPaymentConfirmModal({ payNotBefore, saving, error, onCancel, onConfirm }) {
-  const [checked, setChecked] = useState(false);
+// Version 247 : contrat signé hors établissement, moins de 7 jours après la signature. Les boutons de paiement sont
+// bloqués (art. L221-10 C. conso) : un clic ouvre cette fenêtre, qui explique pourquoi et jusqu'à quand.
+function EarlyPaymentBlockedModal({ payNotBefore, onClose }) {
   return createPortal(
     <div
-      onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget && !saving) onCancel(); }}
+      onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) onClose(); }}
       style={{ position:"fixed", inset:0, zIndex:10050, background:"rgba(10,20,40,0.6)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
     >
-      <div role="dialog" aria-modal="true" style={{ background:C.white, borderRadius:16, width:"100%", maxWidth:440, maxHeight:"90vh", overflowY:"auto", padding:"20px 20px 18px", boxShadow:"0 24px 60px rgba(0,0,0,0.3)", fontFamily:T.body, textAlign:"left" }}>
-        <div style={{ fontSize:16, fontWeight:800, color:"#92400E", marginBottom:10, lineHeight:1.4 }}>⚠️ Paiement avant le {frDate(payNotBefore)}</div>
+      <div role="dialog" aria-modal="true" data-testid="early-payment-blocked" style={{ background:C.white, borderRadius:16, width:"100%", maxWidth:440, maxHeight:"90vh", overflowY:"auto", padding:"20px 20px 18px", boxShadow:"0 24px 60px rgba(0,0,0,0.3)", fontFamily:T.body, textAlign:"left" }}>
+        <div style={{ fontSize:16, fontWeight:800, color:"#92400E", marginBottom:10, lineHeight:1.4 }}>⏳ Pas de paiement avant le {frDate(payNotBefore)}</div>
         <p style={{ fontSize:13, color:C.text, lineHeight:1.6, margin:"0 0 10px" }}>
           Ce contrat a été signé chez le client ou ailleurs que dans tes locaux. Pour ce type de contrat, la loi interdit d'exiger ou de recevoir un paiement, même un acompte, avant le <strong>{frDate(payNotBefore)}</strong> (article L221-10 du Code de la consommation).
         </p>
@@ -701,17 +708,9 @@ function EarlyPaymentConfirmModal({ payNotBefore, saving, error, onCancel, onCon
           Exiger ou obtenir un paiement avant cette date est puni de deux ans d'emprisonnement et de {"150\u00A0000\u00A0€"} d'amende (article L242-7 du Code de la consommation).
         </p>
         <p style={{ fontSize:12.5, color:C.textM, lineHeight:1.6, margin:"0 0 14px" }}>
-          Freeley ne bloque pas : c'est ta décision et ta responsabilité. Ta réponse sera enregistrée dans le contrat, avec la date et l'heure.
+          Pour te protéger, Freeley bloque donc les boutons de paiement jusqu'à cette date. Tu pourras alors envoyer ta facture, ton lien de paiement ou ta relance.
         </p>
-        <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", borderRadius:10, cursor:"pointer", background: checked ? "#FFFBEB" : "#F8FAFC", border:`1.5px solid ${checked ? "#F59E0B" : C.border}`, marginBottom:14 }}>
-          <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} style={{ marginTop:3, flexShrink:0 }} />
-          <span style={{ fontSize:13, fontWeight:700, color:C.text, lineHeight:1.5 }}>{EARLY_PAYMENT_ACK_TEXT}</span>
-        </label>
-        {error && <div style={{ fontSize:12, color:"#B91C1C", marginBottom:10, lineHeight:1.5 }}>{error}</div>}
-        <div style={{ display:"flex", gap:10 }}>
-          <button onClick={onCancel} disabled={saving} style={{ flex:1, padding:"11px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.textM }}>Annuler</button>
-          <button onClick={onConfirm} disabled={!checked || saving} style={{ flex:1, padding:"11px 12px", background: (!checked || saving) ? "#E5E7EB" : "#92400E", border:"none", borderRadius:10, cursor: (!checked || saving) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color: (!checked || saving) ? C.textL : "#fff" }}>{saving ? "Enregistrement…" : "Continuer"}</button>
-        </div>
+        <button onClick={onClose} style={{ width:"100%", padding:"11px 12px", background:"#92400E", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#fff" }}>J'ai compris</button>
       </div>
     </div>,
     document.body
@@ -744,35 +743,15 @@ function ContentDeliveredModal({ saving, error, onCancel, onConfirm }) {
   );
 }
 
-// Logique commune : pendant les 7 jours, le premier clic sur un bouton de paiement ouvre la fenêtre ;
-// une fois la réponse enregistrée, l'action demandée continue, et on ne redemande plus pour ce contrat.
-function useEarlyPaymentGuard({ contractId, payNotBefore, active, savedAck }) {
-  const [ask, setAsk] = useState(null);       // { action, run } en attente de confirmation
-  const [localAck, setLocalAck] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const ackRef = useRef(false);
-  const ack = localAck || savedAck || null;
+// Version 247 : pendant les 7 jours, un clic sur un bouton de paiement ouvre la fenêtre ci-dessus, sans rien envoyer
+function useEarlyPaymentBlock({ payNotBefore, active }) {
+  const [open, setOpen] = useState(false);
   const guard = (action, run) => (...args) => {
-    if (active && !ack && !ackRef.current) { setError(""); setAsk({ action, run: () => run(...args) }); return; }
+    if (active) { setOpen(true); return; }
     return run(...args);
   };
-  const confirm = async () => {
-    if (!ask || saving) return;
-    setSaving(true); setError("");
-    const saved = await saveEarlyPaymentAck(contractId, { action: ask.action, allowedFrom: payNotBefore });
-    setSaving(false);
-    if (!saved) { setError("Ta réponse n'a pas pu être enregistrée. Vérifie ta connexion, puis réessaie."); return; }
-    ackRef.current = true;
-    setLocalAck(saved);
-    const run = ask.run;
-    setAsk(null);
-    run();
-  };
-  const modal = ask ? (
-    <EarlyPaymentConfirmModal payNotBefore={payNotBefore} saving={saving} error={error} onCancel={() => { if (!saving) setAsk(null); }} onConfirm={confirm} />
-  ) : null;
-  return { guard, ack, modal };
+  const modal = open ? <EarlyPaymentBlockedModal payNotBefore={payNotBefore} onClose={() => setOpen(false)} /> : null;
+  return { guard, modal };
 }
 
 // Contenu numérique déjà existant (version 221) : le freelance indique qu'il vient de fournir le contenu.
@@ -851,7 +830,7 @@ const submitRetractationConfirmationSent = async (contractId) => {
 // pour vérifier, puis envoie l'accusé de réception au client et l'alerte au freelance (art. D221-5 C. conso).
 // Avant, la page du client écrivait elle-même en base, et la base le lui refusait (contrat déjà signé).
 const submitRetractationExercise = async (contractId) => {
-  const r = await callRetractionApi({ action: "confirm", contractId });
+  const r = await callRetractionApi({ action: "confirm", contractId, tz: browserTimeZone() }); // version 247 : fuseau du client
   if (r.ok) return { ok: true, exercisedAt: r.data.exercisedAt || new Date().toISOString() };
   console.error("Rétractation refusée par le serveur:", r.status, r.data);
   // right_lost (version 221) : le serveur renvoie les dates qui ont mis fin au droit, pour mettre la page à jour
@@ -1047,7 +1026,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "246";
+const APP_VERSION = "247";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -14647,13 +14626,13 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   const [soldeRelanceSent, setSoldeRelanceSent] = useState(false);
 
   // Contrat signé chez le client ou ailleurs (hors établissement) : la loi interdit tout paiement pendant
-  // 7 jours. Freeley ne bloque pas : au premier clic sur un bouton de paiement, une fenêtre rappelle la
-  // loi, et la réponse du freelance est enregistrée dans le contrat.
+  // 7 jours. Version 247 : Freeley bloque les boutons de paiement jusqu'au 8e jour ; un clic ouvre une fenêtre
+  // qui explique pourquoi (avant, il prévenait seulement et enregistrait la réponse du freelance).
   // Version 222 : le lieu est aussi enregistré pour un client professionnel ; les 7 jours ne valent que pour un
   // particulier ou une petite entreprise protégée (art. L221-3 C. conso).
   const payNotBefore = isConsumerLikeContract(entry?.form, entry) && entry?.signatureLocation === "hors_etablissement" && entry?.signedByClientAt ? paymentAllowedFrom(entry.signedByClientAt) : null;
   const earlyWindow = !!payNotBefore && Date.now() < payNotBefore.getTime() && !paid;
-  const early = useEarlyPaymentGuard({ contractId: entry?.id, payNotBefore, active: earlyWindow, savedAck: entry?.earlyPaymentAck });
+  const early = useEarlyPaymentBlock({ payNotBefore, active: earlyWindow });
 
   // Un contrat sans prix n'a rien à encaisser — ne rien afficher plutôt qu'un bloc acompte à 0€
   if (!rawPrice || rawPrice <= 0) return null;
@@ -14662,7 +14641,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   if (entry?.retractationExercisedAt) {
     return (
       <div className="fade-up" style={{ marginBottom:24, background:"#FEF2F2", border:"1.5px solid #FECACA", borderRadius:14, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
-        ⛔ <strong>Le client s'est rétracté le {frDate(entry.retractationExercisedAt)}.</strong> Ne lui demande plus aucun paiement. S'il t'a déjà payé quelque chose, tu dois le rembourser au plus tard 14 jours après sa rétractation, par le même moyen de paiement.
+        ⛔ <strong>Le client s'est rétracté le {frDate(entry.retractationExercisedAt)}.</strong> Ne lui demande plus aucun paiement. S'il t'a déjà payé quelque chose, tu dois le rembourser au plus tard 14 jours après sa rétractation, par le même moyen de paiement (sauf s'il accepte expressément un autre moyen), sans frais pour lui.
       </div>
     );
   }
@@ -14840,13 +14819,11 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
         </div>
       )}
 
-      {/* Contrat hors établissement, moins de 7 jours : rappel de la loi (les boutons restent utilisables) */}
+      {/* Contrat hors établissement, moins de 7 jours : rappel de la loi (version 247 : boutons de paiement bloqués) */}
       {earlyWindow && (
         <div style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:14, padding:"14px 18px", marginBottom:14, fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
           ⏳ <strong>Pas de paiement avant le {frDate(payNotBefore)}, d'après la loi.</strong> Ce contrat a été signé chez le client ou ailleurs que dans tes locaux. La loi interdit d'exiger ou de recevoir un paiement pendant 7 jours après la signature (article L221-10 du Code de la consommation).{" "}
-          {early.ack
-            ? <>Tu as choisi de demander {paymentWordArticleLe} avant cette date, sous ta responsabilité (réponse enregistrée le {frDateTime(early.ack.atServer || early.ack.at)}).</>
-            : <>Freeley ne bloque pas les boutons : si tu les utilises avant cette date, ce sera sous ta responsabilité.</>}
+          Pour te protéger, Freeley bloque les boutons de paiement jusqu'à cette date. Tu pourras alors envoyer ta facture, ton lien de paiement ou ta relance.
         </div>
       )}
 
@@ -15173,7 +15150,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 fontFamily:T.body, fontSize:13, fontWeight:700,
               }}
             ><span>🧾</span> Télécharger la facture</button>
-            <div style={{ flexBasis:"100%" }}>
+            {/* Version 247 : pas de facture électronique d'acompte pendant les 7 jours (contrat hors établissement) */}
+            {!earlyWindow && <div style={{ flexBasis:"100%" }}>
               <SendElectronicInvoiceButton
                 contractId={entry?.id} invoiceKey="acompteInvoiceNumber"
                 designation={acompteSpec.designation} montant={depositBaseAmt} shownMontant={depositAmt} applyRemises missionTitle={entry?.missionTitle}
@@ -15183,7 +15161,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 clientCompany={entry?.form?.clientCompany} clientAddress={entry?.form?.clientAddress} clientSiret={entry?.form?.clientSiret}
                 clientEmail={entry?.form?.clientEmail} typeClient={entry?.form?.typeClient} authUser={authUser}
               />
-            </div>
+            </div>}
           </div>
         )}
       </div>
@@ -15207,7 +15185,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
         </div>
       )}
 
-      {/* Fenêtre de confirmation : paiement demandé pendant les 7 jours */}
+      {/* Version 247 : fenêtre qui explique le blocage du paiement pendant les 7 jours */}
       {early.modal}
     </div>
   );
@@ -19067,8 +19045,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const isParticulier = form.typeClient === "particulier";
   // Lieu de la signature, déclaré par le freelance : la loi permet un paiement tout de suite (dans ses locaux, ou
   // réparation urgente demandée par le client) ou seulement après 7 jours (contrat hors établissement, art. L221-10
-  // C. conso). Freeley ne bloque pas : pendant les 7 jours, le premier clic sur un bouton de paiement ouvre une
-  // fenêtre de confirmation. Version 222 : la question est aussi posée pour un client professionnel. Signé hors
+  // C. conso). Version 247 : pendant les 7 jours, Freeley bloque les boutons de paiement (une fenêtre
+  // explique pourquoi). Version 222 : la question est aussi posée pour un client professionnel. Signé hors
   // des locaux du freelance, une petite entreprise (5 salariés au plus, contrat hors de son activité principale)
   // a les droits d'un particulier (art. L221-3 C. conso) : le freelance le déclare, Freeley applique les mêmes règles.
   const [signLocation, setSignLocation] = useState(null);
@@ -19093,7 +19071,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const signContextSaveRef = useRef(null);
   const paymentNotBefore = consumerLike && signLocation === "hors_etablissement" ? paymentAllowedFrom(new Date().toISOString()) : null;
   const paymentEarly = !!paymentNotBefore;
-  const early = useEarlyPaymentGuard({ contractId, payNotBefore: paymentNotBefore, active: paymentEarly, savedAck: null });
+  const early = useEarlyPaymentBlock({ payNotBefore: paymentNotBefore, active: paymentEarly });
   // Démarrage prévu au contrat avant le premier jour possible : rappelé au choix du lieu ET sur l'écran final
   const startPlanned = form.startDate ? new Date(form.startDate).getTime() : null;
   const startsBeforePayment = !!(startPlanned && paymentNotBefore && !payAfterDelivery && startPlanned < new Date(paymentNotBefore).getTime());
@@ -19400,7 +19378,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 </div>
                 {(isParticulier ? [
                   { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement. Si tu es allé voir ton client ailleurs pour lui proposer tes services, et qu'il signe juste après dans tes locaux, choisis plutôt « Chez le client ou ailleurs ».", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
-                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander." },
+                  { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Au domicile du client, dans un café, sur un chantier…", rule:"C'est un contrat « hors établissement ». La loi t'interdit de recevoir le moindre paiement, même un acompte, un chèque ou une autorisation de prélèvement, pendant 7 jours après la signature (article L221-10 du Code de la consommation). Freeley t'indiquera la date à partir de laquelle tu pourras le demander, et bloquera ses boutons de paiement jusque-là." },
                   { key:"urgence", title:"Chez le client, pour une réparation urgente qu'il m'a demandée", sub:"Par exemple un dépannage urgent à son domicile, à sa demande.", rule:"La loi autorise alors le paiement tout de suite, mais seulement pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-10, 4°, du Code de la consommation). Si ta mission comprend autre chose, comme un contrat d'entretien, choisis plutôt « Chez le client ou ailleurs »." },
                 ] : [
                   { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement. Si tu es allé voir ton client ailleurs pour lui proposer tes services, et qu'il signe juste après dans tes locaux, choisis plutôt « Chez le client ou ailleurs ».", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
@@ -19771,13 +19749,11 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 </div>
               </div>
 
-              {/* Contrat signé hors établissement : rappel de la loi des 7 jours (les boutons restent utilisables) */}
+              {/* Contrat signé hors établissement : rappel de la loi des 7 jours (version 247 : boutons de paiement bloqués) */}
               {paymentEarly && (
                 <div style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, padding:"14px 16px", marginBottom:20, textAlign:"left", fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
                   ⏳ <strong>Pas de paiement avant le {frDate(paymentNotBefore)}, d'après la loi.</strong> Tu as signé chez le client ou ailleurs que dans tes locaux. La loi interdit d'exiger ou de recevoir un paiement pendant 7 jours après la signature (article L221-10 du Code de la consommation).{" "}
-                  {early.ack
-                    ? <>Tu as choisi de demander {isComptant ? "le paiement" : "l'acompte"} avant cette date, sous ta responsabilité (réponse enregistrée le {frDateTime(early.ack.at)}).</>
-                    : <>Freeley ne bloque pas les boutons ci-dessous : si tu les utilises avant cette date, ce sera sous ta responsabilité.</>}
+                  Pour te protéger, Freeley bloque les boutons de paiement ci-dessous jusqu'à cette date.
                 </div>
               )}
 
@@ -21056,8 +21032,9 @@ function ClientSignaturePage({ contractId }) {
   // Le lien reste la page permanente du client pendant 14 jours : consultation du contrat,
   // et bouton de rétractation si le client est particulier et que le délai n'est pas dépassé.
   if (contractData?.status === "signed" && !done) {
-    // Fin du délai au jour près (fin de journée, prolongée après un week-end ou un jour férié)
-    const retractDeadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt);
+    // Fin du délai au jour près (fin de journée, prolongée après un week-end ou un jour férié). Version 247 : dans le
+    // fuseau du client s'il vit dans un territoire français, jamais plus tôt qu'à l'heure de Paris.
+    const retractDeadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt, browserTimeZone());
     const withinRetractDeadline = retractDeadline ? (new Date() < retractDeadline) : false;
     const retractationExercised = !!content.retractationExercisedAt;
     // Contenu numérique (version 221) : fourni après l'accord du client et la confirmation envoyée, le droit de

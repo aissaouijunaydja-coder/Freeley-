@@ -56,6 +56,11 @@
 // lisait, la signature est refusée (« text_changed ») et la page lui montre la nouvelle version. Deux signatures
 // envoyées en même temps : seule la première compte. L'email de confirmation reprend la preuve.
 //
+// Version 247 : case de démarrage anticipé avec la formule officielle (montant proportionnel ; l'ancien texte reste
+// accepté pour un onglet resté ouvert sur une ancienne version) ; délai de rétractation compté dans le fuseau du
+// client s'il vit dans un territoire français, jamais plus court qu'à l'heure de Paris ; rappel au freelance :
+// rembourser par le même moyen de paiement que le client, sans frais pour lui (art. L221-24).
+//
 // ⚠️ Les textes officiels ci-dessous (information sur la rétractation, formulaire) existent aussi dans
 // contrat-freelance.jsx (buildRetractationNotice / buildRetractationForm). Si tu modifies l'un, modifie l'autre.
 
@@ -323,16 +328,52 @@ function parisDayUtc(iso, plusDays = 0) {
   const [y, mo, d] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(s).split("-").map(Number);
   return Date.UTC(y, mo - 1, d + plusDays);
 }
-function retractationDeadline(signedIso) {
+// Version 247 : fuseaux horaires des territoires français. Le délai de rétractation se compte dans le fuseau du
+// client (celui de son navigateur) et n'est jamais plus court qu'à l'heure de Paris. Même règle des deux côtés
+// (contrat-freelance.jsx et api/retraction.js).
+const FRENCH_TIME_ZONES = ["Europe/Paris", "America/Guadeloupe", "America/Martinique", "America/Cayenne", "America/St_Barthelemy", "America/Marigot", "America/Miquelon", "Indian/Reunion", "Indian/Mayotte", "Indian/Kerguelen", "Pacific/Noumea", "Pacific/Wallis", "Pacific/Tahiti", "Pacific/Marquesas", "Pacific/Gambier"];
+const safeFrenchTimeZone = (tz) => (FRENCH_TIME_ZONES.includes(tz) ? tz : "Europe/Paris");
+// Date (minuit UTC de ce jour-là) d'un instant vu dans un fuseau, plus N jours
+const tzDayUtc = (iso, plusDays, tz) => {
+  const s = new Date(iso);
+  if (isNaN(s.getTime())) return null;
+  const [y, mo, d] = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(s).split("-").map(Number);
+  return Date.UTC(y, mo - 1, d + plusDays);
+};
+// Avance d'un fuseau sur l'heure UTC, en millisecondes, à un instant donné
+const tzOffsetMs = (tz, utcMs) => {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(utcMs));
+  const g = (t) => Number((p.find((x) => x.type === t) || {}).value);
+  return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second")) - utcMs;
+};
+// Fin d'un jour (minuit UTC de cette date) dans un fuseau : l'instant du minuit local suivant
+const tzEndOfDay = (dayUtc, tz) => {
+  const next = dayUtc + 86400000;
+  const first = next - tzOffsetMs(tz, next);
+  return next - tzOffsetMs(tz, first);
+};
+function retractationDeadline(signedIso, tz) {
   let day = signedIso ? parisDayUtc(signedIso, 14) : null;
   if (day == null) return null;
   while ([0, 6].includes(new Date(day).getUTCDay()) || isFrenchHoliday(day)) day += 86400000;
-  return new Date(day + 23 * 3600000); // fin de journée à Paris (23 h UTC = minuit en hiver, 1 h du matin en été)
+  const paris = day + 23 * 3600000; // fin de journée à Paris (23 h UTC = minuit en hiver, 1 h du matin en été)
+  // Version 247 : client dans un territoire français où ce jour finit plus tard (ou y a signé à une date plus tardive)
+  const zone = safeFrenchTimeZone(tz);
+  if (zone === "Europe/Paris") return new Date(paris);
+  let local = tzDayUtc(signedIso, 14, zone);
+  if (local == null) return new Date(paris);
+  while ([0, 6].includes(new Date(local).getUTCDay()) || isFrenchHoliday(local)) local += 86400000;
+  return new Date(Math.max(paris, tzEndOfDay(local, zone)));
 }
 
 // Textes exacts des cases que le client peut cocher (copie de contrat-freelance.jsx)
 const WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la fourniture du contenu numérique commence avant l'expiration du délai de rétractation de quatorze (14) jours et je reconnais qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution.";
-const WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
+// Version 247 : formule officielle du montant dû (proportionnel, art. L221-25). L'ancien texte reste accepté : un client
+// sur un onglet resté ouvert l'a vu et coché, c'est donc lui qui est enregistré.
+const WAIVER_TEXT_SERVICE = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant proportionnel à ce qui m'aura été fourni jusqu'au moment où j'informe le prestataire de ma rétractation, par rapport à l'ensemble des prestations prévues par le contrat, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
+const WAIVER_TEXT_SERVICE_V246 = "Je demande expressément que l'exécution de la prestation commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais que, si je me rétracte après ce début d'exécution, je devrai payer un montant correspondant à la prestation déjà fournie jusqu'à ma décision de me rétracter, et que, si la prestation est pleinement exécutée avant la fin de ce délai, je perdrai mon droit de rétractation.";
+// Remboursement après une rétractation (art. L221-24 C. conso)
+const REFUND_HOW = "par le même moyen de paiement que celui qu'il a utilisé (sauf s'il accepte expressément un autre moyen), sans frais pour lui";
 
 // Client protégé comme un consommateur (version 209) : un particulier, ou une petite entreprise signée hors
 // établissement (art. L221-3 C. conso), déclarée par le freelance. Même règle que isConsumerLikeContract() dans
@@ -384,7 +425,7 @@ async function getFreelanceAuthEmail(userId) {
 }
 
 // ── action: "confirm" — accusé de réception client + notification freelance ──
-async function handleConfirm(contractId) {
+async function handleConfirm(contractId, tz) {
   const { data: row, error } = await supabase
     .from("contracts")
     .select("content, user_id, status")
@@ -398,7 +439,7 @@ async function handleConfirm(contractId) {
   const form = resolveStatus(content.form || {}, content.contract);
   if (row.status !== "signed") return { status: 400, body: { error: "not_signed" } };
   if (!isConsumerLike(form, content)) return { status: 400, body: { error: "not_particulier" } };
-  const deadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt);
+  const deadline = retractationDeadline(content.signedByClientAtServer || content.signedByClientAt, tz); // version 247 : fuseau du client
   if (deadline && Date.now() > deadline.getTime()) return { status: 400, body: { error: "deadline_passed" } };
   // Contenu numérique fourni après l'accord du client et la confirmation : le droit a pris fin (version 208)
   const ended = digitalRightEnded(content, form);
@@ -431,12 +472,12 @@ async function handleConfirm(contractId) {
     // Conseils adaptés : prestation de services, ou contenu numérique (version 208)
     const waived = !!(content.retractationWaivedAtServer || content.retractationWaivedAt);
     const advice = !isDigitalContent(form)
-      ? "Si une partie de la prestation a déjà été réalisée à sa demande expresse, pense à établir la facturation proportionnelle correspondante. Tu dois rembourser les sommes reçues dans les 14 jours."
+      ? "Si une partie de la prestation a déjà été réalisée à sa demande expresse, pense à établir la facturation proportionnelle correspondante. Tu dois rembourser les sommes reçues dans les 14 jours, " + REFUND_HOW + "."
       : !waived
-        ? "Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours. Il n'avait pas accepté de recevoir le contenu avant la fin du délai de rétractation : sa rétractation est valable, même si tu lui avais déjà fourni le contenu."
+        ? "Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours, " + REFUND_HOW + ". Il n'avait pas accepté de recevoir le contenu avant la fin du délai de rétractation : sa rétractation est valable, même si tu lui avais déjà fourni le contenu."
         : !content.retractationConfirmationSentAt
-          ? "Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours. La confirmation de son accord ne lui avait pas été envoyée : sa rétractation est valable, même si tu lui avais déjà fourni le contenu."
-          : "Il avait accepté de recevoir le contenu avant la fin du délai de rétractation, mais tu n'avais pas indiqué dans Freeley le lui avoir fourni. Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours.\n\nSi tu le lui avais déjà fourni avant sa rétractation, son droit de rétractation avait pris fin à ce moment-là : réponds-lui en joignant la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement). La prochaine fois, touche « J'ai fourni le contenu au client » dans Mes contrats au moment où tu le fournis.";
+          ? "Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours, " + REFUND_HOW + ". La confirmation de son accord ne lui avait pas été envoyée : sa rétractation est valable, même si tu lui avais déjà fourni le contenu."
+          : "Il avait accepté de recevoir le contenu avant la fin du délai de rétractation, mais tu n'avais pas indiqué dans Freeley le lui avoir fourni. Ne lui fournis pas le contenu, et rembourse-lui les sommes reçues dans les 14 jours, " + REFUND_HOW + ".\n\nSi tu le lui avais déjà fourni avant sa rétractation, son droit de rétractation avait pris fin à ce moment-là : réponds-lui en joignant la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement). La prochaine fois, touche « J'ai fourni le contenu au client » dans Mes contrats au moment où tu le fournis.";
     try {
       await sendMail({
         from: FROM, to: freelanceEmail,
@@ -505,7 +546,7 @@ async function handleClientWaive(contractId, waiverText) {
   if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
   const content = parseContent(row.content);
   if (!isConsumerLike(content.form || {}, content)) return { status: 400, body: { error: "not_particulier" } };
-  if (![WAIVER_TEXT_DIGITAL, WAIVER_TEXT_SERVICE].includes(waiverText)) return { status: 400, body: { error: "invalid_text" } };
+  if (![WAIVER_TEXT_DIGITAL, WAIVER_TEXT_SERVICE, WAIVER_TEXT_SERVICE_V246].includes(waiverText)) return { status: 400, body: { error: "invalid_text" } };
   if (content.retractationWaivedAt) return { status: 200, body: { ok: true, alreadyWaived: true } };
   if (row.status === "signed") return { status: 400, body: { error: "already_signed" } };
   const nowIso = new Date().toISOString();
@@ -831,14 +872,14 @@ async function handleSendLink(contractId) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { action, contractId, email, waiverText, signature, textSha256, avenantNum, ndaId } = req.body || {};
+  const { action, contractId, email, waiverText, signature, textSha256, avenantNum, ndaId, tz } = req.body || {};
   // Jeton de connexion du freelance, seulement pour ses propres actions (version 208)
   const token = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "").trim();
   let result;
 
   if (action === "confirm") {
     if (!contractId) return res.status(400).json({ error: "contractId manquant" });
-    result = await handleConfirm(contractId);
+    result = await handleConfirm(contractId, typeof tz === "string" ? tz : "");
   } else if (action === "find") {
     result = await handleFind(email);
   } else if (action === "stamp-waiver") {
