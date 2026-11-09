@@ -1082,7 +1082,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "253";
+const APP_VERSION = "254";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -2230,6 +2230,31 @@ const sentencesOf = (s) => {
   return parts.map((p, i) => (i < parts.length - 1 ? p + "." : p));
 };
 
+// ── Version 254 : moyens de paiement écrits dans le contrat (art. R111-1 et R221-2 C. conso, avis d'Ordalie) ──
+// Le freelance coche ceux qu'il accepte. Tant qu'il n'a rien touché, Freeley propose le virement (IBAN dans le profil)
+// et la carte (Stripe branché). Pas d'espèces : un particulier ne peut pas payer en espèces plus de 1 000 €
+// (art. L112-6 du Code monétaire et financier).
+const PAYMENT_METHODS = [
+  { id: "virement", label: "Virement", phrase: "par virement bancaire" },
+  { id: "carte", label: "Carte (lien de paiement)", phrase: "par carte bancaire au moyen d'un lien de paiement sécurisé" },
+  { id: "cheque", label: "Chèque", phrase: "par chèque" },
+];
+const defaultPaymentMethods = (profile, stripeReady) => [
+  ...(String(profile?.iban || "").trim() ? ["virement"] : []),
+  ...(stripeReady ? ["carte"] : []),
+];
+const effectivePaymentMethods = (form, profile, stripeReady) =>
+  (Array.isArray(form?.paymentMethods) ? form.paymentMethods : defaultPaymentMethods(profile, stripeReady))
+    .filter((id) => PAYMENT_METHODS.some((m) => m.id === id));
+const joinOu = (list) => (list.length <= 1 ? (list[0] || "") : `${list.slice(0, -1).join(", ")} ou ${list[list.length - 1]}`);
+const chosenPaymentMethods = (form) => PAYMENT_METHODS.filter((m) => Array.isArray(form?.paymentMethods) && form.paymentMethods.includes(m.id));
+// Phrase de l'article 4 (entre guillemets, comme les autres phrases imposées). Vide pour les contrats d'avant la 254.
+const paymentMethodsSentenceFor = (form) => {
+  const phrases = chosenPaymentMethods(form).map((m) => m.phrase);
+  return phrases.length ? `"Les sommes dues au titre du présent contrat peuvent être payées ${joinOu(phrases)}."` : "";
+};
+const paymentMethodsLabelFor = (form) => chosenPaymentMethods(form).map((m) => m.label).join(", ");
+
 // ── Contrôle automatique du contrat rédigé ──
 // Le texte du contrat est rédigé en partie par l'IA : il peut varier d'une fois sur l'autre. Après chaque
 // rédaction, Freeley relit le texte et liste ce qui ne va pas. Il prévient le freelance, il ne bloque rien.
@@ -2355,6 +2380,10 @@ const checkContractText = (text, form = {}, profile = {}) => {
     else if (bad.length > 1) add(`Les clauses fixes des articles ${bad.slice(0, -1).join(", ")} et ${bad[bad.length - 1]} n'ont pas été recopiées telles quelles. Refais le contrat.`);
   }
 
+  // Version 254 : moyens de paiement cochés, mais absents du contrat
+  const pmSentence = paymentMethodsSentenceFor(form);
+  if (pmSentence && !tFixed.includes(normFixed(pmSentence.slice(1, -1)))) add("Les moyens de paiement n'ont pas été recopiés dans le contrat. Refais le contrat.");
+
   // Mot anglais oublié
   if (has(/\b(duly|scope creep|deliverables?|best effort)\b/i)) add("Le contrat contient un mot anglais.");
   return out;
@@ -2445,7 +2474,7 @@ const contractNumberClauses = (form, profile) => {
         ? `Ne mentionne PAS que l'acompte est automatiquement et intégralement conservé comme indemnité forfaitaire fixe en cas de résiliation par le Client : ce sujet est entièrement régi par la clause de dédommagement ci-dessous, qui prévoit une indemnité déterminée selon l'avancement réel de la mission, et ne doit pas être contredite ou dupliquée ici.`
         : (isB2C || acomptePct === 0)
           ? `Inclus aussi, mot pour mot : "En cas de fin du contrat à l'initiative du Client, hors exercice du droit de rétractation, seules les prestations effectivement réalisées jusqu'à la date de prise d'effet restent dues. Toute somme déjà versée au-delà de leur prix est restituée au Client."`
-          : `Inclus aussi, mot pour mot : "En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire."`;
+          : `Inclus aussi, mot pour mot : "En cas de résiliation par le Client, l'acompte versé s'impute sur le prix des prestations effectivement réalisées jusqu'à la date d'effet de la résiliation. Toute somme excédant ce prix est restituée au Client. Aucune indemnité forfaitaire de résiliation n'est due, sauf stipulation expresse distincte acceptée par les Parties."`; // Version 254 (Ordalie)
 
       // Article 9 — clause de dédommagement en cas d'annulation (texte fixe selon le client et l'acompte)
       const deditClause = form.clauseDedit ? (form.typeClient === "particulier"
@@ -2459,7 +2488,8 @@ const contractNumberClauses = (form, profile) => {
       // révisions (vu : « un cycle de corrections » à l'article 2 contre deux allers-retours à l'article 5).
       const datesSentence = form.startDate && form.endDate ? `La mission débute le ${longDateFr(form.startDate)} et s'achève le ${longDateFr(form.endDate)}.` : "";
       const revisions = revisionsSentence(form.revisions);
-      return { acomptePct, paymentTermsLabel, soldeTermsLabel, recetteEnd, paymentConditionsData, pricing, U, isB2C, recetteClause, dueAtSigning, horsEtabRef, paymentSentences, horsEtabSentence, petitProSentence, resiliationClient, deditClause, datesSentence, revisions };
+      const paymentMethodsSentence = paymentMethodsSentenceFor(form);
+      return { acomptePct, paymentTermsLabel, soldeTermsLabel, recetteEnd, paymentConditionsData, pricing, U, isB2C, recetteClause, dueAtSigning, horsEtabRef, paymentSentences, paymentMethodsSentence, horsEtabSentence, petitProSentence, resiliationClient, deditClause, datesSentence, revisions };
 };
 
 // ── Consignes de rédaction du contrat (texte envoyé à l'IA) ──
@@ -2468,7 +2498,7 @@ const contractNumberClauses = (form, profile) => {
 const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
       const d1 = form.startDate ? new Date(form.startDate).toLocaleDateString("fr-FR") : "Non défini";
       const d2 = form.endDate   ? new Date(form.endDate).toLocaleDateString("fr-FR")   : "Non défini";
-      const { acomptePct, paymentConditionsData, pricing, U, isB2C, recetteClause, paymentSentences, horsEtabSentence, petitProSentence, resiliationClient, deditClause, datesSentence, revisions } = contractNumberClauses(form, profile);
+      const { acomptePct, paymentConditionsData, pricing, U, isB2C, recetteClause, paymentSentences, paymentMethodsSentence, horsEtabSentence, petitProSentence, resiliationClient, deditClause, datesSentence, revisions } = contractNumberClauses(form, profile);
       const isCompany = !isEntrepreneurIndividuel(form.freelanceLegalStatus);
 
       // Article 6 (création, digital, autre) : la clause dit que le contrat indique si le prix rémunère aussi la
@@ -2506,7 +2536,7 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
 DONNÉES DE LA MISSION
 ══════════════════════════════════════════════
 Prestataire        : ${contractFreelanceName(form)}${isCompany && form.freelanceLegalStatus ? "\nForme juridique    : " + form.freelanceLegalStatus + "\nReprésentant légal : " + form.freelanceName : ""}
-Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + fmtSiret(form.freelanceSiret) : ""}${form.freelanceTvaNumber ? "\nN° TVA Prestataire : " + form.freelanceTvaNumber : ""}
+Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + fmtSiret(form.freelanceSiret) : ""}${form.freelanceImmatriculation ? "\nImmatriculation    : " + form.freelanceImmatriculation : ""}${form.freelanceTvaNumber ? "\nN° TVA Prestataire : " + form.freelanceTvaNumber : ""}
 Adresse Prestataire: ${form.freelanceAddress}
 Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + fmtPhone(form.freelancePhone) : ""}${form.freelanceAssurance ? "\nAssurance professionnelle du Prestataire : " + form.freelanceAssurance : ""}
 
@@ -2557,7 +2587,8 @@ ${form.clauseInterlocuteur ? (form.typeClient === "particulier"
 ARTICLE 4 — HONORAIRES, MODALITÉS DE PAIEMENT ET ACOMPTE
 ${!pricing.tvaApplicable ? `Montant total : ${fmtEuro(pricing.total)} € (TVA non applicable, article 293 B du CGI)` : pricing.b2c ? `Montant total TTC : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Montant total HT : ${form.price} €`}
 Inclus OBLIGATOIREMENT, mot pour mot, les phrases suivantes, chacune dans son propre sous-paragraphe :
-${paymentSentences}
+${paymentSentences}${paymentMethodsSentence ? `
+- ${paymentMethodsSentence}` : ""}
 ${pricing.b2c
   ? `- "${pricing.tvaApplicable ? "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent" : "Les prix stipulés au présent contrat correspondent"} aux montants que le Client aura effectivement à payer (${pricing.taxNote})."
 - ${horsEtabSentence}
@@ -2640,7 +2671,7 @@ ${fixedParagraphs(FIXED_FORCE_MAJEURE)}
 
 ARTICLE 11 — ${form.typeClient === "particulier" ? "DROIT APPLICABLE ET RÈGLEMENT DES LITIGES" : "DROIT APPLICABLE, MÉDIATION ET ATTRIBUTION DE JURIDICTION"}
 ${form.typeClient === "particulier"
-  ? `Le Client étant un consommateur, rédige cet article EXACTEMENT ainsi, mot pour mot, sans ajouter aucune obligation de médiation préalable ni aucune clause attribuant compétence à un tribunal : "Le présent contrat est soumis au droit français. En cas de litige, le Client peut recourir gratuitement ${mediateurB2C}. Le Client doit avoir adressé au préalable une réclamation écrite au Prestataire. Le recours au médiateur est facultatif et ne constitue pas un préalable obligatoire à la saisine du juge. Le Client peut saisir, à son choix, l'une des juridictions territorialement compétentes en vertu du Code de procédure civile ou la juridiction du lieu où il demeurait au moment de la conclusion du contrat ou de la survenance du fait dommageable, conformément à l'article R631-3 du Code de la consommation."`
+  ? `Le Client étant un consommateur, rédige cet article EXACTEMENT ainsi, mot pour mot, sans ajouter aucune obligation de médiation préalable ni aucune clause attribuant compétence à un tribunal : "Le présent contrat est soumis au droit français. Les réclamations du Client sont adressées par écrit au Prestataire, à l'adresse postale ou électronique indiquée en tête du contrat. En cas de litige, le Client peut recourir gratuitement ${mediateurB2C}. Le Client doit avoir adressé au préalable une réclamation écrite au Prestataire. Le recours au médiateur est facultatif et ne constitue pas un préalable obligatoire à la saisine du juge. Le Client peut saisir, à son choix, l'une des juridictions territorialement compétentes en vertu du Code de procédure civile ou la juridiction du lieu où il demeurait au moment de la conclusion du contrat ou de la survenance du fait dommageable, conformément à l'article R631-3 du Code de la consommation."`
   : `Rédige cet article EXACTEMENT ainsi, mot pour mot, en gardant les majuscules de la phrase sur la compétence (la loi exige qu'elle soit très apparente) : "Le présent contrat est soumis au droit français. Les Parties peuvent rechercher une solution amiable, notamment par la médiation, sans que cette démarche constitue une condition préalable à la saisine du juge. LORSQUE LES DEUX PARTIES ONT CONTRACTÉ EN QUALITÉ DE COMMERÇANT, TOUT LITIGE RELATIF AU PRÉSENT CONTRAT RELÈVE DE LA COMPÉTENCE EXCLUSIVE DES JURIDICTIONS DU RESSORT DU DOMICILE OU DU SIÈGE DU PRESTATAIRE. Dans les autres cas, le tribunal compétent est déterminé selon les règles légales."`}
 
 ARTICLE 12 — DISPOSITIONS GÉNÉRALES
@@ -4092,6 +4123,8 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   tableRows.push(["Délai de paiement", pForm.paymentTerms === "Comptant"
     ? (acomptePctPdf > 0 ? "Solde dès réception de la facture" : (payFromLabel ? `Comptant, payable à partir du ${payFromLabel} (délai légal de 7 jours)` : "Comptant à la commande"))
     : `${pForm.paymentTerms} jours nets`]);
+  // Version 254 : moyens de paiement acceptés
+  if (paymentMethodsLabelFor(pForm)) tableRows.push(["Moyens de paiement", paymentMethodsLabelFor(pForm)]);
   tableRows.push(["Révisions incluses", /^illimit/i.test(String(pForm.revisions || "")) ? "Illimitées" : `${pForm.revisions} aller${pForm.revisions !== "1" ? "s" : ""}-retour${pForm.revisions !== "1" ? "s" : ""}`]);
   if (pricing.b2c) tableRows.push(["Intérêts de retard", pForm.latePaymentPenalty ? "Oui — Taux d'intérêt légal, après mise en demeure" : "Non stipulés"]);
   else tableRows.push(["Pénalités de retard", pForm.latePaymentPenalty ? "Oui — Taux BCE + 10 pts + 40 € forfait (art. L441-10 C.com.)" : "Non stipulées"]);
@@ -4490,7 +4523,7 @@ const emptyProfile = () => ({
   skills: [], photo: null,
   companyName: "", legalStatus: "", tvaNumber: "", address: "",
   iban: "", bic: "", bankName: "", logo: null,
-  mediateur: "", assurance: "",
+  mediateur: "", assurance: "", immatriculation: "",
 });
 
 function AppInner() {
@@ -4835,19 +4868,22 @@ function AppInner() {
     company_name: p.companyName, legal_status: p.legalStatus, tva_number: p.tvaNumber, address: p.address,
     iban: p.iban, bic: p.bic, bank_name: p.bankName, logo: p.logo,
     mediateur: p.mediateur || "", assurance: p.assurance || "",
+    immatriculation: p.immatriculation || "",
     updated_at: new Date().toISOString(),
   });
   // Colonnes ajoutées en version 219 (script SQL v219). Tant que le script n'a pas été lancé, Supabase refuse
   // toute la sauvegarde à cause d'elles : on réessaie alors sans elles, et elles restent gardées sur l'appareil.
   const PROFILE_V219_COLUMNS = ["mediateur", "assurance"];
+  // Version 254 : immatriculation (script SQL v254). Même principe : tant que la colonne manque, on fait sans elle.
+  const PROFILE_V254_COLUMNS = ["immatriculation"];
   // Version 229 : colonnes lues pour le profil. Le secret de facturation électronique n'en fait plus partie : seul le
   // serveur en a besoin. Ce sont les colonnes que la sauvegarde du profil écrit déjà, plus la connexion Stripe et
   // l'identifiant Super PDP.
   const PROFILE_SELECT_COLUMNS = ["id", "first_name", "last_name", "job_title", "bio", "tjm", "siret",
     "skills", "photo", "company_name", "legal_status", "tva_number", "address", "iban", "bic", "bank_name", "logo",
-    "mediateur", "assurance", "super_pdp_client_id", "stripe_connect_account_id", "stripe_connect_ready"];
+    "mediateur", "assurance", "immatriculation", "super_pdp_client_id", "stripe_connect_account_id", "stripe_connect_ready"];
   const isUnknownColumnError = (error) => !!error && (error.code === "42703" || error.code === "PGRST204" || /column .*does not exist|could not find .*column/i.test(String(error.message || "")));
-  const isMissingColumnError = (error) => !!error && (error.code === "PGRST204" || error.code === "42703" || PROFILE_V219_COLUMNS.some(c => String(error.message || "").includes(c)));
+  const isMissingColumnError = (error) => !!error && (error.code === "PGRST204" || error.code === "42703" || [...PROFILE_V219_COLUMNS, ...PROFILE_V254_COLUMNS].some(c => String(error.message || "").includes(c)));
 
   // Convertit une ligne Supabase (snake_case) vers le format du profil (camelCase)
   const rowToProfile = (row) => ({
@@ -4860,6 +4896,7 @@ function AppInner() {
     // Seulement si la colonne existe déjà : sinon on garderait un champ vide à la place de ce qui est sur l'appareil
     ...(row.mediateur !== undefined ? { mediateur: row.mediateur || "" } : {}),
     ...(row.assurance !== undefined ? { assurance: row.assurance || "" } : {}),
+    ...(row.immatriculation !== undefined ? { immatriculation: row.immatriculation || "" } : {}),
     // Version 229 : le secret (super_pdp_client_secret) n'est plus lu par le navigateur ; l'identifiant suffit
     // (les deux sont enregistrés et effacés ensemble). Avant, select("*") l'envoyait au navigateur.
     superPdpConnected: !!row.super_pdp_client_id,
@@ -4874,7 +4911,8 @@ function AppInner() {
       // manque encore dans la base (script SQL pas lancé), on réessaie sans celles de la v219, puis comme avant.
       const sel = (cols) => supabase.from("profiles").select(cols).eq("id", userId).maybeSingle();
       let res = await sel(PROFILE_SELECT_COLUMNS.join(", "));
-      if (res.error && isUnknownColumnError(res.error)) res = await sel(PROFILE_SELECT_COLUMNS.filter(c => !PROFILE_V219_COLUMNS.includes(c)).join(", "));
+      if (res.error && isUnknownColumnError(res.error)) res = await sel(PROFILE_SELECT_COLUMNS.filter(c => !PROFILE_V254_COLUMNS.includes(c)).join(", "));
+      if (res.error && isUnknownColumnError(res.error)) res = await sel(PROFILE_SELECT_COLUMNS.filter(c => !PROFILE_V219_COLUMNS.includes(c) && !PROFILE_V254_COLUMNS.includes(c)).join(", "));
       if (res.error && isUnknownColumnError(res.error)) { console.warn("Profil : colonne absente de la base, lecture complète", res.error); res = await sel("*"); }
       if (res.error) throw res.error;
       data = res.data;
@@ -4917,10 +4955,17 @@ function AppInner() {
       supabase.from("profiles").upsert(row)
         .then(({ error }) => {
           if (!isMissingColumnError(error)) { if (error) console.error("Erreur sauvegarde profil Supabase:", error); return; }
+          // Version 254 : d'abord sans la colonne de la v254, puis sans celles de la v219
           const rest = { ...row };
-          PROFILE_V219_COLUMNS.forEach(c => { delete rest[c]; });
+          PROFILE_V254_COLUMNS.forEach(c => { delete rest[c]; });
           return supabase.from("profiles").upsert(rest)
-            .then(({ error: e2 }) => { if (e2) console.error("Erreur sauvegarde profil Supabase:", e2); });
+            .then(({ error: e2 }) => {
+              if (!isMissingColumnError(e2)) { if (e2) console.error("Erreur sauvegarde profil Supabase:", e2); return; }
+              const rest2 = { ...rest };
+              PROFILE_V219_COLUMNS.forEach(c => { delete rest2[c]; });
+              return supabase.from("profiles").upsert(rest2)
+                .then(({ error: e3 }) => { if (e3) console.error("Erreur sauvegarde profil Supabase:", e3); });
+            });
         });
     }, 1200);
     return () => clearTimeout(timer);
@@ -5273,6 +5318,9 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       freelanceTvaNumber: String(profile?.tvaNumber || "").trim(),
       // Version 253 : le médiateur du profil n'est plus recopié dans le contrat (c'est l'affaire du freelance).
       freelanceAssurance: String(profile?.assurance || "").trim(),
+      // Version 254 : immatriculation (profil) et moyens de paiement (cases du formulaire, ou ceux proposés par défaut)
+      freelanceImmatriculation: String(profile?.immatriculation || "").trim(),
+      paymentMethods: effectivePaymentMethods(form, profile, stripeConnectReady),
       // Entre professionnels, les pénalités de retard sont obligatoires (art. L441-10 C. com.)
       latePaymentPenalty: form.typeClient === "particulier" ? !!form.latePaymentPenalty : true,
     };
@@ -6687,6 +6735,25 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                   Temps accordé au client pour payer, une fois la mission terminée et ta facture reçue. Exception : « Comptant » sans acompte veut dire que tout est payé à la signature.
                 </div>
               </div>
+              {/* Version 254 : moyens de paiement acceptés, écrits dans le contrat */}
+              <div className="fade-up fade-up-3" style={{ marginBottom:24 }}>
+                <label style={{ display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:10 }}>MOYENS DE PAIEMENT ACCEPTÉS</label>
+                <div data-testid="payment-methods" style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                  {PAYMENT_METHODS.map(m => {
+                    const current = effectivePaymentMethods(form, profile, stripeConnectReady);
+                    const on = current.includes(m.id);
+                    return (
+                      <label key={m.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 12px", border:`1.5px solid ${on ? C.navy : C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13, color:C.navy, background: on ? "#F1F5F9" : "#fff" }}>
+                        <input type="checkbox" name="paymentMethods" value={m.id} checked={on} onChange={() => update("paymentMethods", on ? current.filter(x => x !== m.id) : [...current, m.id])} />
+                        {m.label}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5, marginTop:8 }}>
+                  Ils seront écrits dans le contrat : la loi impose de dire au client comment il peut payer.
+                </div>
+              </div>
               <div className="fade-up fade-up-4">
                 <ToggleGroup label="Révisions incluses" options={["1","2","3","Illimitées"]} labels={["1","2","3","Illimitées"]} value={form.revisions} onChange={v=>update("revisions",v)} tooltip="Nombre de retours client inclus dans le prix. Au-delà, tu peux facturer des modifications supplémentaires." />
               </div>
@@ -7038,6 +7105,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               {(() => {
                 const notes = [];
                 // Version 253 : plus de message sur le médiateur (c'est l'affaire du freelance).
+                if (!effectivePaymentMethods(form, profile, stripeConnectReady).length) notes.push("Coche au moins un moyen de paiement (virement, carte ou chèque) : le contrat doit dire à ton client comment il peut payer.");
                 if (form.clauseSecurite && !String(profile?.assurance || "").trim()) notes.push("La clause d'assurance annonce que tes assurances sont indiquées dans le contrat. Indique ton assurance dans ton profil, ou décoche la clause.");
                 if (!notes.length) return null;
                 return (
@@ -20844,6 +20912,14 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
               <label style={labelStyle}>NUMÉRO SIRET</label>
               <input style={inputStyle} value={profile.siret} placeholder="123 456 789 00012" onChange={e => updateProfile("siret", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
             </div>
+            {/* Version 254 : immatriculation, écrite en tête des contrats (art. R111-2 C. conso) */}
+            <div style={{ marginBottom:14 }}>
+              <label style={labelStyle}>IMMATRICULATION</label>
+              <input style={inputStyle} value={profile.immatriculation || ""} placeholder="Ex. : RCS Amiens 123 456 789, ou RNE 123 456 789" onChange={e => updateProfile("immatriculation", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+              <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>
+                Le registre où ton entreprise est immatriculée, avec son numéro. Il sera écrit en tête de tes contrats.
+              </div>
+            </div>
             <div style={{ marginBottom:14 }}>
               <label style={labelStyle}>STATUT JURIDIQUE</label>
               <select style={{ ...inputStyle, cursor:"pointer" }} value={profile.legalStatus} onChange={e => updateProfile("legalStatus", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border}>
@@ -20873,9 +20949,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             {/* Version 253 : plus de case « Médiateur de la consommation » : Freeley ne s'en occupe pas. */}
             <div style={{ marginTop:14 }}>
               <label style={labelStyle}>ASSURANCE PROFESSIONNELLE</label>
-              <input style={inputStyle} value={profile.assurance || ""} placeholder="Assureur, numéro de contrat et zone couverte (ex. : France)" onChange={e => updateProfile("assurance", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+              <input style={inputStyle} value={profile.assurance || ""} placeholder="Assureur et ses coordonnées, n° de contrat, zone couverte (ex. : France)" onChange={e => updateProfile("assurance", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
               <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>
-                Si tu as une assurance professionnelle, indique-la ici. Elle sera écrite dans tes contrats et sur tes factures. Pour certains métiers, comme le bâtiment avec la garantie décennale, la loi l'impose sur les devis et les factures.
+                Si tu as une assurance professionnelle, indique ici l'assureur, ses coordonnées et la zone couverte : avec un client particulier, la loi t'oblige à les lui donner. Elle sera écrite dans tes contrats et sur tes factures. Pour certains métiers, comme le bâtiment avec la garantie décennale, la loi l'impose sur les devis et les factures.
               </div>
             </div>
           </div>
@@ -21135,6 +21211,19 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
 }
 
 /* ══════════════════════════════════════════════════════════ ROOT EXPORT ══ */
+// Version 254 : rôle de Freeley sur les pages du client (place de marché en ligne, art. L111-7 C. conso, avis
+// d'Ordalie). Le contrat est conclu avec le freelance ; Freeley n'est que l'outil qu'il utilise.
+function FreeleyRoleBox({ name, kind = "contrat" }) {
+  const who = String(name || "").trim() || "votre prestataire";
+  const ce = kind === "avenant" ? "cet avenant" : "ce contrat";
+  return (
+    <div data-testid="freeley-role" style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:12, padding:"12px 14px", marginBottom:16, fontSize:12, color:"#475569", lineHeight:1.55, textAlign:"left" }}>
+      <div style={{ fontWeight:700, color:"#1B2E4B", marginBottom:4 }}>Qui est votre prestataire ?</div>
+      {kind === "avenant" ? "Cet avenant" : "Ce contrat"} est conclu entre vous et {who}, professionnel indépendant, qui réalise la prestation et en est seul responsable. Freeley est l'outil en ligne que {who} utilise pour préparer, signer et gérer ses contrats. Freeley n'est pas partie à {ce}, ne référence ni ne classe aucun prestataire et ne perçoit aucune commission sur {ce}. Pour toute question sur la prestation, adressez-vous directement à {who}.
+    </div>
+  );
+}
+
 function ClientSignaturePage({ contractId }) {
   const [loading, setLoading] = useState(true);
   const [contractData, setContractData] = useState(null);
@@ -21433,6 +21522,7 @@ function ClientSignaturePage({ contractId }) {
             </div>
           )}
 
+          <FreeleyRoleBox name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} />
           <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
             <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>CONTRAT SIGNÉ</div>
             <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
@@ -21544,6 +21634,7 @@ function ClientSignaturePage({ contractId }) {
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
           <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique du contrat</div>
         </div>
+        <FreeleyRoleBox name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} />
 
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           {textChangedNotice && (
@@ -21579,10 +21670,10 @@ function ClientSignaturePage({ contractId }) {
               onClick={handleSign}
               disabled={!hasStrokes || signing}
               style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
-            >{signing ? "Enregistrement…" : "✓ Signer le contrat"}</button>
+            >{signing ? "Enregistrement…" : (isParticulier ? "✓ Signer le contrat avec obligation de paiement" : "✓ Signer le contrat")}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
-            En signant, vous acceptez les termes de ce contrat. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
+            En signant, vous acceptez les termes de ce contrat{isParticulier ? " et vous vous engagez à payer le prix qu'il prévoit" : ""}. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
           </div>
         </div>
         )}
@@ -21842,6 +21933,15 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
   const [hasStrokes, setHasStrokes] = useState(false);
   const drawing = useRef(false);
 
+  // Version 254 : le contrat lui-même, pour l'encadré « Qui est votre prestataire ? » et le bouton de signature
+  // (un particulier dont l'avenant ajoute un montant signe « avec obligation de paiement », art. L221-14 C. conso)
+  const [contractInfo, setContractInfo] = useState(null);
+  useEffect(() => {
+    getContractForSigning(contractId).then(r => setContractInfo(r?.content || null)).catch(() => {});
+  }, [contractId]);
+  const avRecord = (Array.isArray(contractInfo?.avenants) ? contractInfo.avenants : []).find(a => Number(a?.num) === Number(avenantNum)) || avenantData || {};
+  const avWithPayment = contractInfo?.form?.typeClient === "particulier" && Number(avRecord?.ajustementMontant) > 0;
+
   useEffect(() => {
     getAvenantForSigning(contractId, avenantNum)
       .then(data => {
@@ -21914,6 +22014,7 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
           <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique — Avenant n°{avenantNum}</div>
         </div>
+        <FreeleyRoleBox kind="avenant" name={contractInfo?.form ? contractFreelanceName(resolveLegalStatus(contractInfo.form, contractInfo.contract)) : ""} />
 
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>AVENANT À SIGNER</div>
@@ -21945,10 +22046,10 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
               onClick={handleSign}
               disabled={!hasStrokes || signing}
               style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
-            >{signing ? "Enregistrement…" : "✓ Signer l'avenant"}</button>
+            >{signing ? "Enregistrement…" : (avWithPayment ? "✓ Signer l'avenant avec obligation de paiement" : "✓ Signer l'avenant")}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
-            En signant, vous acceptez les termes de cet avenant. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
+            En signant, vous acceptez les termes de cet avenant{avWithPayment ? " et vous vous engagez à payer le montant qu'il prévoit" : ""}. Votre signature est horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de votre appareil, comme preuve.
           </div>
         </div>
         <ClientLegalNote who="prestataire" />
