@@ -1082,7 +1082,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "251";
+const APP_VERSION = "252";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -2406,40 +2406,45 @@ const contractNumberClauses = (form, profile) => {
         : paymentTermsLabel;
       // Montants du contrat : TTC pour un particulier (obligatoire), HT pour un professionnel
       const pricing = contractPricing(form, profile);
-      const U = pricing.unit;
+      // Version 252 (Ordalie) : en franchise de TVA, ni « HT » ni « TTC » après les montants. Le montant seul, puis la
+      // mention « TVA non applicable, article 293 B du CGI ».
+      const U = pricing.tvaApplicable ? pricing.unit : "";
+      const money = (n) => `${fmtEuro(n)} €${U ? " " + U : ""}`;
       const isB2C = form.typeClient === "particulier";
 
       // Article 3 — particulier : pas de preuve limitée ni de validation qui priverait le client de ses garanties
+      // Version 252 (Ordalie) : le silence vaut acceptation pour l'avancement et la facturation seulement, sans
+      // renonciation aux recours du client ; entre professionnels, seulement pour les défauts apparents.
       const recetteEndB2C = acomptePct > 0
-        ? ", ce qui permet la facturation du solde correspondant"
-        : form.paymentTerms === "Comptant" ? "" : ", ce qui permet la facturation des honoraires";
+        ? " et de permettre la facturation du solde correspondant"
+        : form.paymentTerms === "Comptant" ? "" : " et de permettre la facturation des honoraires";
       const recetteClause = isB2C
-        ? `"À compter de la livraison de chaque livrable, le Client dispose d'un délai de sept (7) jours ouvrés pour faire part au Prestataire, par écrit (par exemple par courriel), de ses observations ou réserves. À défaut, le livrable est considéré comme validé${recetteEndB2C}. Cette validation ne prive pas le Client des garanties légales dont il bénéficie, notamment pour les défauts qui n'apparaissent qu'après la livraison."`
-        : `"À compter de la livraison de chaque livrable, le Client dispose d'un délai de SEPT (7) JOURS OUVRÉS pour formuler par écrit (email avec accusé de réception) ses observations ou réserves motivées et circonstanciées. À l'expiration de ce délai sans retour écrit du Client, la prestation est réputée définitivement acceptée sans réserve, ${recetteEnd}. Les retours oraux ou non circonstanciés ne seront pas pris en compte."`;
+        ? `"À compter de la livraison de chaque livrable, le Client dispose d'un délai de sept (7) jours ouvrés pour faire part au Prestataire, par écrit, de ses observations ou réserves. À défaut, le livrable est réputé accepté aux seules fins de constater son avancement${recetteEndB2C}, sans que cette acceptation emporte renonciation du Client à ses droits ou recours en cas de non-conformité ou de défaut, ni aux garanties légales dont il bénéficie, notamment pour les défauts qui n'apparaissent qu'après la livraison."`
+        : `"À compter de la livraison de chaque livrable, le Client dispose d'un délai de sept (7) jours ouvrés pour formuler par écrit, à l'adresse électronique indiquée au contrat, des réserves suffisamment précises pour permettre au Prestataire d'identifier les défauts ou non-conformités invoqués. À défaut de réserves dans ce délai, le livrable est réputé accepté pour les défauts apparents qui pouvaient raisonnablement être décelés pendant ce délai. Cette acceptation ne prive pas le Client de ses recours pour les défauts non décelables dans ce délai, les défauts dissimulés ou les garanties légales impératives."`;
 
       // Article 4 — phrases écrites ici, mot pour mot : l'IA ne reformule plus les échéances de paiement
       // (elle avait recopié une consigne dans le contrat : « Seul l'acompte est dû à la signature… »).
       const dueAtSigning = acomptePct > 0 || form.paymentTerms === "Comptant";
       const horsEtabRef = isB2C ? ", sous réserve du délai de sept jours applicable aux contrats conclus hors établissement rappelé ci-après" : "";
-      const paymentSentences = `- "Le montant total des honoraires est fixé à ${fmtEuro(pricing.total)} € ${U}."
+      const paymentSentences = `- "Le montant total des honoraires est fixé à ${money(pricing.total)}."
 ` + (acomptePct > 0
-        ? `- "Un acompte de ${acomptePct} %, soit ${fmtEuro(pricing.acompte)} € ${U}, est dû à la signature du présent contrat${horsEtabRef}. Le versement de cet acompte conditionne le démarrage de la mission. Si la date de démarrage prévue à l'article 3 tombe avant ce versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée."
-- "Le solde de ${100 - acomptePct} %, soit ${fmtEuro(pricing.solde)} € ${U}, est exigible à la livraison et à la recette finale de la mission, payable ${soldeTermsLabel}."`
+        ? `- "Un acompte de ${acomptePct} %, soit ${money(pricing.acompte)}, est dû à la signature du présent contrat${horsEtabRef}. Le versement de cet acompte conditionne le démarrage de la mission. Si la date de démarrage prévue à l'article 3 tombe avant ce versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée."
+- "Le solde de ${100 - acomptePct} %, soit ${money(pricing.solde)}, est exigible à la livraison et à l'acceptation finale de la mission, payable ${soldeTermsLabel}."`
         : form.paymentTerms === "Comptant"
-          ? `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${fmtEuro(pricing.total)} € ${U}, est payable à la signature du présent contrat${horsEtabRef}. Le versement de cette somme conditionne le démarrage de la mission. Si la date de démarrage prévue à l'article 3 tombe avant ce versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée."`
-          : `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${fmtEuro(pricing.total)} € ${U}, est facturée à la fin de la mission et payable à ${form.paymentTerms} jours nets à compter de la date de cette facture."`);
+          ? `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${money(pricing.total)}, est payable à la signature du présent contrat${horsEtabRef}. Le versement de cette somme conditionne le démarrage de la mission. Si la date de démarrage prévue à l'article 3 tombe avant ce versement, le démarrage est reporté au jour du versement et la date de fin est décalée de la même durée."`
+          : `- "Aucun acompte n'est demandé. La totalité des honoraires, soit ${money(pricing.total)}, est facturée à la fin de la mission et payable à ${form.paymentTerms} jours nets à compter de la date de cette facture."`);
       // Contrat hors établissement (art. L221-10 C. conso) : rien ne se paie pendant 7 jours. Si un paiement
       // conditionne le démarrage, le contrat dit ce que deviennent les dates de la mission.
       const horsEtabSentence = `"Lorsque le présent contrat est conclu hors établissement, aucun paiement ne peut être exigé ni reçu du Client avant l'expiration d'un délai de sept jours à compter de sa conclusion, sauf pour des travaux d'entretien ou de réparation à réaliser en urgence au domicile du Client et expressément sollicités par lui, dans la limite des pièces de rechange et travaux strictement nécessaires pour répondre à l'urgence (article L221-10 du Code de la consommation).${dueAtSigning ? " En dehors de ce cas d'urgence, la somme prévue à la signature n'est alors exigible qu'à l'expiration de ce délai." : ""}"`;
       // Client professionnel (version 222) : une petite entreprise signée hors établissement a les droits d'un
       // consommateur (art. L221-3 C. conso). Phrase conditionnelle, comme celle du particulier : le contrat reste juste
       // quel que soit l'endroit où il est signé.
-      const petitProSentence = `"Lorsque le présent contrat est conclu hors établissement, que son objet n'entre pas dans le champ de l'activité principale du Client et que celui-ci emploie au plus cinq salariés, le Client bénéficie des règles du Code de la consommation applicables aux contrats conclus hors établissement, notamment du droit de rétractation de quatorze jours et de l'interdiction de tout paiement avant l'expiration d'un délai de sept jours à compter de la conclusion du contrat (articles L221-3 et L221-10 du Code de la consommation).${dueAtSigning ? " Dans ce cas, la somme prévue à la signature n'est exigible qu'à l'expiration de ce délai." : ""}"`;
+      const petitProSentence = `"Lorsque le présent contrat est conclu hors établissement entre deux professionnels, que son objet n'entre pas dans le champ de l'activité principale du professionnel sollicité et que celui-ci emploie au plus cinq salariés, les dispositions des sections 2, 3 et 6 du chapitre Ier du titre II du livre II du Code de la consommation sont applicables (article L221-3 du Code de la consommation), notamment le délai de rétractation de quatorze jours prévu à l'article L221-18 et l'interdiction de recevoir un paiement avant l'expiration du délai de sept jours prévue à l'article L221-10, sous réserve des exceptions légales. Dans ce cas, les informations et le formulaire applicables au droit de rétractation sont remis au Client avec le contrat${dueAtSigning ? ", et la somme prévue à la signature n'est exigible qu'à l'expiration du délai de sept jours" : ""}."`;
       // Article 9 — résiliation : phrases fixes, et rien qui retienne l'acompte d'un particulier
       const resiliationClient = form.clauseDedit
         ? `Ne mentionne PAS que l'acompte est automatiquement et intégralement conservé comme indemnité forfaitaire fixe en cas de résiliation par le Client : ce sujet est entièrement régi par la clause de dédommagement ci-dessous, qui prévoit une indemnité déterminée selon l'avancement réel de la mission, et ne doit pas être contredite ou dupliquée ici.`
         : (isB2C || acomptePct === 0)
-          ? `Inclus aussi, mot pour mot : "En cas de résiliation par le Client${isB2C ? " en dehors de l'exercice de son droit de rétractation" : ""}, les prestations effectivement réalisées jusqu'à la date de résiliation restent dues. Toute somme déjà versée s'impute sur ces montants, et le surplus éventuel est restitué au Client."`
+          ? `Inclus aussi, mot pour mot : "En cas de fin du contrat à l'initiative du Client, hors exercice du droit de rétractation, seules les prestations effectivement réalisées jusqu'à la date de prise d'effet restent dues. Toute somme déjà versée au-delà de leur prix est restituée au Client."`
           : `Inclus aussi, mot pour mot : "En cas de résiliation par le Client, l'acompte versé reste acquis au Prestataire à titre d'indemnité forfaitaire."`;
 
       // Article 9 — clause de dédommagement en cas d'annulation (texte fixe selon le client et l'acompte)
@@ -2482,15 +2487,18 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
         ? `\nJuste après cette clause, inclus mot pour mot : "Assurance déclarée par le Prestataire : ${form.freelanceAssurance}."`
         : "";
 
-      // Article 11 — particulier : le médiateur du freelance, s'il est indiqué dans son profil
-      const mediateurB2C = form.freelanceMediateur
-        ? `au médiateur de la consommation dont relève le Prestataire, ${form.freelanceMediateur},`
-        : `à un médiateur de la consommation`;
+      // Article 11 — particulier : le médiateur du freelance, tel qu'il l'a indiqué dans son profil. Version 252
+      // (Ordalie) : ses coordonnées complètes, et la réclamation écrite préalable au freelance (art. L612-2, R616-1).
+      // Freeley ne choisit ni ne vérifie le médiateur : c'est au freelance d'y adhérer et de le renseigner.
+      const mediateurInfo = String(form.freelanceMediateur || "").trim().replace(/[\s.;,]+$/, "");
+      const mediateurB2C = mediateurInfo
+        ? `au médiateur de la consommation dont relève le Prestataire : ${mediateurInfo}`
+        : `au médiateur de la consommation dont relève le Prestataire`;
 
       // Article 12 — dispositions générales : texte fixe
       const dispositionsGenerales = isB2C
-        ? `"Le présent contrat, ses annexes et ses éventuels avenants signés expriment l'accord des Parties sur son objet. Toute modification du contrat fait l'objet d'un avenant écrit, accepté par les deux Parties. Si l'une des stipulations du présent contrat est déclarée nulle ou inapplicable, les autres stipulations demeurent en vigueur. Le fait pour l'une des Parties de ne pas se prévaloir d'un manquement de l'autre Partie ne vaut pas renonciation à s'en prévaloir ultérieurement. En cas de contradiction entre un avenant et le présent contrat, l'avenant prévaut pour son objet. Les notifications prévues au présent contrat sont adressées aux adresses postales ou électroniques indiquées en tête du contrat."`
-        : `"Le présent contrat, ses annexes et ses éventuels avenants signés expriment l'intégralité de l'accord des Parties sur son objet et remplacent tout accord antérieur portant sur le même objet. Toute modification du contrat fait l'objet d'un avenant écrit, accepté par les deux Parties. Si l'une des stipulations du présent contrat est déclarée nulle ou inapplicable, les autres stipulations demeurent en vigueur. Le fait pour l'une des Parties de ne pas se prévaloir d'un manquement de l'autre Partie ne vaut pas renonciation à s'en prévaloir ultérieurement. En cas de contradiction entre un avenant et le présent contrat, l'avenant prévaut pour son objet. Les notifications prévues au présent contrat sont adressées aux adresses postales ou électroniques indiquées en tête du contrat."`;
+        ? `"Le présent contrat, ses annexes et ses éventuels avenants signés expriment l'accord des Parties sur son objet. Toute modification du contrat fait l'objet d'un avenant écrit, accepté par les deux Parties. Si l'une des stipulations du présent contrat est déclarée nulle ou inapplicable, les autres stipulations demeurent en vigueur dans la mesure où le contrat peut subsister sans elle, conformément à l'article 1184 du Code civil. Le fait pour l'une des Parties de ne pas se prévaloir d'un manquement de l'autre Partie ne vaut pas renonciation à s'en prévaloir ultérieurement. En cas de contradiction entre un avenant et le présent contrat, l'avenant prévaut pour son objet. Les notifications prévues au présent contrat sont adressées aux adresses postales ou électroniques indiquées en tête du contrat."`
+        : `"Le présent contrat, ses annexes et ses éventuels avenants signés expriment l'intégralité de l'accord des Parties sur son objet et remplacent tout accord antérieur portant sur le même objet. Toute modification du contrat fait l'objet d'un avenant écrit, accepté par les deux Parties. Si l'une des stipulations du présent contrat est déclarée nulle ou inapplicable, les autres stipulations demeurent en vigueur dans la mesure où le contrat peut subsister sans elle, conformément à l'article 1184 du Code civil. Le fait pour l'une des Parties de ne pas se prévaloir d'un manquement de l'autre Partie ne vaut pas renonciation à s'en prévaloir ultérieurement. En cas de contradiction entre un avenant et le présent contrat, l'avenant prévaut pour son objet. Les notifications prévues au présent contrat sont adressées aux adresses postales ou électroniques indiquées en tête du contrat."`;
       // Date et numéro générés par l'app (pas par l'IA) : garantit une info réelle, jamais hallucinée
       const todayFull = now.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
       const contractRef = `CP-${now.getFullYear()}-${String(now.getTime()).slice(-4)}`;
@@ -2543,19 +2551,20 @@ Objet général, puis la description de la mission et des livrables, reprise FID
 ARTICLE 3 — DÉLAIS, PLANNING ET PROCÉDURE DE VALIDATION (RECETTE)
 ${datesSentence ? `Commence par cette phrase, mot pour mot, sans y ajouter de renvoi à un autre article : "${datesSentence}"` : "Rédige les dates de début et de fin en une phrase simple, sans renvoi à un autre article."}
 Puis inclus OBLIGATOIREMENT, mot pour mot, cette clause de recette :
-${recetteClause}${form.categorieMetier === "artisanat" ? `\nInclus aussi, mot pour mot : "Pour les travaux qui relèvent de l'article 1792-6 du Code civil, la réception est prononcée dans les conditions prévues à l'article 6."` : ""}
+${recetteClause}${form.categorieMetier === "artisanat" ? `\nInclus aussi, mot pour mot : "Pour les travaux relevant de l'article 1792-6 du Code civil, cette procédure ne vaut pas réception : celle-ci est prononcée contradictoirement dans les conditions prévues à l'article 6."` : ""}
 ${form.clauseInterlocuteur ? (form.typeClient === "particulier"
   ? `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Le Client est l'interlocuteur de référence du Prestataire pour la validation des livrables et la transmission des instructions. S'il souhaite qu'un tiers intervienne pour son compte, il en informe préalablement le Prestataire par écrit en précisant l'identité et le rôle de cette personne. Les instructions d'un tiers non désigné ne sont opposables au Prestataire qu'après confirmation écrite du Client."`
   : `Inclus OBLIGATOIREMENT, en complément, la clause d'interlocuteur unique suivante : "Lorsque plusieurs personnes sont susceptibles d'intervenir pour le compte du Client dans le suivi de la mission, le Client désigne un interlocuteur unique, dûment habilité, chargé de la validation des livrables et de la transmission des instructions au Prestataire. Le Prestataire n'est tenu de prendre en compte que les observations, validations ou demandes de modification émanant de cet interlocuteur ou expressément confirmées par écrit par celui-ci. Toute instruction contradictoire émanant d'une autre personne intervenant pour le compte du Client ne peut engager le Prestataire ni justifier un dépassement du périmètre ou des délais convenus. L'identité et les coordonnées de l'interlocuteur sont précisées au contrat ou communiquées par écrit avant le commencement de la mission. Tout changement est notifié par écrit dans les meilleurs délais."`)
   : ""}
 
 ARTICLE 4 — HONORAIRES, MODALITÉS DE PAIEMENT ET ACOMPTE
-${pricing.b2c ? `Montant total TTC : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Montant total HT : ${form.price} €`}
+${!pricing.tvaApplicable ? `Montant total : ${fmtEuro(pricing.total)} € (TVA non applicable, article 293 B du CGI)` : pricing.b2c ? `Montant total TTC : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Montant total HT : ${form.price} €`}
 Inclus OBLIGATOIREMENT, mot pour mot, les phrases suivantes, chacune dans son propre sous-paragraphe :
 ${paymentSentences}
 ${pricing.b2c
-  ? `- "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent aux montants que le Client aura effectivement à payer (${pricing.taxNote})."
-- ${horsEtabSentence}`
+  ? `- "${pricing.tvaApplicable ? "Les prix stipulés au présent contrat sont exprimés toutes taxes comprises (TTC) ; ils correspondent" : "Les prix stipulés au présent contrat correspondent"} aux montants que le Client aura effectivement à payer (${pricing.taxNote})."
+- ${horsEtabSentence}
+- "Lorsque le Client est un consommateur et que le contrat est conclu à distance ou hors établissement, les conditions, modalités et formulaire de son éventuel droit de rétractation lui sont remis avec le contrat. Si le Client demande que la mission commence avant la fin du délai de rétractation, le Prestataire recueille au préalable sa demande expresse et, pour un contrat hors établissement, sur support durable."`
   : `${pricing.tvaApplicable
     ? `- "Toutes les sommes sont exprimées hors taxes ; la TVA s'y ajoute au taux en vigueur."`
     : `- "TVA non applicable, article 293 B du Code général des impôts : les montants indiqués au présent contrat sont les montants effectivement dus par le Client."`}
@@ -2603,9 +2612,11 @@ Le Client étant un consommateur, rédige OBLIGATOIREMENT, mot pour mot :
 ${responsabiliteB2C}
 N'ajoute AUCUN plafond de responsabilité, AUCUNE exclusion de préjudice et AUCUNE limitation de garantie : avec un consommateur, ces clauses sont interdites (article R212-1 du Code de la consommation).${form.freelanceAssurance && !form.clauseSecurite ? `
 Inclus aussi, mot pour mot : "Le Prestataire est couvert par l'assurance professionnelle suivante : ${form.freelanceAssurance}."` : ""}`
-  : `ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE — OBLIGATION DE MOYENS ET PLAFONNEMENT
-Rédige OBLIGATOIREMENT :
-"Le Prestataire est soumis à une OBLIGATION DE MOYENS au sens du droit civil français : il s'engage à mettre en œuvre tous les moyens raisonnables et les compétences professionnelles requises pour atteindre les objectifs de la mission, sans garantir un résultat déterminé. La responsabilité du Prestataire ne pourra être engagée qu'en cas de faute prouvée par le Client. En tout état de cause, la responsabilité totale et cumulée du Prestataire au titre du présent contrat est PLAFONNÉE au montant total des honoraires effectivement perçus par le Prestataire pour la mission considérée, à l'exclusion de tout préjudice indirect, perte de chiffre d'affaires, perte de données ou préjudice commercial."${form.categorieMetier === "artisanat" ? `
+  : `ARTICLE 8 — RESPONSABILITÉ DU PRESTATAIRE ET PLAFONNEMENT
+Inclus OBLIGATOIREMENT, mot pour mot, les paragraphes suivants, dans cet ordre, chacun dans son propre sous-paragraphe :
+- "Le Prestataire exécute les obligations mises à sa charge selon leur nature et les engagements convenus au présent contrat. Il répond des dommages résultant de l'inexécution ou du retard dans l'exécution de ses obligations dans les conditions prévues par la loi."
+- "Dans la mesure permise par la loi, la responsabilité totale et cumulée du Prestataire au titre du présent contrat est plafonnée au montant total des honoraires prévus au présent contrat. Ce plafond ne s'applique pas lorsque la loi interdit de limiter la responsabilité ou lorsqu'il aurait pour effet de priver de sa substance une obligation essentielle du Prestataire."
+- "Dans la mesure permise par la loi, seuls les préjudices indirects sont exclus. La qualification d'un préjudice comme direct ou indirect s'apprécie au regard des circonstances de l'espèce."${form.categorieMetier === "artisanat" ? `
 Inclus aussi, mot pour mot : "Le plafonnement prévu ci-dessus ne s'applique pas aux responsabilités et garanties légales impératives rappelées à l'article 6."` : ""}`}
 ${form.clauseSecurite ? (form.categorieMetier === "artisanat"
   ? `Inclus OBLIGATOIREMENT, en complément, la clause de sécurité et assurance suivante, et n'aborde ce sujet nulle part ailleurs dans le contrat (ne crée pas d'article séparé sur l'assurance) : "Le Prestataire déclare avoir souscrit et s'engage à maintenir pendant la durée de la mission les assurances rendues obligatoires par la réglementation applicable à son activité et à la nature des travaux réalisés. Lorsque sa responsabilité décennale est susceptible d'être engagée sur le fondement des articles 1792 et suivants du Code civil, le Prestataire est couvert par l'assurance obligatoire prévue à l'article L241-1 du Code des assurances. À l'ouverture du chantier, il justifie de cette assurance dans les conditions légales applicables. L'attestation d'assurance correspondante est notamment jointe aux devis et factures lorsque l'article L243-2 du Code des assurances l'exige. Le Client s'engage à signaler par écrit au Prestataire, avant le début de la mission, tout risque, danger ou anomalie connu du lieu d'intervention. Le Client demeure responsable des dommages directement imputables à un manquement prouvé à cette obligation d'information. Les montants garantis par les polices d'assurance ne constituent pas, par eux-mêmes, une limitation contractuelle de responsabilité."`
@@ -2615,10 +2626,10 @@ ${form.clauseSecurite ? (form.categorieMetier === "artisanat"
   : ""}
 
 ARTICLE 9 — RÉSILIATION
-Inclus OBLIGATOIREMENT, mot pour mot : "Chacune des Parties peut résilier le présent contrat en cas de manquement grave de l'autre Partie à l'une de ses obligations essentielles, après une mise en demeure écrite restée sans effet pendant un délai de huit (8) jours à compter de sa réception. La résiliation est notifiée par écrit et prend effet à la date de sa réception."
-Inclus aussi, mot pour mot : "Le Client peut également mettre fin au contrat à tout moment, par notification écrite adressée au Prestataire, dans les conditions prévues au présent article."
+Inclus OBLIGATOIREMENT, mot pour mot : "Chacune des Parties peut résoudre le présent contrat en cas d'inexécution suffisamment grave par l'autre Partie de l'une de ses obligations. Sauf urgence, la Partie qui entend résoudre le contrat adresse d'abord à l'autre une mise en demeure précisant le manquement et lui impartissant un délai raisonnable pour y remédier. La mise en demeure indique expressément qu'à défaut d'exécution dans ce délai, le contrat pourra être résolu. Si le manquement persiste, la résolution est notifiée par écrit et motivée."
+Inclus aussi, mot pour mot : "Le Client peut également mettre fin au contrat à tout moment, par notification écrite adressée au Prestataire. La fin du contrat prend effet à la réception de cette notification."
 ${resiliationClient}
-Inclus aussi, mot pour mot : "En cas de résiliation par le Prestataire pour faute du Client, les sommes dues pour les prestations réalisées sont immédiatement exigibles."
+Inclus aussi, mot pour mot : "En cas de résolution par le Prestataire pour inexécution du Client, les sommes correspondant aux prestations effectivement réalisées deviennent exigibles à la date de prise d'effet de la résolution, sans préjudice d'une éventuelle indemnité prévue par une clause distincte."
 ${deditClause}
 ${form.clauseRespect ? `Inclus OBLIGATOIREMENT, en complément, la clause de bonne conduite suivante : "Le Client s'engage à faire preuve de respect et de courtoisie dans l'ensemble de ses échanges avec le Prestataire, quel qu'en soit le support (écrit, oral, téléphonique ou en personne). Tout comportement abusif, insultant, dégradant, menaçant ou constitutif de harcèlement à l'égard du Prestataire constitue un manquement grave aux obligations essentielles du présent contrat. Sauf urgence rendant manifestement impossible la poursuite de la relation contractuelle, le Prestataire met préalablement le Client en demeure, par écrit, de cesser le comportement reproché dans un délai raisonnable. Cette mise en demeure indique qu'à défaut de cessation du manquement, le Prestataire pourra mettre fin au contrat. Si le manquement persiste, le Prestataire notifie au Client la résolution du contrat et les raisons qui la motivent. Les sommes dues au titre des prestations déjà réalisées demeurent exigibles. En cas d'urgence, notamment en présence de menace grave, de violence ou de harcèlement caractérisé rendant impossible la poursuite de la relation, le Prestataire peut notifier immédiatement la résolution du contrat, par écrit et de manière motivée."` : ""}
 ${form.clausePreavis ? (form.typeClient === "particulier"
@@ -2632,8 +2643,8 @@ ${fixedParagraphs(FIXED_FORCE_MAJEURE)}
 
 ARTICLE 11 — ${form.typeClient === "particulier" ? "DROIT APPLICABLE ET RÈGLEMENT DES LITIGES" : "DROIT APPLICABLE, MÉDIATION ET ATTRIBUTION DE JURIDICTION"}
 ${form.typeClient === "particulier"
-  ? `Le Client étant un consommateur, rédige cet article EXACTEMENT ainsi, mot pour mot, sans ajouter aucune obligation de médiation préalable ni aucune clause attribuant compétence à un tribunal : "Le présent contrat est soumis au droit français. En cas de litige, le Client peut recourir gratuitement ${mediateurB2C} en vue de la résolution amiable du litige, dans les conditions prévues aux articles L611-1 et suivants du Code de la consommation. Ce recours est facultatif et ne constitue pas un préalable obligatoire à la saisine du juge. Le Client peut saisir, à son choix, l'une des juridictions territorialement compétentes en vertu du Code de procédure civile ou la juridiction du lieu où il demeurait au moment de la conclusion du contrat ou de la survenance du fait dommageable, conformément à l'article R631-3 du Code de la consommation."`
-  : `Rédige cet article EXACTEMENT ainsi, mot pour mot : "Le présent contrat est soumis au droit français. En cas de litige, les Parties s'efforcent de trouver une solution amiable, notamment par la médiation, avant toute action judiciaire. Lorsque les deux Parties ont la qualité de commerçant, tout litige relatif au présent contrat relève de la compétence exclusive du tribunal dans le ressort duquel se trouve le domicile ou le siège du Prestataire, conformément à l'article 48 du Code de procédure civile. Dans les autres cas, le tribunal compétent est déterminé selon les règles légales."`}
+  ? `Le Client étant un consommateur, rédige cet article EXACTEMENT ainsi, mot pour mot, sans ajouter aucune obligation de médiation préalable ni aucune clause attribuant compétence à un tribunal : "Le présent contrat est soumis au droit français. En cas de litige, le Client peut recourir gratuitement ${mediateurB2C}. Le Client doit avoir adressé au préalable une réclamation écrite au Prestataire. Le recours au médiateur est facultatif et ne constitue pas un préalable obligatoire à la saisine du juge. Le Client peut saisir, à son choix, l'une des juridictions territorialement compétentes en vertu du Code de procédure civile ou la juridiction du lieu où il demeurait au moment de la conclusion du contrat ou de la survenance du fait dommageable, conformément à l'article R631-3 du Code de la consommation."`
+  : `Rédige cet article EXACTEMENT ainsi, mot pour mot, en gardant les majuscules de la phrase sur la compétence (la loi exige qu'elle soit très apparente) : "Le présent contrat est soumis au droit français. Les Parties peuvent rechercher une solution amiable, notamment par la médiation, sans que cette démarche constitue une condition préalable à la saisine du juge. LORSQUE LES DEUX PARTIES ONT CONTRACTÉ EN QUALITÉ DE COMMERÇANT, TOUT LITIGE RELATIF AU PRÉSENT CONTRAT RELÈVE DE LA COMPÉTENCE EXCLUSIVE DES JURIDICTIONS DU RESSORT DU DOMICILE OU DU SIÈGE DU PRESTATAIRE. Dans les autres cas, le tribunal compétent est déterminé selon les règles légales."`}
 
 ARTICLE 12 — DISPOSITIONS GÉNÉRALES
 Rédige cet article EXACTEMENT ainsi, mot pour mot :
@@ -2651,7 +2662,7 @@ CONSIGNES DE RÉDACTION
 - Cite les fondements légaux (articles de loi) entre parenthèses, uniquement quand ils sont certains.
 - Ne laisse AUCUN champ vide ou à compléter : utilise toutes les données fournies.
 - Le contrat doit être immédiatement utilisable, sans modification, par un freelance non-juriste.
-- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "500 € ${U}"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
+- MISE EN FORME : n'utilise JAMAIS de tableaux (pas de barres verticales |), pas de gras (**), pas de titres avec #. Écris les montants en texte simple (ex : "${U ? `500 € ${U}` : "500 €"}"). Ne répète JAMAIS un même récapitulatif de prix dans plusieurs articles — le détail des honoraires ne doit apparaître qu'une seule fois, à l'article 4.
 - Rédige INTÉGRALEMENT en français. N'insère aucun mot anglais isolé (ex : jamais "duly", toujours "dûment").
 - Ne cite un article de loi que si tu es certain de son numéro exact. N'écris JAMAIS de numéro d'article incomplet ou approximatif (par exemple « L221-... ») : dans le doute, ne cite pas d'article.
 - N'ajoute aucune clause qui contredit ou affaiblit les clauses imposées ci-dessus, et ne remplace jamais une clause imposée par ta propre formulation.
@@ -2744,7 +2755,7 @@ RÈGLES ABSOLUES :
 4. Si une demande du client est déraisonnable ou dangereuse pour le prestataire, adapte-la de façon équilibrée, sans inventer de chiffre.
 5. Le nombre de révisions ne figure qu'à l'article 5. Si un autre article indique un nombre de révisions ou de corrections différent, supprime cette mention.
 6. Garde toutes les mentions légales du contrat (mention « EI », TVA, délais légaux, médiateur, rétractation).${isB2C ? `
-7. Le client est un particulier : les prix restent exprimés toutes taxes comprises (TTC). N'ajoute jamais de plafond ni d'exclusion de responsabilité, de pénalités de retard, d'indemnité forfaitaire de 40 €, de clause de non-sollicitation ni de clause qui impose un tribunal : avec un particulier, ces clauses sont interdites ou sans effet.` : ""}
+7. Le client est un particulier : les prix restent exprimés ${nc.pricing.tvaApplicable ? "toutes taxes comprises (TTC)" : "comme dans le contrat (TVA non applicable, article 293 B du CGI)"}. N'ajoute jamais de plafond ni d'exclusion de responsabilité, de pénalités de retard, d'indemnité forfaitaire de 40 €, de clause de non-sollicitation ni de clause qui impose un tribunal : avec un particulier, ces clauses sont interdites ou sans effet.` : ""}
 
 Réponds UNIQUEMENT avec le texte du contrat modifié, sans aucun commentaire avant ou après, sans backticks.`;
 };
@@ -20864,9 +20875,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             </div>
             <div style={{ marginTop:14 }}>
               <label style={labelStyle}>MÉDIATEUR DE LA CONSOMMATION</label>
-              <input style={inputStyle} value={profile.mediateur || ""} placeholder="Nom du médiateur et adresse de son site internet" onChange={e => updateProfile("mediateur", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
+              <input style={inputStyle} value={profile.mediateur || ""} placeholder="Nom, adresse (postale ou email) et site internet du médiateur" onChange={e => updateProfile("mediateur", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
               <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>
-                <strong>Obligatoire si tu travailles pour des particuliers</strong> (article L612-1 du Code de la consommation). Tu dois adhérer toi-même à un médiateur de la consommation, puis indiquer ici son nom et son site internet. Ils seront écrits dans tes contrats avec des particuliers.
+                <strong>Obligatoire si tu travailles pour des particuliers</strong> (article L612-1 du Code de la consommation). Tu dois adhérer toi-même à un médiateur de la consommation, puis indiquer ici ses coordonnées : son nom, son adresse postale ou électronique, et l'adresse de son site internet. Elles seront écrites dans tes contrats avec des particuliers.
               </div>
             </div>
             <div style={{ marginTop:14 }}>
