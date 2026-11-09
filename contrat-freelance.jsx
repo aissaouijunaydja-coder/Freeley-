@@ -1082,7 +1082,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "252";
+const APP_VERSION = "253";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -2325,7 +2325,7 @@ const checkContractText = (text, form = {}, profile = {}) => {
     if (has(/réputée définitivement acceptée|retours oraux/)) add("Client particulier : la validation des livrables est trop stricte pour un particulier.");
     if (has(/compétence exclusive|attribution de (compétence|juridiction)|tribunal de commerce/i)) add("Client particulier : le contrat impose un tribunal. C'est interdit avec un particulier.");
     if (!has(/L221-10/)) add("Client particulier : la règle des 7 jours sans paiement après une signature hors établissement n'apparaît pas.");
-    if (!String(form.freelanceMediateur || "").trim()) add("Client particulier : ton médiateur de la consommation n'est pas indiqué, alors que la loi l'impose. Ajoute-le dans ton profil, puis refais le contrat.");
+    // Version 253 : plus d'alerte sur le médiateur. C'est au freelance d'y adhérer et d'en donner les coordonnées.
   } else {
     if (!has(/L441-10/)) add("Client professionnel : les pénalités de retard, obligatoires entre professionnels (article L441-10 du Code de commerce), n'apparaissent pas.");
     // Version 222 : petite entreprise signée hors établissement (article L221-3 du Code de la consommation)
@@ -2487,13 +2487,10 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
         ? `\nJuste après cette clause, inclus mot pour mot : "Assurance déclarée par le Prestataire : ${form.freelanceAssurance}."`
         : "";
 
-      // Article 11 — particulier : le médiateur du freelance, tel qu'il l'a indiqué dans son profil. Version 252
-      // (Ordalie) : ses coordonnées complètes, et la réclamation écrite préalable au freelance (art. L612-2, R616-1).
-      // Freeley ne choisit ni ne vérifie le médiateur : c'est au freelance d'y adhérer et de le renseigner.
-      const mediateurInfo = String(form.freelanceMediateur || "").trim().replace(/[\s.;,]+$/, "");
-      const mediateurB2C = mediateurInfo
-        ? `au médiateur de la consommation dont relève le Prestataire : ${mediateurInfo}`
-        : `au médiateur de la consommation dont relève le Prestataire`;
+      // Article 11 — particulier : le contrat informe le client de son droit au médiateur et de la réclamation écrite
+      // préalable (art. L612-2). Version 253 : sans coordonnées. Freeley ne s'occupe pas du médiateur : c'est au freelance
+      // d'y adhérer et d'en communiquer les coordonnées à ses clients (CGU, obligations du freelance).
+      const mediateurB2C = `au médiateur de la consommation dont relève le Prestataire`;
 
       // Article 12 — dispositions générales : texte fixe
       const dispositionsGenerales = isB2C
@@ -2511,7 +2508,7 @@ DONNÉES DE LA MISSION
 Prestataire        : ${contractFreelanceName(form)}${isCompany && form.freelanceLegalStatus ? "\nForme juridique    : " + form.freelanceLegalStatus + "\nReprésentant légal : " + form.freelanceName : ""}
 Activité           : ${form.freelanceActivity}${form.freelanceSiret ? "\nSIRET             : " + fmtSiret(form.freelanceSiret) : ""}${form.freelanceTvaNumber ? "\nN° TVA Prestataire : " + form.freelanceTvaNumber : ""}
 Adresse Prestataire: ${form.freelanceAddress}
-Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + fmtPhone(form.freelancePhone) : ""}${form.freelanceAssurance ? "\nAssurance professionnelle du Prestataire : " + form.freelanceAssurance : ""}${isB2C && form.freelanceMediateur ? "\nMédiateur de la consommation du Prestataire : " + form.freelanceMediateur : ""}
+Email Prestataire  : ${form.freelanceEmail || "—"}${form.freelancePhone ? "\nTéléphone Prestataire: " + fmtPhone(form.freelancePhone) : ""}${form.freelanceAssurance ? "\nAssurance professionnelle du Prestataire : " + form.freelanceAssurance : ""}
 
 Client             : ${form.clientName}${form.clientCompany && String(form.clientCompany).trim() !== String(form.clientName || "").trim() ? " — " + form.clientCompany : ""}
 Type de client     : ${form.typeClient === "particulier" ? "PARTICULIER (B2C)" : "PROFESSIONNEL / ENTREPRISE (B2B)"}${!isB2C && form.clientSiret ? "\nSIRET Client       : " + fmtSiret(form.clientSiret) : ""}
@@ -5274,7 +5271,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       freelanceLegalStatus: legalStatus,
       freelanceCompanyName: !isEntrepreneurIndividuel(legalStatus) ? String(profile?.companyName || "").trim() : "",
       freelanceTvaNumber: String(profile?.tvaNumber || "").trim(),
-      freelanceMediateur: String(profile?.mediateur || "").trim(),
+      // Version 253 : le médiateur du profil n'est plus recopié dans le contrat (c'est l'affaire du freelance).
       freelanceAssurance: String(profile?.assurance || "").trim(),
       // Entre professionnels, les pénalités de retard sont obligatoires (art. L441-10 C. com.)
       latePaymentPenalty: form.typeClient === "particulier" ? !!form.latePaymentPenalty : true,
@@ -7040,7 +7037,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               {/* Avant la rédaction : ce qui manque pour que le contrat soit complet. On prévient, on ne bloque pas. */}
               {(() => {
                 const notes = [];
-                if (form.typeClient === "particulier" && !String(profile?.mediateur || "").trim()) notes.push("Ton client est un particulier : la loi t'oblige à adhérer à un médiateur de la consommation et à donner ses coordonnées au client (article L612-1 du Code de la consommation). Indique ton médiateur dans ton profil : il sera écrit dans le contrat.");
+                // Version 253 : plus de message sur le médiateur (c'est l'affaire du freelance).
                 if (form.clauseSecurite && !String(profile?.assurance || "").trim()) notes.push("La clause d'assurance annonce que tes assurances sont indiquées dans le contrat. Indique ton assurance dans ton profil, ou décoche la clause.");
                 if (!notes.length) return null;
                 return (
@@ -20873,13 +20870,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 ⚠️ C'est à toi de vérifier ton statut réel et de tenir ce champ à jour — Freeley ne peut pas le déterminer à ta place.
               </div>
             </div>
-            <div style={{ marginTop:14 }}>
-              <label style={labelStyle}>MÉDIATEUR DE LA CONSOMMATION</label>
-              <input style={inputStyle} value={profile.mediateur || ""} placeholder="Nom, adresse (postale ou email) et site internet du médiateur" onChange={e => updateProfile("mediateur", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
-              <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>
-                <strong>Obligatoire si tu travailles pour des particuliers</strong> (article L612-1 du Code de la consommation). Tu dois adhérer toi-même à un médiateur de la consommation, puis indiquer ici ses coordonnées : son nom, son adresse postale ou électronique, et l'adresse de son site internet. Elles seront écrites dans tes contrats avec des particuliers.
-              </div>
-            </div>
+            {/* Version 253 : plus de case « Médiateur de la consommation » : Freeley ne s'en occupe pas. */}
             <div style={{ marginTop:14 }}>
               <label style={labelStyle}>ASSURANCE PROFESSIONNELLE</label>
               <input style={inputStyle} value={profile.assurance || ""} placeholder="Assureur, numéro de contrat et zone couverte (ex. : France)" onChange={e => updateProfile("assurance", e.target.value)} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
