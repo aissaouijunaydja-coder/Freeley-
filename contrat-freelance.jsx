@@ -1000,6 +1000,7 @@ const initialForm = {
   clausePreavis: false,
   preavisJours: "30",
   contenuNumeriquePret: false,
+  contenuDescription: "", // version 256 : nom, version et format du contenu déjà existant (licence, article 6)
 };
 
 const validate = (step, form) => {
@@ -1012,6 +1013,8 @@ const validate = (step, form) => {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.freelanceEmail)) e.freelanceEmail = "Email invalide";
     if (form.typeClient === "particulier" && !(form.freelancePhone || "").trim()) e.freelancePhone = "Ton téléphone est obligatoire pour un client particulier";
     if (!form.clientName.trim()) e.clientName = "Le nom du client est obligatoire";
+    // Version 257 : l'adresse du client doit figurer sur les factures (avis d'Ordalie)
+    if (!String(form.clientAddress || "").trim()) e.clientAddress = "L'adresse du client est obligatoire : elle doit figurer sur les factures";
     if (!form.clientEmail.trim()) e.clientEmail = "L'email du client est obligatoire";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.clientEmail)) e.clientEmail = "Email invalide";
   }
@@ -1082,7 +1085,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "254";
+const APP_VERSION = "257";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -2221,6 +2224,21 @@ const FIXED_FORCE_MAJEURE = [
 ];
 // Une ligne par paragraphe, au même format que les autres clauses imposées (« - "..." »)
 const fixedParagraphs = (list) => list.map((s) => `- "${s}"`).join("\n");
+// ── Version 256 (huitième réponse d'Ordalie) : licence d'un contenu numérique déjà existant vendu à un particulier ──
+// Les actes permis sont listés, le contenu est décrit (nom, version, format : champ du formulaire, ou à défaut le titre
+// de la mission) et la garantie légale de conformité est rappelée. La modification est permise pour les besoins
+// personnels du Client : un template se modifie (Ordalie l'exclut « sauf autorisation expresse » : le contrat la donne).
+const isExistingDigitalContent = (form) => form?.typeClient === "particulier" && !!form?.contenuNumeriquePret && form?.categorieMetier !== "artisanat" && form?.categorieMetier !== "conseil";
+const existingContentLicenceParagraphs = (form) => {
+  const clean = (v) => String(v || "").trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
+  const desc = clean(form?.contenuDescription) || `« ${clean(form?.missionTitle) || "contenu numérique"} »`;
+  return [
+    `Le contenu numérique préexistant fourni au titre du présent contrat est le suivant : ${desc}. Le Prestataire déclare être titulaire des droits concédés ou dûment autorisé à les concéder.`,
+    "Sous réserve du paiement intégral et effectif du prix, le Prestataire accorde au Client une licence non exclusive, pour ses besoins personnels et non commerciaux, dans le monde entier et pendant la durée légale de protection, lui permettant de télécharger, stocker, afficher, reproduire et modifier le contenu sur ses appareils et pour ses besoins propres. Cette licence n'autorise ni la revente du contenu en tant que produit autonome, ni sa diffusion publique, ni sa concession à des tiers. Tout autre droit est exclu sauf autorisation expresse.",
+    "La fourniture du contenu préexistant sans adaptation ne limite pas les droits légaux du Client au titre de la conformité du contenu numérique. Toute dérogation à une caractéristique à laquelle le Client peut légitimement s'attendre doit être spécifiquement portée à sa connaissance et acceptée expressément et séparément.",
+    "La présente licence concerne uniquement le contenu numérique préexistant décrit ci-dessus. Les droits portant sur les créations réalisées spécifiquement pour le Client, le cas échéant, font l'objet d'une stipulation distincte précisant chaque droit concédé ainsi que son étendue, sa destination, son territoire et sa durée.",
+  ];
+};
 const FIXED_CLAUSES_BY_ARTICLE = [[1, FIXED_INDEPENDANCE], [5, FIXED_HORS_PERIMETRE], [7, FIXED_CONFIDENTIALITE], [10, FIXED_FORCE_MAJEURE]];
 // Comparaison phrase par phrase : apostrophes courbes, espaces insécables et retours à la ligne rendus comparables.
 // (Pas de « lookbehind » dans l'expression : les anciens iPhone ne le connaissent pas.)
@@ -2380,6 +2398,14 @@ const checkContractText = (text, form = {}, profile = {}) => {
     else if (bad.length > 1) add(`Les clauses fixes des articles ${bad.slice(0, -1).join(", ")} et ${bad[bad.length - 1]} n'ont pas été recopiées telles quelles. Refais le contrat.`);
   }
 
+  // Version 256 : licence d'un contenu déjà existant (article 6). Même règle que les clauses fixes : seulement si au
+  // moins une de ses phrases est dans le contrat (ceux d'avant la version 256 ont l'ancienne licence).
+  if (isExistingDigitalContent(form)) {
+    const lic = existingContentLicenceParagraphs(form).flatMap(sentencesOf);
+    const licMissing = lic.filter((s) => !tFixed.includes(s)).length;
+    if (licMissing > 0 && licMissing < lic.length) add("La licence du contenu déjà existant (article 6) n'a pas été recopiée telle quelle. Refais le contrat.");
+  }
+
   // Version 254 : moyens de paiement cochés, mais absents du contrat
   const pmSentence = paymentMethodsSentenceFor(form);
   if (pmSentence && !tFixed.includes(normFixed(pmSentence.slice(1, -1)))) add("Les moyens de paiement n'ont pas été recopiés dans le contrat. Refais le contrat.");
@@ -2504,11 +2530,12 @@ const buildContractPrompt = (form, profile, { now = new Date() } = {}) => {
       // Article 6 (création, digital, autre) : la clause dit que le contrat indique si le prix rémunère aussi la
       // cession des droits. On l'écrit vraiment, à l'article 4.
       const cessionInPrice = form.categorieMetier !== "artisanat" && form.categorieMetier !== "conseil";
-      // Contenu numérique déjà existant (vendu tel quel, à plusieurs clients) : rien n'est créé pour ce client,
-      // donc pas de cession exclusive, mais une licence d'utilisation non exclusive.
+      // Contenu numérique déjà existant (vendu à l'identique à plusieurs clients) : rien n'est créé pour ce client,
+      // donc pas de cession exclusive, mais une licence d'utilisation non exclusive. Version 256 : texte d'Ordalie
+      // (existingContentLicenceParagraphs), recopié tel quel et contrôlé après la rédaction.
       const existingContent = isB2C && !!form.contenuNumeriquePret && cessionInPrice;
       const existingContentLicence = existingContent
-        ? `\nLe livrable est un contenu numérique déjà existant, fourni tel quel. Inclus aussi, mot pour mot : "Le contenu numérique fourni au titre du présent contrat existait avant la mission. Sous réserve du paiement intégral et effectif des honoraires, le Prestataire concède au Client, pour ses besoins propres, une licence non exclusive d'utilisation de ce contenu, pour le monde entier et pendant toute la durée légale de protection applicable. Cette licence n'autorise pas la revente du contenu en tant que produit autonome, sa commercialisation séparée ni sa concession à des tiers. La cession prévue au présent article ne porte que sur les éventuelles créations réalisées spécifiquement pour le Client."`
+        ? `\nLe livrable est un contenu numérique déjà existant, fourni sans adaptation. Inclus aussi, à la suite de la clause ci-dessus, mot pour mot et dans cet ordre, les paragraphes suivants :\n${fixedParagraphs(existingContentLicenceParagraphs(form))}`
         : "";
 
       // Article 8 — particulier : aucune limite de responsabilité (clause noire, art. R212-1 6° C. conso)
@@ -2547,7 +2574,7 @@ Email Client       : ${form.clientEmail || "—"}
 
 Titre de la mission: ${form.missionTitle}
 Domaine d'activité : ${form.categorieMetier === "artisanat" ? "Métier manuel / artisanat" : form.categorieMetier === "digital" ? "Digital / Tech / Création" : form.categorieMetier === "conseil" ? "Conseil / Formation / Services" : "Autre / prestation générale"}
-Description        : ${form.missionDescription}${isB2C && form.contenuNumeriquePret ? "\nNature du livrable : contenu numérique déjà existant, fourni tel quel (pas un travail réalisé sur mesure pour ce client)" : ""}
+Description        : ${form.missionDescription}${isB2C && form.contenuNumeriquePret ? "\nNature du livrable : contenu numérique déjà existant, fourni sans adaptation (pas un travail réalisé sur mesure pour ce client)" : ""}
 Période            : du ${d1} au ${d2}
 ${pricing.b2c ? `Prix TTC           : ${fmtEuro(pricing.total)} € (${pricing.taxNote})` : `Honoraires HT      : ${form.price} €`}
 Conditions paiement: ${paymentConditionsData}
@@ -2600,7 +2627,7 @@ ${pricing.b2c
 - "Le prix global du présent contrat rémunère à la fois ${existingContent ? "la fourniture du contenu numérique et les droits d'utilisation prévus à l'article 6" : "la réalisation de la prestation et la cession des droits prévue à l'article 6"}."` : ""}
 ${(form.latePaymentPenalty || !isB2C)
   ? (form.typeClient === "particulier"
-    ? `- Le client étant un PARTICULIER (B2C), la clause doit IMPÉRATIVEMENT s'intituler "intérêts de retard" (jamais "pénalités de retard", terme réservé au Code de commerce entre professionnels et inapplicable à un consommateur), utiliser le taux d'intérêt légal en vigueur en France applicable aux consommateurs, ET exiger une mise en demeure préalable conformément à l'article 1231-6 du Code civil — ces intérêts ne courent qu'à compter de cette mise en demeure, jamais automatiquement dès la date d'échéance (et non le Code de commerce ni l'indemnité forfaitaire de 40 €, strictement réservés aux professionnels) : "En cas de retard de paiement, une mise en demeure sera préalablement adressée au Client par lettre recommandée ou courrier électronique avec accusé de réception. À défaut de règlement, des intérêts de retard calculés au taux d'intérêt légal en vigueur seront appliqués sur les sommes dues à compter de la date de cette mise en demeure et jusqu'au complet paiement, conformément à l'article 1231-6 du Code civil et au droit de la consommation."`
+    ? `- Le client étant un PARTICULIER (B2C), la clause doit IMPÉRATIVEMENT s'intituler "intérêts de retard" (jamais "pénalités de retard", terme réservé au Code de commerce entre professionnels et inapplicable à un consommateur), utiliser le taux d'intérêt légal en vigueur en France, ET exiger une mise en demeure préalable conformément à l'article 1231-6 du Code civil — ces intérêts ne courent qu'à compter de cette mise en demeure, jamais automatiquement dès la date d'échéance (et non le Code de commerce ni l'indemnité forfaitaire de 40 €, strictement réservés aux professionnels) : "En cas de retard de paiement, une mise en demeure sera préalablement adressée au Client par lettre recommandée ou courrier électronique avec accusé de réception. À défaut de règlement, des intérêts de retard calculés au taux d'intérêt légal en vigueur seront appliqués sur les sommes dues à compter de la date de cette mise en demeure et jusqu'au complet paiement, conformément à l'article 1231-6 du Code civil et au droit de la consommation."`
     : `- La clause légale de pénalités de retard réservée aux professionnels : "Conformément à l'article L441-10 du Code de commerce, toute somme non réglée à l'échéance porte, de plein droit et sans qu'un rappel soit nécessaire, des pénalités de retard au taux d'intérêt appliqué par la Banque centrale européenne à son opération de refinancement la plus récente, majoré de dix (10) points de pourcentage, sauf stipulation d'un autre taux conforme aux limites légales. Les pénalités sont exigibles à compter du jour suivant la date de règlement figurant sur la facture. En sus, tout professionnel en situation de retard de paiement est de plein droit débiteur de l'indemnité forfaitaire pour frais de recouvrement fixée à quarante euros (40 €) par l'article D441-5 du Code de commerce. Lorsque les frais de recouvrement exposés sont supérieurs à ce montant, le Prestataire peut demander une indemnisation complémentaire sur justification."`)
   : ""}
 ${pricing.b2c
@@ -4611,7 +4638,7 @@ function AppInner() {
   const [premiumPlan, setPlan]    = useState(null);
   const [screen, setScreen] = useState(() => {
     const saved = localStorage.getItem("freeley_screen");
-    return saved && ["history","profile","pricing","scan-results","dashboard","cgu","mentions","confidentialite","drafts","mes-ndas","archives","recettes"].includes(saved) ? saved : "app";
+    return saved && ["history","profile","pricing","scan-results","dashboard","cgu","mentions","confidentialite","clients","drafts","mes-ndas","archives","recettes"].includes(saved) ? saved : "app";
   });
   const [forceAuthOnStart, setForceAuthOnStart] = useState(false);
   const [history, setHistory]     = useState([]);
@@ -6218,6 +6245,15 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     </Shell>
   );
 
+  // Version 255 : « Comment fonctionne Freeley pour les clients », ouverte par le bas des écrans
+  if (screen === "clients") return (
+    <Shell>
+      {AuthModalEl}
+      <Header {...headerProps} />
+      <ClientsInfoPage onBack={() => goToScreen("app")} />
+    </Shell>
+  );
+
   if (screen === "drafts") return (
     <Shell>
       {AuthModalEl}
@@ -6635,7 +6671,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                   </div>
                 );
               })()}
-              <Field label="Adresse du client (optionnel)" value={form.clientAddress} onChange={v=>update("clientAddress",v)} placeholder="5 avenue Victor Hugo, 69001 Lyon" error={errors.clientAddress} delay={4} hint={addressHint(form.clientAddress, "69001 Lyon")} />
+              <Field label="Adresse du client *" value={form.clientAddress} onChange={v=>update("clientAddress",v)} placeholder="5 avenue Victor Hugo, 69001 Lyon" error={errors.clientAddress} delay={4} hint={addressHint(form.clientAddress, "69001 Lyon")} />
               <ToggleGroup
                 label="Type de client *"
                 options={["professionnel","particulier"]}
@@ -6973,6 +7009,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                       </div>
                     </div>
                   </div>
+                  {/* Version 256 : le contenu est décrit dans la licence de l'article 6 (avis d'Ordalie) */}
+                  {form.contenuNumeriquePret && form.categorieMetier !== "artisanat" && form.categorieMetier !== "conseil" && (
+                    <div style={{ marginTop:14 }}>
+                      <Field label="Description du contenu : nom, version, format" value={form.contenuDescription || ""} onChange={v=>update("contenuDescription", v)} placeholder="Pack de 12 modèles de CV, version 2026, fichiers Word et PDF" hint={!String(form.contenuDescription || "").trim() ? "Elle est écrite dans le contrat, à l'article 6. Si tu la laisses vide, Freeley reprend le titre de la mission." : ""} />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -7716,12 +7758,34 @@ const getOrReserveInvoiceNumber = async (args) => (await getOrReserveInvoice(arg
 
 // Dessine et télécharge le PDF d'une facture. Reçoit toutes les infos déjà prêtes — ne gère ni la
 // numérotation ni la récupération du lien de paiement, pour rester simple et réutilisable partout.
+// ── Version 257 (neuvième réponse d'Ordalie) : mentions de la facture ──
+// Date ou période de réalisation de la prestation (vide si aucune date n'est connue). Une facture émise avant le début
+// de la mission, comme une facture d'acompte, indique la période prévue.
+const invoiceServicePeriod = (start, end, issueIso = "") => {
+  const a = isIsoDay(start) ? start : (isIsoDay(end) ? end : "");
+  if (!a) return "";
+  const b = isIsoDay(end) && end >= a ? end : a;
+  const planned = isIsoDay(issueIso) && a > issueIso ? " (prévue)" : "";
+  return a === b
+    ? `Date de réalisation de la prestation${planned} : ${longDateFr(a)}`
+    : `Période de réalisation de la prestation${planned} : du ${longDateFr(a)} au ${longDateFr(b)}`;
+};
+// Retard de paiement. Client professionnel : le taux en chiffres, celui du semestre où les pénalités commencent (table
+// NOTICE_RATES) ; si ce semestre n'est pas encore dans la table, la formule. Client particulier : phrase d'Ordalie.
+const invoicePenaltyText = (typeClient, issueIso, dueIso) => {
+  if (typeClient === "particulier") return "À défaut de stipulation contractuelle applicable prévoyant un autre régime, les intérêts de retard au taux légal sont dus à compter de la mise en demeure, conformément à l'article 1231-6 du Code civil.";
+  const from = isIsoDay(dueIso) ? isoDayPlus(dueIso, 1) : issueIso;
+  const r = noticeRateFor(from);
+  const rate = r ? `${noticePct(r.bce + 10)} %` : "taux de la Banque centrale européenne majoré de 10 points";
+  return `Taux annuel des pénalités de retard : ${rate}, exigibles de plein droit à compter du lendemain de la date d'échéance. Indemnité forfaitaire pour frais de recouvrement : 40 € en cas de retard de paiement.`;
+};
+
 function renderInvoicePDF({
   invoiceNum, designation, missionTitle, montant,
   freelanceName, freelanceSiret, freelanceEmail, freelanceAddress,
   clientName, clientCompany, clientAddress, clientEmail, clientSiret,
   profile, typeClient, qrBase64, footNote, filename, dueDays = 0,
-  issueDate = null, returnDoc = false,
+  issueDate = null, returnDoc = false, serviceStart = "", serviceEnd = "",
 }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
@@ -7744,7 +7808,8 @@ function renderInvoicePDF({
   // Version 229 : un logo clair (invisible sur la page blanche) est posé sur un bloc bleu marine, dans la même place
   drawPdfLogo(doc, p.logo, { x: ML, y, maxW: 50, maxH: 24, ...(p.logoLight ? { badge: true, badgeColor: LOGO_BADGE_ON_WHITE, pad: 2, radius: 2 } : {}) });
   doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(...NAVY);
-  doc.text("FACTURE", PW - MR, y + 8, { align: "right" });
+  // Version 257 : une facture d'acompte le dit dans son titre (avis d'Ordalie)
+  doc.text(/^acompte/i.test(String(designation || "").trim()) ? "FACTURE D'ACOMPTE" : "FACTURE", PW - MR, y + 8, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GREY);
   doc.text(`N° ${invoiceNum}`, PW - MR, y + 15, { align: "right" });
   doc.text(`Date d'émission : ${today}`, PW - MR, y + 20, { align: "right" });
@@ -7767,6 +7832,7 @@ function renderInvoicePDF({
   yL += line(p.legalStatus, ML, yL);
   yL += line(freelanceAddress || p.address, ML, yL);
   yL += line(freelanceSiret ? "SIRET : " + fmtSiret(freelanceSiret) : (p.siret ? "SIRET : " + fmtSiret(p.siret) : ""), ML, yL);
+  yL += line(String(p.immatriculation || "").trim(), ML, yL); // version 257 : immatriculation (RCS…), si elle est dans le profil
   yL += line(freelanceEmail, ML, yL);
   yL += line(p.tvaNumber ? "TVA : " + p.tvaNumber : "", ML, yL);
   // Assurance professionnelle : obligatoire sur les factures quand le métier impose une assurance (bâtiment…)
@@ -7780,23 +7846,31 @@ function renderInvoicePDF({
   yR += line(clientEmail, cx, yR);
   y = Math.max(yL, yR) + 8;
 
-  // Tableau prestation
+  // Tableau prestation. Version 257 (avis d'Ordalie) : quantité, unité et prix unitaire hors taxes
+  const colQty = ML + 92, colUnit = ML + 130;
   doc.setFillColor(...NAVY); doc.rect(ML, y, cw, 9, "F");
-  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255,255,255);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(255,255,255);
   doc.text("DÉSIGNATION", ML + 3, y + 6);
-  doc.text("MONTANT", PW - MR - 3, y + 6, { align: "right" });
+  doc.text("QUANTITÉ", colQty, y + 6, { align: "center" });
+  doc.text("PRIX UNIT. HT", colUnit, y + 6, { align: "right" });
+  doc.text("MONTANT HT", PW - MR - 3, y + 6, { align: "right" });
   y += 9;
 
   const desc = `${designation} — ${missionTitle || "Prestation de services"}`;
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...DARK);
-  const descLines = doc.splitTextToSize(desc, cw - 45);
+  const descLines = doc.splitTextToSize(desc, 72);
   doc.text(descLines, ML + 3, y + 6);
+  doc.text("1 (forfait)", colQty, y + 6, { align: "center" });
+  doc.text(`${fmt(montant)} €`, colUnit, y + 6, { align: "right" });
   doc.text(`${fmt(montant)} €`, PW - MR - 3, y + 6, { align: "right" });
   const rowH = Math.max(10, descLines.length * 4.6 + 4);
   doc.setDrawColor(225,225,225); doc.line(ML, y + rowH, PW - MR, y + rowH);
   y += rowH + 6;
-  // Version 222 : nature de l'opération (nouvelle mention obligatoire des factures, réforme de la facture électronique)
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...GREY);
+  // Version 257 : date ou période de réalisation de la prestation (avis d'Ordalie)
+  const servicePeriod = invoiceServicePeriod(serviceStart, serviceEnd, issueIso);
+  if (servicePeriod) { doc.text(servicePeriod, ML + 3, y); y += 5; }
+  // Version 222 : nature de l'opération (nouvelle mention obligatoire des factures, réforme de la facture électronique)
   doc.text("Nature de l'opération : prestation de services", ML + 3, y);
   y += 7;
 
@@ -7865,11 +7939,11 @@ function renderInvoicePDF({
   doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
   // Particulier : des « intérêts de retard » au taux légal, seulement après une mise en demeure (art. 1231-6
   // C. civ.), comme le dit le contrat. Les « pénalités de plein droit » sont réservées aux professionnels.
-  const penaltyMention = typeClient === "particulier"
-    ? "Intérêts de retard : en cas de retard de paiement, des intérêts au taux d'intérêt légal pourront être appliqués à compter d'une mise en demeure (article 1231-6 du Code civil)."
-    : "Pénalités de retard : taux BCE majoré de 10 points (minimum légal : 3 fois le taux d'intérêt légal), applicable de plein droit dès le lendemain de l'échéance (art. L441-10 C. com.). Indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.), due pour toute facture réglée en retard.";
-  doc.text(doc.splitTextToSize(penaltyMention, cw), ML, y);
-  y += (typeClient === "particulier" ? 10 : 14);
+  // Version 257 : textes d'Ordalie ; entre professionnels, le taux est écrit en chiffres (invoicePenaltyText).
+  const dueIso = days > 0 ? isoDayPlus(issueIso, days) : issueIso;
+  const penaltyLines = doc.splitTextToSize(invoicePenaltyText(typeClient, issueIso, dueIso), cw);
+  doc.text(penaltyLines, ML, y);
+  y += penaltyLines.length * 3.4 + 3;
   doc.text("Pas d'escompte pour paiement anticipé.", ML, y);
 
   if (returnDoc) return doc; // version 233 : pour le fichier ZIP « Tout télécharger »
@@ -7877,13 +7951,14 @@ function renderInvoicePDF({
 }
 
 // Génère une vraie facture pour l'ajustement de prix d'un avenant — passe par le moteur commun
-const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, freelanceAddress, clientSiret) => {
+const downloadAvenantInvoicePDF = async (avenantNum, missionTitle, montant, freelanceName, freelanceSiret, freelanceEmail, clientName, clientCompany, clientAddress, clientEmail, typeClient, profile, authUser, contractId, freelanceAddress, clientSiret, extra = {}) => {
   if (!window.jspdf) { alert("PDF en cours de chargement, réessaie."); return; }
   try {
     const { invoiceNum, issueDate } = await getOrReserveInvoice({ authUser, contractId, key: "avenant", avenantNum });
     renderInvoicePDF({
       invoiceNum, issueDate, designation: `Avenant n°${avenantNum}`, missionTitle, montant,
       freelanceName, freelanceSiret, freelanceEmail, freelanceAddress, clientName, clientCompany, clientAddress, clientEmail, clientSiret, typeClient, profile: await profileWithPdfLogo(profile),
+      serviceStart: extra.serviceStart || "", serviceEnd: extra.serviceEnd || "", // version 257
       filename: `Facture_Avenant${avenantNum}_${(clientName||"contact").replace(/[^a-zA-Z0-9]/g,"_")}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
@@ -7907,6 +7982,7 @@ const downloadPaymentInvoicePDF = async (designation, missionTitle, montant, fre
       clientName, clientCompany, clientAddress, clientEmail, typeClient, profile: await profileWithPdfLogo(profile),
       clientSiret: extra.clientSiret || extra.form?.clientSiret || "",
       footNote: spec ? spec.footNote + (withRemise ? remiseFootNote(remiseNums, remiseTotal, profile) : "") : undefined, dueDays: spec ? spec.dueDays : 0,
+      serviceStart: extra.serviceStart || extra.form?.startDate || "", serviceEnd: extra.serviceEnd || extra.form?.endDate || "", // version 257
       filename: `Facture_${invoiceNum}.pdf`,
     });
   } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
@@ -8600,6 +8676,7 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
       clientName: entry.clientName, clientCompany: form.clientCompany, clientAddress: form.clientAddress, clientEmail: form.clientEmail,
       clientSiret: form.clientSiret || "", typeClient: form.typeClient, profile: logoProfile,
       footNote: spec ? spec.footNote + remiseNote : undefined, dueDays: spec ? spec.dueDays : 0, filename: "", returnDoc: true,
+      serviceStart: form.startDate || "", serviceEnd: form.endDate || "", // version 257
     });
   };
 
@@ -8648,6 +8725,7 @@ const downloadAllDocumentsZip = async ({ profile, onProgress } = {}) => {
           freelanceName: form.freelanceName, freelanceSiret: form.freelanceSiret, freelanceEmail: form.freelanceEmail, freelanceAddress: form.freelanceAddress,
           clientName: entry.clientName, clientCompany: form.clientCompany, clientAddress: form.clientAddress, clientEmail: form.clientEmail, clientSiret: form.clientSiret,
           typeClient: form.typeClient, profile: logoProfile, filename: "", returnDoc: true,
+          serviceStart: form.startDate || "", serviceEnd: form.endDate || "", // version 257
         }) });
       }
     }
@@ -10447,7 +10525,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
       onClick: onNda,
       title: "Accord de confidentialité instantané",
       description: "Protégez vos idées avant d'envoyer un brief.",
-      example: "Votre client a une idée de projet secrète, Freeley génère un accord de confidentialité conforme en 2 secondes.",
+      example: "Votre client a une idée de projet secrète : Freeley prépare un accord de confidentialité en droit français, prêt à signer en ligne.",
     },
     {
       id: "recouvrement",
@@ -10459,10 +10537,10 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
       accentText: "#B91C1C",
       onClick: onRecouvrement,
       // Version 237 : tant que la mise en demeure est suspendue, la carte décrit ce que l'outil fait vraiment
-      title: FORMAL_LETTER_ENABLED ? "Mise en demeure commerciale" : "Relances de paiement",
+      title: FORMAL_LETTER_ENABLED ? "Relances et mise en demeure" : "Relances de paiement",
       description: "Relancez vos factures en retard efficacement.",
       example: FORMAL_LETTER_ENABLED
-        ? "Un client a dépassé l'échéance, Freeley génère une mise en demeure officielle citant le Code de commerce."
+        ? "Un client a dépassé l'échéance : Freeley rédige une relance amiable, puis, si besoin, une mise en demeure avec le calcul des pénalités."
         : "Un client a dépassé l'échéance : Freeley rédige une relance amiable, prête à envoyer par email ou par SMS. Avant l'échéance, un rappel courtois.",
     },
     {
@@ -12113,12 +12191,27 @@ const cleanNdaText = (text) => String(text || "")
 const NDA_YEARS = { "2": 2, "3": 3, "5": 5, "10": 10 };
 // Version 223 : chaque partie est identifiée (Partie A : SIRET et adresse de son profil ; Partie B : son email
 // s'il est donné), et l'objet est cité entre guillemets.
-const buildNdaText = ({ partieA, partieB, partieASiret, partieAAddress, partieBEmail, objet, ndaType, duration, ref, date }) => {
-  const A = (partieA || "").trim();
-  const B = (partieB || "").trim();
+// Version 256 (huitième réponse d'Ordalie) : identification complète des parties. Partie A : adresse, SIRET,
+// immatriculation et, pour une société, forme juridique et représentant. Partie B : particulier (nom, adresse, email)
+// ou entreprise (dénomination, forme juridique, siège, immatriculation, représentant). Articles 2, 4, 5 et 8 corrigés.
+// Les nouveaux champs ne servent qu'à écrire le texte : rien de plus n'est enregistré en base.
+const NDA_COMPANY_ROLE = { SAS: "Président", SASU: "Président", SARL: "Gérant", EURL: "Gérant" };
+const buildNdaText = ({ partieA, partieB, partieASiret, partieAAddress, partieAImmat, partieALegalStatus, partieARep, partieBEmail, partieBType, partieBAddress, partieBForm, partieBRegistration, partieBRep, objet, ndaType, duration, ref, date }) => {
   const one = (v) => String(v || "").trim().replace(/\s+/g, " ");
-  const idA = [one(partieASiret) ? `SIRET ${fmtSiret(one(partieASiret))}` : "", one(partieAAddress)].filter(Boolean).join(", ");
+  const A = one(partieA);
+  const B = one(partieB);
+  const formA = one(partieALegalStatus);
+  const aIsCompany = !!formA && !isEntrepreneurIndividuel(formA);
+  const repA = aIsCompany ? one(partieARep) : "";
+  const idA = [one(partieAAddress), one(partieASiret) ? `SIRET ${fmtSiret(one(partieASiret))}` : "", one(partieAImmat)].filter(Boolean).join(", ");
+  const lineA = `${A}${aIsCompany ? `, ${formA}` : ""}${idA ? ` (${idA})` : ""}${repA ? `, représentée par ${repA}` : ""}, ci-après « la Partie A »,`;
   const emailB = one(partieBEmail);
+  const addrB = one(partieBAddress);
+  const bIsCompany = partieBType === "entreprise";
+  const repB = bIsCompany ? one(partieBRep) : "";
+  const lineB = bIsCompany
+    ? `${B}${one(partieBForm) ? `, ${one(partieBForm)}` : ""}${addrB ? `, dont le siège est situé ${addrB}` : ""}${one(partieBRegistration) ? `, n° d'immatriculation : ${one(partieBRegistration)}` : ""}${repB ? `, représentée par ${repB}` : ""}${emailB ? ` (adresse électronique : ${emailB})` : ""}, ci-après « la Partie B »,`
+    : `${B}${addrB ? `, demeurant ${addrB}` : ""}${emailB ? ` (adresse électronique : ${emailB})` : ""}, ci-après « la Partie B »,`;
   const obj = (objet || "").trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
   const years = NDA_YEARS[duration] || 3;
   const yearsTxt = { 2: "deux (2)", 3: "trois (3)", 5: "cinq (5)", 10: "dix (10)" }[years];
@@ -12138,9 +12231,9 @@ const buildNdaText = ({ partieA, partieB, partieASiret, partieAAddress, partieBE
     `Établi le ${date}`,
     "",
     "ENTRE LES SOUSSIGNÉS :",
-    `${A}${idA ? ` (${idA})` : ""}, ci-après « la Partie A »,`,
+    lineA,
     "ET",
-    `${B}${emailB ? ` (adresse électronique : ${emailB})` : ""}, ci-après « la Partie B »,`,
+    lineB,
     "ci-après ensemble « les Parties » et individuellement « une Partie ».",
     "",
     roles,
@@ -12157,6 +12250,7 @@ const buildNdaText = ({ partieA, partieB, partieASiret, partieAAddress, partieBE
     "- qu'elle les a reçues de manière licite d'un tiers non tenu à une obligation de confidentialité ;",
     "- qu'elle les a développées de manière indépendante, sans utiliser les Informations confidentielles.",
     "Lorsque la communication d'une Information confidentielle est exigée par la loi, par une décision de justice ou par une autorité compétente, la Partie réceptrice en informe préalablement la Partie divulgatrice lorsque la loi le permet, et limite la communication au strict nécessaire.",
+    "Aucune stipulation du présent accord n'interdit une communication imposée ou autorisée par la loi, à une autorité compétente, ni une divulgation protégée par les règles relatives à la liberté d'expression, à l'information ou au signalement de bonne foi d'une activité illégale. La Partie réceptrice peut également communiquer les Informations confidentielles à ses conseils professionnels et assureurs, dans la mesure nécessaire et sous réserve de leurs obligations de confidentialité.",
     "",
     "ARTICLE 3 — OBLIGATIONS DE LA PARTIE RÉCEPTRICE",
     "La Partie réceptrice s'engage à :",
@@ -12167,11 +12261,11 @@ const buildNdaText = ({ partieA, partieB, partieASiret, partieAAddress, partieBE
     "- ne les copier ou les reproduire que dans la mesure nécessaire à l'Objet ;",
     "- informer sans délai la Partie divulgatrice de toute utilisation ou divulgation non autorisée dont elle aurait connaissance.",
     "",
-    "ARTICLE 4 — PROPRIÉTÉ DES INFORMATIONS",
-    "Les Informations confidentielles restent la propriété de la Partie divulgatrice. Le présent accord ne confère à la Partie réceptrice aucun droit de propriété ni aucune licence sur les Informations confidentielles ou sur les droits de propriété intellectuelle qui s'y rattachent. Il n'oblige aucune des Parties à conclure un autre contrat.",
+    "ARTICLE 4 — DROITS SUR LES INFORMATIONS",
+    "La Partie divulgatrice conserve, le cas échéant, les droits qu'elle détient sur les Informations confidentielles. Le présent accord ne transfère aucun droit de propriété intellectuelle et ne concède aucune licence, sauf stipulation expresse distincte. Il n'oblige aucune des Parties à conclure un autre contrat.",
     "",
     "ARTICLE 5 — RESTITUTION OU DESTRUCTION",
-    "À la fin des discussions relatives à l'Objet, ou à tout moment sur demande écrite de la Partie divulgatrice, la Partie réceptrice restitue ou détruit, au choix de la Partie divulgatrice, l'ensemble des Informations confidentielles et de leurs copies, quel qu'en soit le support, et le confirme par écrit dans un délai de quinze (15) jours. Les copies dont la conservation est imposée par une obligation légale restent soumises au présent accord.",
+    "À la fin des discussions relatives à l'Objet, ou à tout moment sur demande écrite de la Partie divulgatrice, la Partie réceptrice restitue ou détruit, au choix de la Partie divulgatrice, l'ensemble des Informations confidentielles et de leurs copies, quel qu'en soit le support, et le confirme par écrit dans un délai de quinze (15) jours. La Partie réceptrice peut conserver une copie d'archive uniquement dans la mesure nécessaire au respect d'une obligation légale ou à la défense de ses droits. Les copies présentes dans des sauvegardes techniques non accessibles pour un usage courant sont supprimées selon le cycle normal de sauvegarde et restent soumises au présent accord jusqu'à leur suppression. Les copies d'archive ainsi conservées restent soumises au présent accord.",
     "",
     "ARTICLE 6 — DURÉE",
     `Le présent accord entre en vigueur à la date de sa signature par les Parties et s'applique aux Informations confidentielles communiquées dans le cadre de l'Objet. Les obligations de confidentialité et de non-utilisation demeurent en vigueur pendant ${yearsTxt} ans à compter de la communication de la dernière Information confidentielle, que les Parties aient ou non conclu un autre contrat. Toutefois, pour les Informations confidentielles constituant un secret des affaires au sens de l'article L151-1 du Code de commerce, ces obligations demeurent en vigueur aussi longtemps qu'elles conservent ce caractère.`,
@@ -12180,15 +12274,15 @@ const buildNdaText = ({ partieA, partieB, partieASiret, partieAAddress, partieBE
     "Tout manquement au présent accord engage la responsabilité contractuelle de la Partie réceptrice, conformément aux articles 1231-1 et suivants du Code civil, et l'oblige à réparer le préjudice subi par la Partie divulgatrice. En cas d'utilisation ou de divulgation non autorisée, la Partie divulgatrice peut en outre demander au juge, y compris en référé, toute mesure propre à faire cesser le trouble. Ces actions ne font pas obstacle à celles prévues par le Code de commerce pour la protection du secret des affaires (articles L151-1 et suivants).",
     "",
     "ARTICLE 8 — DISPOSITIONS GÉNÉRALES",
-    "Le présent accord exprime l'intégralité de l'accord des Parties sur son objet. Toute modification doit faire l'objet d'un écrit signé par les Parties. Le fait pour une Partie de ne pas se prévaloir d'un manquement ne vaut pas renonciation à s'en prévaloir ultérieurement. Si une stipulation est déclarée nulle, les autres stipulations conservent leur plein effet. Aucune Partie ne peut céder le présent accord sans l'accord écrit préalable de l'autre. Le présent accord est signé électroniquement, conformément aux articles 1366 et 1367 du Code civil.",
+    "Le présent accord exprime l'intégralité de l'accord des Parties sur son objet. Toute modification doit faire l'objet d'un écrit signé par les Parties. Le fait pour une Partie de ne pas se prévaloir d'un manquement ne vaut pas renonciation à s'en prévaloir ultérieurement. Si une stipulation est déclarée nulle, les conséquences sur le reste de l'accord sont déterminées conformément au droit applicable ; les autres stipulations demeurent applicables dans la mesure où elles peuvent subsister sans la stipulation concernée. Aucune Partie ne peut céder le présent accord sans l'accord écrit préalable de l'autre. Le présent accord est signé électroniquement, conformément aux articles 1366 et 1367 du Code civil.",
     "",
     "ARTICLE 9 — DROIT APPLICABLE ET LITIGES",
     "Le présent accord est soumis au droit français. Les Parties s'efforceront de régler à l'amiable tout différend relatif à sa validité, son interprétation ou son exécution. À défaut d'accord amiable, le différend sera porté devant les juridictions françaises compétentes.",
     "",
     "Fait par signature électronique.",
     "",
-    `Pour la Partie A : ${A}`,
-    `Pour la Partie B : ${B}`,
+    `Pour la Partie A : ${A}${repA ? `, représentée par ${repA}` : ""}`,
+    `Pour la Partie B : ${B}${repB ? `, représentée par ${repB}` : ""}`,
   ].join("\n");
 };
 
@@ -12359,9 +12453,23 @@ function NdaExpressModal({ onClose, profile, authUser }) {
   });
   const [partieASiret, setPartieASiret] = useState(() => String((profile || {}).siret || ""));
   const [partieAAddress, setPartieAAddress] = useState(() => String((profile || {}).address || ""));
+  // Version 256 : immatriculation de la Partie A, et pour une société sa forme juridique et son représentant
+  const [partieAImmat, setPartieAImmat] = useState(() => String((profile || {}).immatriculation || ""));
+  const partieALegalStatus = String((profile || {}).legalStatus || "").trim();
+  const partieARep = (() => {
+    const p = profile || {};
+    const full = [p.firstName, p.lastName].filter(Boolean).join(" ").trim();
+    return !isEntrepreneurIndividuel(partieALegalStatus) && full ? `${full}, ${NDA_COMPANY_ROLE[partieALegalStatus] || "représentant légal"}` : "";
+  })();
   const [ndaCreatedAt, setNdaCreatedAt] = useState(null);
   const [partieB, setPartieB]     = useState("");
   const [partieBEmail, setPartieBEmail] = useState("");
+  // Version 256 : la Partie B est un particulier ou une entreprise ; son adresse est obligatoire
+  const [partieBType, setPartieBType] = useState("entreprise");
+  const [partieBAddress, setPartieBAddress] = useState("");
+  const [partieBForm, setPartieBForm] = useState("");
+  const [partieBRegistration, setPartieBRegistration] = useState("");
+  const [partieBRep, setPartieBRep] = useState("");
   const [objet, setObjet]         = useState("");
   const [ndaType, setNdaType]     = useState("unilateral"); // "unilateral" | "mutuel"
   const [duration, setDuration]   = useState("3"); // "2" | "3" | "5" | "10" (anciens NDA : "indeterminee")
@@ -12442,7 +12550,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
   const clearSignatureA = () => { const c = canvasRefA.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); setHasStrokesA(false); };
 
   const generate = async () => {
-    if (!partieA.trim() || !partieB.trim() || !objet.trim()) return;
+    if (!partieA.trim() || !partieB.trim() || !partieBAddress.trim() || !objet.trim()) return;
     if (!hasStrokesA) { alert("Signe en tant que Partie A avant de générer le NDA."); return; }
     const freelanceSig = canvasRefA.current.toDataURL("image/png");
     // Version 223 : pas d'espace en trop (« Paule Martin  (Partie B) » dans le PDF)
@@ -12458,7 +12566,8 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     setNdaRef(ref);
     try {
       // Texte fixe, rempli avec les cases du formulaire (plus d'appel à l'IA)
-      const text = buildNdaText({ partieA: pA, partieB: pB, partieASiret: pASiret, partieAAddress: pAAddress, partieBEmail: pBEmail, objet: pObjet, ndaType, duration, ref, date: new Date().toLocaleDateString("fr-FR") });
+      const isCo = partieBType === "entreprise";
+      const text = buildNdaText({ partieA: pA, partieB: pB, partieASiret: pASiret, partieAAddress: pAAddress, partieAImmat: clean(partieAImmat), partieALegalStatus, partieARep, partieBEmail: pBEmail, partieBType, partieBAddress: clean(partieBAddress), partieBForm: isCo ? clean(partieBForm) : "", partieBRegistration: isCo ? clean(partieBRegistration) : "", partieBRep: isCo ? clean(partieBRep) : "", objet: pObjet, ndaType, duration, ref, date: new Date().toLocaleDateString("fr-FR") });
       setNda(text);
       setStep("result");
       setSignLink(""); setNdaRowId(null); setNdaSaveError(false); setNdaClientSignature(null); setNdaSignedAt(null); setNdaFreelanceSignature(freelanceSig); // repart de zéro : ce nouveau NDA n'a pas encore d'id ni de lien de signature
@@ -12555,7 +12664,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
           {step === "form" && (
             <div className="fade-up">
               <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.65, marginBottom:22, background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px" }}>
-                🛡️ <strong style={{color:"#1E40AF"}}>Protégez vos idées avant d'envoyer votre brief.</strong> Ce NDA est généré en 15 secondes et couvre toutes les obligations contractuelles françaises.
+                🛡️ <strong style={{color:"#1E40AF"}}>Protégez vos idées avant d'envoyer votre brief.</strong> Ce NDA à texte fixe, en droit français, est prêt en quelques secondes.
               </div>
 
               {/* Type d'accord */}
@@ -12589,11 +12698,36 @@ function NdaExpressModal({ onClose, profile, authUser }) {
                   <input style={{ ...inputStyle, flex:"1 1 150px", padding:"10px 12px", fontSize:12 }} value={partieASiret} onChange={e=>setPartieASiret(e.target.value)} placeholder="Ton SIRET" aria-label="SIRET de la Partie A" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
                   <input style={{ ...inputStyle, flex:"2 1 220px", padding:"10px 12px", fontSize:12 }} value={partieAAddress} onChange={e=>setPartieAAddress(e.target.value)} placeholder="Ton adresse professionnelle" aria-label="Adresse de la Partie A" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
                 </div>
-                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>Ton SIRET et ton adresse viennent de ton profil. Ils identifient la Partie A dans le NDA.</div>
+                <input style={{ ...inputStyle, marginTop:8, padding:"10px 12px", fontSize:12 }} value={partieAImmat} onChange={e=>setPartieAImmat(e.target.value)} placeholder="Ton immatriculation (RCS ou RNE)" aria-label="Immatriculation de la Partie A" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>Ton adresse, ton SIRET et ton immatriculation viennent de ton profil. Ils identifient la Partie A dans le NDA.{partieARep ? ` Ta société y est représentée par ${partieARep}.` : ""}</div>
               </div>
               <div style={{ marginBottom:14 }}>
                 <label style={labelSt}>{ndaType === "mutuel" ? "PARTIE B — L'AUTRE PARTIE" : ndaType === "unilateral_b" ? "PARTIE B — CELUI QUI PARTAGE (divulgatrice)" : "PARTIE B — LE DESTINATAIRE (réceptrice)"}</label>
-                <input style={inputStyle} value={partieB} onChange={e=>setPartieB(e.target.value)} placeholder="Nom du client / partenaire" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                {/* Version 256 : particulier ou entreprise, pour bien identifier la Partie B (avis d'Ordalie) */}
+                <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                  {[
+                    { key:"entreprise", label:"Une entreprise" },
+                    { key:"particulier", label:"Un particulier" },
+                  ].map(o => (
+                    <button key={o.key} type="button" data-testid={`nda-b-${o.key}`} onClick={() => setPartieBType(o.key)} style={{
+                      flex:1, padding:"8px 0", borderRadius:8, cursor:"pointer",
+                      fontFamily:T.body, fontSize:12, fontWeight:700,
+                      background: partieBType === o.key ? C.navy : C.white,
+                      color: partieBType === o.key ? "#fff" : C.textM,
+                      border: `1.5px solid ${partieBType === o.key ? C.navy : C.border}`,
+                    }}>{o.label}</button>
+                  ))}
+                </div>
+                <input style={inputStyle} value={partieB} onChange={e=>setPartieB(e.target.value)} placeholder={partieBType === "entreprise" ? "Nom de l'entreprise" : "Prénom et nom"} aria-label="Nom de la Partie B" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                <input style={{ ...inputStyle, marginTop:8 }} value={partieBAddress} onChange={e=>setPartieBAddress(e.target.value)} placeholder={partieBType === "entreprise" ? "Adresse du siège" : "Adresse postale"} aria-label="Adresse de la Partie B" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                {partieBType === "entreprise" && (
+                  <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+                    <input style={{ ...inputStyle, flex:"1 1 130px", padding:"10px 12px", fontSize:12 }} value={partieBForm} onChange={e=>setPartieBForm(e.target.value)} placeholder="Forme juridique (SAS, SARL…)" aria-label="Forme juridique de la Partie B" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                    <input style={{ ...inputStyle, flex:"2 1 200px", padding:"10px 12px", fontSize:12 }} value={partieBRegistration} onChange={e=>setPartieBRegistration(e.target.value)} placeholder="N° d'immatriculation (ex. : RCS Paris 123 456 789)" aria-label="Immatriculation de la Partie B" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                    <input style={{ ...inputStyle, flex:"1 1 100%", padding:"10px 12px", fontSize:12 }} value={partieBRep} onChange={e=>setPartieBRep(e.target.value)} placeholder="Représentant : nom et qualité (ex. : Marie Martin, gérante)" aria-label="Représentant de la Partie B" onFocus={e=>e.target.style.borderColor=C.navy} onBlur={e=>e.target.style.borderColor=C.border} />
+                  </div>
+                )}
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>{partieBType === "entreprise" ? "L'adresse est obligatoire. Le reste est facultatif, mais identifie mieux l'entreprise." : "L'adresse est obligatoire : elle identifie la personne qui signe."}</div>
               </div>
               <div style={{ marginBottom:14 }}>
                 <label style={labelSt}>EMAIL DE LA PARTIE B (optionnel)</label>
@@ -12644,10 +12778,10 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 
               <button
                 onClick={generate}
-                disabled={!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA}
-                style={{ width:"100%", padding:"15px", background:(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA) ? C.creamDD : `linear-gradient(135deg, ${C.navyD} 0%, ${C.navy} 100%)`, color:(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA) ? C.textL : C.white, border:"none", borderRadius:12, cursor:(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:14, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA) ? "none" : "0 8px 28px #1B2E4B35", transition:"all 0.2s" }}
-                onMouseOver={e=>{if(partieA.trim()&&partieB.trim()&&objet.trim()&&hasStrokesA){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 12px 36px #1B2E4B45";}}}
-                onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=(!partieA.trim()||!partieB.trim()||!objet.trim()||!hasStrokesA)?"none":"0 8px 28px #1B2E4B35";}}
+                disabled={!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA}
+                style={{ width:"100%", padding:"15px", background:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? C.creamDD : `linear-gradient(135deg, ${C.navyD} 0%, ${C.navy} 100%)`, color:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? C.textL : C.white, border:"none", borderRadius:12, cursor:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:14, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? "none" : "0 8px 28px #1B2E4B35", transition:"all 0.2s" }}
+                onMouseOver={e=>{if(partieA.trim()&&partieB.trim()&&partieBAddress.trim()&&objet.trim()&&hasStrokesA){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 12px 36px #1B2E4B45";}}}
+                onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA)?"none":"0 8px 28px #1B2E4B35";}}
               >
                 <span style={{ fontSize:16 }}>🔒</span> Signer et générer le NDA
               </button>
@@ -12741,11 +12875,10 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 }
 
 /* ══════════════════════════════════════════════════════════ RECOUVREMENT FERME MODAL ══ */
-// ⚠️ MISE EN DEMEURE FORMELLE MASQUÉE (échéance dépassée) en attendant la mise à jour des taux légaux de janvier
-// et une relecture juridique. Pour la réactiver : mettre FORMAL_LETTER_ENABLED à true APRÈS avoir mis à jour
-// CURRENT_PENALTY_RATE_B2B et CURRENT_LEGAL_RATE_B2C dans RecouvrementFermeModal.
-// Les relances amiables avant échéance et le message pour client silencieux restent disponibles.
-const FORMAL_LETTER_ENABLED = false;
+// Version 256 : la mise en demeure revient, en texte fixe (deux modèles d'Ordalie, voir FormalNoticeForm), avec les taux
+// de NOTICE_RATES. Elle se bloque d'elle-même après le dernier semestre connu. Pour la masquer : FORMAL_LETTER_ENABLED à false.
+// Les rappels avant échéance, les relances amiables et le message pour client silencieux restent rédigés par l'IA.
+const FORMAL_LETTER_ENABLED = true;
 // Version 251 : assistant « J'ai un problème » masqué. D'après Ordalie, c'est la fonction la plus exposée à la loi du
 // 31/12/1971 (art. 54 : la consultation juridique est réservée aux professionnels autorisés). Le code reste : pour le
 // remettre, passer CONTRACT_ASSISTANT_ENABLED à true (les CGU et la politique de confidentialité suivent).
@@ -12816,6 +12949,370 @@ Réponds en français, ton clair et rassurant, sans jargon juridique excessif, 1
 // Vrai quand le paiement est en retard (échéance dépassée ou non renseignée) : mise en demeure formelle, ou relance
 // amiable tant qu'elle est suspendue. Version 237 : le jour même de l'échéance, ce n'est pas encore un retard.
 const isFormalLetterPath = (dueDate) => { const d = daysUntilIso(dueDate); return d === null || d < 0; };
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Version 256 — MISE EN DEMEURE À TEXTE FIXE (huitième réponse d'Ordalie, 9 novembre 2026)
+// Deux modèles fixes : client professionnel et client particulier. Freeley remplit les cases et fait les calculs ;
+// aucune IA. La relance amiable (rédigée par l'IA) reste proposée avant, sur son propre bouton.
+// TAUX PAR SEMESTRE, à compléter fin juin et fin décembre, dès la publication des taux du semestre suivant :
+// - bce : taux de la BCE (opération principale de refinancement) en vigueur au 1er janvier ou au 1er juillet. Entre
+//   professionnels, à défaut d'autre taux valable, les pénalités valent ce taux majoré de 10 points (art. L441-10 C. com.) ;
+// - legalPro : taux de l'intérêt légal « dans tous les autres cas » (art. L313-2 C. mon. fin.). Il dépend de celui qui
+//   réclame l'argent : c'est celui du freelance, créancier professionnel, même quand son client est un particulier.
+// Après le dernier semestre de la liste, la mise en demeure se bloque d'elle-même : jamais de lettre avec un faux taux.
+const NOTICE_RATES = [
+  { from: "2026-01-01", bce: 2.15, legalPro: 2.62 }, // 1er semestre 2026
+  { from: "2026-07-01", bce: 2.40, legalPro: 2.75 }, // 2nd semestre 2026 (BCE relevée le 17 juin 2026 ; arrêté du 26 juin 2026)
+];
+const noticeSemesterEnd = (from) => `${from.slice(0, 4)}-${from.slice(5, 7) === "01" ? "06-30" : "12-31"}`;
+const noticeRateFor = (iso) => NOTICE_RATES.find((r) => isIsoDay(iso) && iso >= r.from && iso <= noticeSemesterEnd(r.from)) || null;
+const noticeRatesKnownUntil = () => noticeSemesterEnd(NOTICE_RATES[NOTICE_RATES.length - 1].from);
+const noticeSemesterLabel = (from) => `${from.slice(5, 7) === "01" ? "premier" : "second"} semestre ${from.slice(0, 4)}`;
+const noticeDaysBetween = (a, b) => {
+  const [y1, m1, d1] = String(a).split("-").map(Number);
+  const [y2, m2, d2] = String(b).split("-").map(Number);
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+};
+const noticeRound2 = (x) => Math.round((Number(x) + Number.EPSILON) * 100) / 100;
+const noticeEur = (n) => noticeRound2(n).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[  ]/g, " ");
+const noticePct = (r) => noticeRound2(r).toFixed(2).replace(".", ",");
+// Minimum légal d'un taux de pénalités prévu entre professionnels : trois fois le taux de l'intérêt légal
+const noticeMinRate = (iso) => { const r = noticeRateFor(iso); return r ? noticeRound2(3 * r.legalPro) : null; };
+const NOTICE_RATES_MSG = "La mise en demeure revient dans quelques jours : Freeley met à jour les taux du nouveau semestre. En attendant, envoie une relance amiable.";
+
+// Pénalités entre professionnels, du lendemain de l'échéance au jour de la lettre, sur une base de 365 jours. Le calcul
+// est coupé à chaque changement de semestre, car le taux change. Un taux prévu par le freelance (customRate) vaut pour
+// toute la période. Erreurs : « rates » (taux du semestre pas encore entrés), « too_old » (avant la liste des taux).
+const computeNoticePenalties = ({ principal, dueDate, letterDate, customRate = null }) => {
+  if (!isIsoDay(dueDate) || !isIsoDay(letterDate)) return { error: "dates" };
+  const start = isoDayPlus(dueDate, 1);
+  if (start > letterDate) return { days: 0, segments: [], amount: 0 };
+  const days = noticeDaysBetween(start, letterDate) + 1;
+  const P = Number(principal) || 0;
+  if (customRate != null) {
+    const amount = noticeRound2(P * customRate * days / 36500);
+    return { days, segments: [{ from: start, to: letterDate, days, rate: customRate, amount }], amount };
+  }
+  const segments = [];
+  let cur = start;
+  while (cur <= letterDate) {
+    const r = noticeRateFor(cur);
+    if (!r) return { error: cur < NOTICE_RATES[0].from ? "too_old" : "rates" };
+    const semEnd = noticeSemesterEnd(r.from);
+    const end = semEnd < letterDate ? semEnd : letterDate;
+    const d = noticeDaysBetween(cur, end) + 1;
+    const rate = noticeRound2(r.bce + 10);
+    segments.push({ from: cur, to: end, days: d, rate, amount: noticeRound2(P * rate * d / 36500) });
+    cur = isoDayPlus(end, 1);
+  }
+  return { days, segments, amount: noticeRound2(segments.reduce((s, x) => s + x.amount, 0)) };
+};
+
+// L'émetteur de la lettre, d'après le profil : « EI » après le nom d'un entrepreneur individuel ; pour une société, sa
+// forme juridique, et la signature de son représentant.
+const noticeSenderFromProfile = (p = {}) => {
+  const one = (v) => String(v || "").trim().replace(/\s+/g, " ");
+  const full = one([p.firstName, p.lastName].filter(Boolean).join(" "));
+  const company = !isEntrepreneurIndividuel(p.legalStatus);
+  const name = withEI(one(p.companyName) || full, p.legalStatus);
+  return {
+    name, legalForm: company ? one(p.legalStatus) : "", address: one(p.address), siret: one(p.siret),
+    immatriculation: one(p.immatriculation), iban: one(p.iban), bic: one(p.bic),
+    signature: company && full && one(p.companyName) ? `${full}, pour ${one(p.companyName)}` : name,
+  };
+};
+const NOTICE_SEND_MODES = { lrar: "Lettre recommandée avec avis de réception", lre: "Lettre recommandée électronique", email: "Par courriel" };
+const NOTICE_SEND_NOTES = {
+  lrar: "Pour l'envoyer : télécharge le PDF, puis envoie-le en lettre recommandée avec avis de réception, à La Poste ou en ligne. C'est la preuve la plus sûre que ton client l'a reçue.",
+  lre: "Pour l'envoyer : télécharge le PDF, puis envoie-le par un service de lettre recommandée électronique. Il prouve l'envoi et la réception.",
+  email: "Garde une preuve de l'envoi et, si possible, de la réception, par exemple la réponse de ton client. Si ton client risque de dire qu'il n'a rien reçu, le recommandé est plus sûr.",
+};
+// Ville de l'adresse du freelance, pour « Amiens, le 9 novembre 2026 » (vide si l'adresse n'a pas de code postal)
+const noticeCityOf = (addr) => {
+  const m = String(addr || "").replace(/\s+/g, " ").match(/\b\d{5} ([^,]+)/);
+  return m ? m[1].replace(/\s+cedex\b.*$/i, "").trim() : "";
+};
+
+// Les deux modèles d'Ordalie, remplis. d : { kind: "pro" | "conso", letterDate, sendMode, sender, debtor: { name,
+// address }, invoice: { number, date, total, paid, dueDate, mission }, vat, rateRef, customRate }.
+// Renvoie { text, total (somme réclamée), principal, penalties } ou { error }.
+const buildFormalNotice = (d) => {
+  const one = (v) => String(v || "").trim().replace(/\s+/g, " ");
+  const rate = noticeRateFor(d.letterDate);
+  if (!rate) return { error: "rates" };
+  const inv = d.invoice || {};
+  const total = noticeRound2(inv.total);
+  const principal = noticeRound2(total - (Number(inv.paid) || 0));
+  if (!(principal > 0)) return { error: "amount" };
+  const s = d.sender || {};
+  const pro = d.kind !== "conso";
+  let pen = null;
+  if (pro) {
+    pen = computeNoticePenalties({ principal, dueDate: inv.dueDate, letterDate: d.letterDate, customRate: d.customRate });
+    if (pen.error) return { error: pen.error };
+    if (!pen.segments.length) return { error: "not_late" };
+  }
+  const city = noticeCityOf(s.address);
+  const mission = one(inv.mission).replace(/[.\s]+$/, "");
+  const missionPart = mission ? ` au titre de la mission « ${mission} »` : "";
+  const ibanPart = s.iban ? `, par virement sur le compte suivant : ${s.iban}${s.bic ? ` (BIC : ${s.bic})` : ""}` : "";
+  const daysTxt = (n) => `${n} jour${n > 1 ? "s" : ""}`;
+  const paragraphs = [];
+  let claimed;
+  if (pro) {
+    const calc = (g) => `${noticeEur(principal)} € × ${noticePct(g.rate)} % × ${g.days} / 365 = ${noticeEur(g.amount)} €`;
+    claimed = noticeRound2(principal + pen.amount + 40);
+    paragraphs.push(
+      `La facture n° ${one(inv.number)}, émise le ${longDateFr(inv.date)}${missionPart}, d'un montant total de ${noticeEur(total)} €${d.vat ? ", TVA comprise" : ""}, était payable le ${longDateFr(inv.dueDate)}. À ce jour, après déduction des paiements et avoirs enregistrés, le principal restant dû s'élève à ${noticeEur(principal)} €.`,
+      (pen.segments.length === 1
+        ? `Les pénalités de retard sont calculées du ${longDateFr(pen.segments[0].from)} au ${longDateFr(d.letterDate)}, soit ${daysTxt(pen.days)}, au taux annuel applicable de ${noticePct(pen.segments[0].rate)} %, selon le calcul suivant : ${calc(pen.segments[0])}.`
+        : `Les pénalités de retard sont calculées du ${longDateFr(pen.segments[0].from)} au ${longDateFr(d.letterDate)}, soit ${daysTxt(pen.days)}, au taux annuel applicable à chaque semestre, selon le calcul suivant : ${pen.segments.map((g) => `du ${longDateFr(g.from)} au ${longDateFr(g.to)}, ${calc(g)}`).join(" ; ")}, soit au total ${noticeEur(pen.amount)} €.`)
+        + ` Le taux appliqué est celui prévu ${one(d.rateRef) || "aux conditions de règlement de la facture"}, ou, à défaut de taux dérogatoire valable, le taux supplétif applicable au semestre concerné.`,
+      "S'y ajoute l'indemnité forfaitaire pour frais de recouvrement de 40 €.",
+      `À la date de cette lettre, le total réclamé est de ${noticeEur(claimed)} €, sous réserve des pénalités qui continueront à courir jusqu'au paiement intégral.`,
+      `Je vous mets en demeure de régler cette somme dans un délai de huit (8) jours ouvrés à compter de la réception de la présente${ibanPart}.`,
+      "À défaut de règlement dans ce délai, je me réserve le droit de saisir la juridiction compétente, notamment par une requête en injonction de payer si les conditions légales sont réunies.",
+    );
+  } else {
+    claimed = principal;
+    paragraphs.push(
+      `La facture n° ${one(inv.number)}, émise le ${longDateFr(inv.date)}${missionPart}, était payable le ${longDateFr(inv.dueDate)}. Après déduction des paiements et avoirs enregistrés, le principal restant dû s'élève à ${noticeEur(principal)} €.`,
+      `Je ne réclame ni l'indemnité forfaitaire de 40 € ni d'intérêts pour la période antérieure à la présente mise en demeure. Je vous mets en demeure de régler le principal de ${noticeEur(principal)} € dans un délai de huit (8) jours calendaires à compter de la réception de la présente${ibanPart}.`,
+      `À défaut de paiement, et en l'absence de stipulation contractuelle valable prévoyant un autre régime, des intérêts au taux légal applicable lorsque le créancier agit à titre professionnel courront à compter de la réception de cette mise en demeure, conformément à l'article 1231-6 du Code civil. Le taux légal applicable est semestriel : ${noticePct(rate.legalPro)} % au ${noticeSemesterLabel(rate.from)}.`,
+      "À défaut de règlement, je me réserve le droit de saisir la juridiction compétente pour demander le recouvrement de la créance, notamment par une requête en injonction de payer si les conditions légales sont réunies.",
+    );
+  }
+  const lines = [
+    s.legalForm ? `${s.name}, ${s.legalForm}` : s.name,
+    [s.address, s.siret ? `SIRET ${fmtSiret(s.siret)}` : ""].filter(Boolean).join(" — "),
+    ...(s.immatriculation ? [s.immatriculation] : []),
+    "",
+    `À l'attention de ${one(d.debtor?.name)}`,
+    ...(one(d.debtor?.address) ? [one(d.debtor.address)] : []),
+    "",
+    NOTICE_SEND_MODES[d.sendMode] || NOTICE_SEND_MODES.lrar,
+    `${city ? `${city}, le` : "Le"} ${longDateFr(d.letterDate)}`,
+    "",
+    `Objet : Mise en demeure de payer — facture n° ${one(inv.number)}`,
+    "",
+    "Madame, Monsieur,",
+    "",
+    ...paragraphs.flatMap((p) => [p, ""]),
+    "Veuillez agréer, Madame, Monsieur, l'expression de mes salutations distinguées.",
+    "",
+    s.signature || s.name || "",
+  ];
+  const text = lines.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n").trim();
+  return { text, total: claimed, principal, penalties: pen ? pen.amount : 0 };
+};
+
+// Factures en retard d'un dossier suivi : numéro, date d'émission, montant payé par le client (TVA comprise quand le
+// freelance la facture) et date limite. Un paiement sans facture est montré, mais ne peut pas être choisi.
+const noticeInvoicesOf = (entry, profile, today = parisTodayIso()) => {
+  if (!entry) return [];
+  const endDay = isIsoDay(entry.endDate) ? entry.endDate : null;
+  const avs = Array.isArray(entry.avenants) ? entry.avenants : [];
+  return contractPaymentItems(entry).filter((i) => !i.paid && i.amount > 0).map((i) => {
+    let number = "", date = "";
+    if (i.kind === "acompte" || i.kind === "facture") {
+      number = entry.acompteInvoiceNumber || "";
+      date = isIsoDay(entry.acompteInvoiceDate) ? entry.acompteInvoiceDate : (i.kind === "facture" ? frDayToIso(entry.date) : endDay) || "";
+    } else if (i.kind === "solde") {
+      number = entry.soldeInvoiceNumber || "";
+      date = isIsoDay(entry.soldeInvoiceDate) ? entry.soldeInvoiceDate : endDay || "";
+    } else if (i.kind === "avenant") {
+      const av = avs.find((a) => Number(a.num) === i.num) || {};
+      number = av.invoiceNumber || "";
+      date = isIsoDay(av.invoiceDate) ? av.invoiceDate : parisIsoDayOf(av.signedByClientAt || av.createdAt) || "";
+    }
+    return { key: `${i.kind}-${i.num || ""}`, label: i.label, number: String(number || "").trim(), date, amount: withTva(i.amount, profile), dueDate: i.dueDate || "", late: isIsoDay(i.dueDate) && i.dueDate < today };
+  });
+};
+// Ce que Freeley sait d'un dossier suivi, pour préremplir la mise en demeure
+const noticeCaseFromEntry = (entry, profile, today = parisTodayIso()) => {
+  if (!entry) return { initial: {}, invoices: [], rateRef: "" };
+  const f = entry.form || {};
+  const conso = f.typeClient === "particulier";
+  const one = (v) => String(v || "").trim().replace(/\s+/g, " ");
+  const company = one(entry.clientCompany || f.clientCompany);
+  const person = one(entry.clientName || f.clientName);
+  const cNum = (String(entry.contract || "").match(/CP-\d{4}-\d{3,5}/) || [])[0] || "";
+  return {
+    initial: { kind: conso ? "conso" : "pro", debtorName: (!conso && company) || person || company, debtorAddress: one(f.clientAddress || entry.clientAddress), mission: one(entry.missionTitle || f.missionTitle) },
+    invoices: noticeInvoicesOf(entry, profile, today),
+    rateRef: entry.isStandaloneInvoice ? "aux conditions de règlement figurant sur la facture" : cNum ? `à l'article 4 du contrat n° ${cNum}` : "à l'article 4 du contrat",
+  };
+};
+
+// Formulaire de la mise en demeure. Prérempli avec ce que Freeley sait (dossier suivi, ou saisie manuelle), le freelance
+// complète ce qui manque. « initial » sert aussi de brouillon : « ← Modifier » rouvre le formulaire tel qu'il était.
+function FormalNoticeForm({ profile, mode, initial = {}, invoices = [], rateRef = "", onCancel, onDone }) {
+  const today = parisTodayIso();
+  const kind = initial.kind === "conso" ? "conso" : "pro";
+  const manual = mode === "manual";
+  const late = (invoices || []).filter((i) => i.late);
+  const selectable = late.filter((i) => i.number);
+  const [invKey, setInvKey] = useState(() => (selectable.find((i) => i.key === initial.invKey) || selectable[0] || {}).key || "");
+  const [debtorName, setDebtorName] = useState(initial.debtorName || "");
+  const [debtorAddress, setDebtorAddress] = useState(initial.debtorAddress || "");
+  const [mission, setMission] = useState(initial.mission || "");
+  const [number, setNumber] = useState(initial.number || "");
+  const [invDate, setInvDate] = useState(initial.invDate || "");
+  const [amount, setAmount] = useState(initial.amount != null ? String(initial.amount) : "");
+  const [dueDate, setDueDate] = useState(initial.dueDate || "");
+  const [paid, setPaid] = useState(initial.paid || "");
+  const [rateMode, setRateMode] = useState(initial.rateMode || "legal");
+  const [customRate, setCustomRate] = useState(initial.customRate || "");
+  const [sendMode, setSendMode] = useState(initial.sendMode || "lrar");
+  const [error, setError] = useState("");
+  const minRate = noticeMinRate(today);
+  const toNum = (v) => { const n = parseFloat(String(v ?? "").replace(/\s/g, "").replace(",", ".")); return Number.isFinite(n) ? n : NaN; };
+  const inputSt = { width:"100%", padding:"11px 13px", border:`1.5px solid ${C.border}`, borderRadius:9, fontSize:13, fontFamily:T.body, color:C.text, outline:"none", background:C.white, boxSizing:"border-box" };
+  const labelSt = { display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:6 };
+  const box = { marginBottom:12 };
+  const tooOldMsg = `Ce retard a commencé avant le ${longDateFr(NOTICE_RATES[0].from)}. Freeley ne connaît pas les taux de cette période : fais calculer les pénalités par un professionnel.`;
+  const submit = () => {
+    setError("");
+    if (!noticeRateFor(today)) return setError(NOTICE_RATES_MSG);
+    const sel = selectable.find((i) => i.key === invKey);
+    const inv = manual
+      ? { number: number.trim(), date: invDate, total: toNum(amount), dueDate }
+      : sel ? { number: sel.number, date: sel.date, total: sel.amount, dueDate: sel.dueDate } : null;
+    if (!inv) return setError("Choisis la facture concernée.");
+    if (!debtorName.trim()) return setError("Indique le nom du client.");
+    if (!inv.number) return setError("Indique le numéro de la facture.");
+    if (!isIsoDay(inv.date)) return setError("Indique la date de la facture.");
+    if (!(inv.total > 0)) return setError("Indique le montant total de la facture.");
+    if (!isIsoDay(inv.dueDate)) return setError("Indique la date d'échéance de la facture.");
+    if (inv.dueDate >= today) return setError("L'échéance n'est pas encore dépassée : la mise en demeure est possible à partir du lendemain de l'échéance.");
+    if (inv.date > today) return setError("La date de la facture est dans le futur.");
+    const paidN = String(paid).trim() ? toNum(paid) : 0;
+    if (!(paidN >= 0)) return setError("Le montant déjà payé n'est pas un nombre.");
+    if (paidN >= inv.total) return setError("Le montant déjà payé doit être inférieur au montant de la facture.");
+    let custom = null;
+    if (kind === "pro" && manual && rateMode === "custom") {
+      custom = toNum(customRate);
+      if (!(custom > 0)) return setError("Indique le taux écrit sur ta facture, ou choisis le taux légal par défaut.");
+      if (minRate && custom < minRate) return setError(`Ce taux est inférieur au minimum légal entre professionnels : trois fois le taux de l'intérêt légal, soit ${noticePct(minRate)} %. Choisis le taux légal par défaut.`);
+    }
+    const res = buildFormalNotice({
+      kind, letterDate: today, sendMode,
+      sender: noticeSenderFromProfile(profile || {}),
+      debtor: { name: debtorName, address: debtorAddress },
+      invoice: { ...inv, paid: paidN, mission },
+      vat: !!(profile?.tvaNumber && String(profile.tvaNumber).trim()),
+      rateRef: manual ? "" : rateRef, customRate: custom,
+    });
+    if (res.error) return setError(res.error === "rates" ? NOTICE_RATES_MSG : res.error === "too_old" ? tooOldMsg : "La lettre n'a pas pu être préparée. Vérifie les montants et les dates.");
+    onDone({ text: res.text, total: res.total, info: { kind, sendMode }, draft: { kind, invKey, debtorName, debtorAddress, mission, number, invDate, amount, dueDate, paid, rateMode, customRate, sendMode } });
+  };
+  const ready = manual || selectable.length > 0;
+  return (
+    <div data-testid="notice-form" className="fade-up" style={{ background:C.white, border:"1.5px solid #FECACA", borderRadius:14, padding:"16px 16px 18px", marginBottom:14 }}>
+      <div style={{ fontFamily:T.display, fontSize:15, fontWeight:700, color:"#7F1D1D", marginBottom:6 }}>Mise en demeure</div>
+      <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:14 }}>
+        {kind === "pro"
+          ? "Client professionnel : la lettre réclame les pénalités de retard, calculées par Freeley, et l'indemnité de 40 €."
+          : "Client particulier : la lettre ne réclame ni pénalités ni indemnité de 40 €. Si elle reste sans effet, des intérêts au taux légal courront."}
+        {" "}Le texte est un modèle fixe : relis-le avant de l'envoyer.
+      </div>
+      {!manual && (
+        <div style={box}>
+          <label style={labelSt}>FACTURE EN RETARD</label>
+          {late.map((i) => (
+            <label key={i.key} style={{ display:"flex", gap:9, alignItems:"flex-start", padding:"9px 11px", border:`1.5px solid ${invKey === i.key ? "#DC2626" : C.border}`, borderRadius:9, marginBottom:6, cursor: i.number ? "pointer" : "default", opacity: i.number ? 1 : 0.6, fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.5 }}>
+              <input type="radio" name="notice-invoice" disabled={!i.number} checked={invKey === i.key} onChange={() => setInvKey(i.key)} style={{ marginTop:3 }} />
+              <span>{i.number ? <strong>Facture n° {i.number}</strong> : <strong>Pas encore de facture</strong>} · {i.label} · {noticeEur(i.amount)} € · échéance le {longDateFr(i.dueDate)}</span>
+            </label>
+          ))}
+          {!selectable.length && (
+            <div data-testid="notice-no-invoice" style={{ fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", lineHeight:1.6 }}>Une mise en demeure cite la facture en retard. Fais d'abord la facture dans Mes contrats (bouton « Télécharger la facture »), puis reviens ici.</div>
+          )}
+        </div>
+      )}
+      {manual && (
+        <>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <div style={{ ...box, flex:"1 1 160px" }}>
+              <label style={labelSt}>N° DE LA FACTURE</label>
+              <input data-testid="notice-number" style={inputSt} value={number} onChange={(e) => setNumber(e.target.value)} placeholder="Ex. : FA-2026-0012" />
+            </div>
+            <div style={{ ...box, flex:"1 1 140px" }}>
+              <label style={labelSt}>DATE DE LA FACTURE</label>
+              <input data-testid="notice-invoice-date" type="date" style={inputSt} value={invDate} onChange={(e) => setInvDate(e.target.value)} />
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <div style={{ ...box, flex:"1 1 160px" }}>
+              <label style={labelSt}>MONTANT TOTAL (€)</label>
+              <input data-testid="notice-amount" type="number" style={inputSt} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Ex. : 1500" />
+            </div>
+            <div style={{ ...box, flex:"1 1 140px" }}>
+              <label style={labelSt}>DATE D'ÉCHÉANCE</label>
+              <input data-testid="notice-due-date" type="date" style={inputSt} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            </div>
+          </div>
+        </>
+      )}
+      {ready && (
+        <>
+          <div style={box}>
+            <label style={labelSt}>{kind === "pro" ? "CLIENT : NOM DE L'ENTREPRISE" : "CLIENT : PRÉNOM ET NOM"}</label>
+            <input data-testid="notice-debtor" style={inputSt} value={debtorName} onChange={(e) => setDebtorName(e.target.value)} />
+          </div>
+          <div style={box}>
+            <label style={labelSt}>ADRESSE DU CLIENT</label>
+            <input data-testid="notice-debtor-address" style={inputSt} value={debtorAddress} onChange={(e) => setDebtorAddress(e.target.value)} placeholder="Ex. : 5 avenue Victor Hugo, 69001 Lyon" />
+          </div>
+          <div style={box}>
+            <label style={labelSt}>MISSION CONCERNÉE (FACULTATIF)</label>
+            <input data-testid="notice-mission" style={inputSt} value={mission} onChange={(e) => setMission(e.target.value)} placeholder="Ex. : Création du site vitrine" />
+          </div>
+          <div style={box}>
+            <label style={labelSt}>DÉJÀ PAYÉ PAR LE CLIENT (FACULTATIF)</label>
+            <input data-testid="notice-paid" type="number" style={inputSt} value={paid} onChange={(e) => setPaid(e.target.value)} placeholder="Paiement partiel ou avoir, en €" />
+          </div>
+          {kind === "pro" && manual && (
+            <div style={box}>
+              <label style={labelSt}>TAUX DES PÉNALITÉS</label>
+              {[
+                { key:"legal", label:"Le taux légal par défaut (taux de la BCE + 10 points)" },
+                { key:"custom", label:"Un autre taux, écrit sur ma facture" },
+              ].map((o) => (
+                <label key={o.key} style={{ display:"flex", gap:8, alignItems:"center", fontFamily:T.body, fontSize:12, color:C.text, marginBottom:6, cursor:"pointer" }}>
+                  <input type="radio" name="notice-rate" data-testid={`notice-rate-${o.key}`} checked={rateMode === o.key} onChange={() => setRateMode(o.key)} /> {o.label}
+                </label>
+              ))}
+              {rateMode === "custom" && (
+                <input data-testid="notice-custom-rate" type="number" style={{ ...inputSt, marginTop:4 }} value={customRate} onChange={(e) => setCustomRate(e.target.value)} placeholder={`Taux annuel en %, au moins ${minRate ? noticePct(minRate) : "3 fois le taux légal"} %`} />
+              )}
+            </div>
+          )}
+          <div style={box}>
+            <label style={labelSt}>ENVOI</label>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              {[
+                { key:"lrar", label:"Recommandé avec AR (conseillé)" },
+                { key:"lre", label:"Recommandé électronique" },
+                { key:"email", label:"Email" },
+              ].map((o) => (
+                <button key={o.key} type="button" data-testid={`notice-send-${o.key}`} onClick={() => setSendMode(o.key)} style={{ flex:"1 1 auto", padding:"8px 10px", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, background: sendMode === o.key ? "#7F1D1D" : C.white, color: sendMode === o.key ? "#fff" : C.textM, border:`1.5px solid ${sendMode === o.key ? "#7F1D1D" : C.border}` }}>{o.label}</button>
+              ))}
+            </div>
+            <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>Le recommandé prouve que ton client a reçu la lettre. Le mode d'envoi est écrit en haut de la lettre.</div>
+          </div>
+        </>
+      )}
+      {error && <div data-testid="notice-error" style={{ fontFamily:T.body, fontSize:12, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 11px", marginBottom:10, lineHeight:1.5 }}>{error}</div>}
+      <div style={{ display:"flex", gap:10 }}>
+        <button type="button" onClick={onCancel} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }}>← Annuler</button>
+        {ready && (
+          <button type="button" data-testid="notice-submit" onClick={submit} style={{ flex:2, padding:"12px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}>Préparer la lettre</button>
+        )}
+      </div>
+    </div>
+  );
+}
 function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripeConnectAccountId, stripeConnectReady, onGoToProfileTva }) {
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   /* ── State global ── */
@@ -12834,6 +13331,7 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripe
     setSelectedCase(rc);
     setAutoStep("alert");
     setAutoLetter("");
+    setAutoNoticeDraft(null); setAutoNoticeInfo(null);
     setStripeLinkUrl(""); setStripeLinkCopied(false);
   };
 
@@ -12858,6 +13356,12 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripe
   const [manDots,    setManDots]    = useState(1);
   const [manMode, setManMode] = useState("paiement"); // "paiement" | "silence" — bascule entre relance de paiement et relance pour client silencieux (ghosting)
   const [manLastContact, setManLastContact] = useState("");
+  /* ── Version 256 : mise en demeure à texte fixe (brouillon gardé pour « Modifier », mode d'envoi et type de client) ── */
+  const [autoNoticeDraft, setAutoNoticeDraft] = useState(null);
+  const [autoNoticeInfo, setAutoNoticeInfo] = useState(null);
+  const [manNoticeDraft, setManNoticeDraft] = useState(null);
+  const [manNoticeInfo, setManNoticeInfo] = useState(null);
+  const noticeRatesReady = !!noticeRateFor(parisTodayIso());
 
   /* ── State envoi mise en demeure ── */
   const [sendModal, setSendModal]   = useState(null); // null | { letter, clientName }
@@ -12878,82 +13382,7 @@ function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripe
     return () => clearInterval(id);
   }, [manStep]);
 
-  /* ── Génération IA ── */
-  // ⚠️ Taux légaux en vigueur — À METTRE À JOUR CHAQUE 1er JANVIER ET 1er JUILLET
-  // Sources : service-public.gouv.fr + arrêté au J.O. (vérifié pour S2 2026 : BCE 2,40% + 10 pts)
-  const CURRENT_PENALTY_RATE_B2B = 0.1240;  // Taux BCE + 10 pts pour pros — S2 2026 (1 juil. → 31 déc. 2026)
-  const CURRENT_LEGAL_RATE_B2C   = 0.0684;  // Taux d'intérêt légal particuliers — S2 2026
-
-  const computeDueTotal = (amount, daysLate, isParticulier) => {
-    const numAmount = parseFloat(amount) || 0;
-    const numDays = Number(daysLate) || 0;
-    const rate = isParticulier ? CURRENT_LEGAL_RATE_B2C : CURRENT_PENALTY_RATE_B2B;
-    // Particulier : les intérêts de retard ne courent qu'à compter de la mise en demeure (art. 1231-6
-    // C. civ.), et le contrat Freeley le dit aussi. La lettre ne réclame donc rien pour le passé.
-    const penaltyAmount = isParticulier ? "0.00" : (numAmount * rate * numDays / 365).toFixed(2);
-    const indemnite = isParticulier ? 0 : 40;
-    const total = (numAmount + parseFloat(penaltyAmount) + indemnite).toFixed(2);
-    return { rate, penaltyAmount, indemnite, total: parseFloat(total) };
-  };
-
-  const buildPrompt = (debtor, amount, dueDate, mission, daysLate, isParticulier) => {
-    const { rate, penaltyAmount, indemnite, total } = computeDueTotal(amount, daysLate, isParticulier);
-
-    const p = profile || {};
-    const senderName = withEI(p.companyName || [p.firstName, p.lastName].filter(Boolean).join(" "), p.legalStatus) || null;
-    const senderAddress = p.address || null;
-    const senderSiret = p.siret || null;
-    const senderIban = p.iban ? `IBAN : ${p.iban}${p.bic ? " · BIC : " + p.bic : ""}${p.bankName ? " · " + p.bankName : ""}` : null;
-
-    return `Tu es un avocat spécialisé en recouvrement de créances en droit français. Rédige une MISE EN DEMEURE DE PAIEMENT ferme et juridiquement solide.
-
-Débiteur : ${debtor}
-Montant impayé TTC (toutes taxes comprises, montant réellement dû) : ${amount} €
-Date d'échéance dépassée : ${dueDate}
-Retard : ${daysLate} jours
-Mission concernée : ${mission}
-Date de la lettre : ${new Date().toLocaleDateString("fr-FR")}
-Nature du débiteur : ${isParticulier ? "PARTICULIER (consommateur, non professionnel)" : "PROFESSIONNEL (entreprise/société)"}
-
-IDENTITÉ DE L'ÉMETTEUR (le prestataire qui envoie la lettre) :
-- Nom / raison sociale : ${senderName || "Non renseigné — laisser le placeholder [Votre nom/raison sociale]"}
-- Adresse : ${senderAddress || "Non renseignée — laisser le placeholder [Votre adresse]"}
-- SIRET : ${senderSiret || "Non renseigné — laisser le placeholder [SIRET]"}
-- Coordonnées bancaires pour le règlement : ${senderIban || "Non renseignées — laisser le placeholder [Coordonnées bancaires - IBAN/BIC]"}
-IMPORTANT : utilise ces informations réelles TELLES QUELLES dans l'en-tête et la section paiement de la lettre quand elles sont fournies. Ne remplace JAMAIS une information réelle fournie ci-dessus par un placeholder générique entre crochets — les placeholders ne doivent apparaître que pour les champs explicitement marqués "Non renseigné(e)".
-
-CALCULS DÉJÀ EFFECTUÉS (à reprendre TELS QUELS dans la lettre, ne recalcule surtout pas toi-même — le taux légal change chaque semestre et tu n'as pas accès à sa valeur actuelle) :
-${isParticulier
-  ? `- Taux d'intérêt légal applicable aux particuliers ce semestre : ${(rate * 100).toFixed(2)} % par an
-- Aucun intérêt n'est réclamé pour la période déjà écoulée : pour un particulier, les intérêts de retard ne courent qu'à compter de la mise en demeure (article 1231-6 du Code civil).`
-  : `- Taux applicable : ${(rate * 100).toFixed(2)}% annuel (taux BCE + 10 points en vigueur ce semestre, art. L441-10 C.com.)
-- Montant des pénalités pour ${daysLate} jours : ${penaltyAmount} € (calcul : ${amount} € × ${(rate*100).toFixed(2)}% × ${daysLate}/365)
-- Indemnité forfaitaire de recouvrement : 40,00 € (art. D441-5 C.com.)`}
-- MONTANT TOTAL EXIGIBLE : ${total} €
-
-La lettre doit :
-${isParticulier
-  ? `1. Le débiteur étant un PARTICULIER, NE PAS appliquer le régime du Code de commerce (article L441-10) ni l'indemnité forfaitaire de 40 € — ce régime est réservé aux professionnels et son application à un consommateur serait juridiquement incorrecte.
-2. Ne réclamer AUCUN intérêt pour la période passée. Indiquer qu'à défaut de règlement dans le délai, des intérêts de retard au taux d'intérêt légal (${(rate * 100).toFixed(2)} % par an) courront à compter de la date de la présente mise en demeure (article 1231-6 du Code civil). N'emploie jamais le mot « pénalités » : pour un particulier, on parle d'« intérêts de retard ».
-3. Fixer un délai de 8 JOURS pour régulariser sous peine de poursuites judiciaires.
-4. Mentionner le recours possible à l'injonction de payer (art. 1405 CPC) devant le tribunal judiciaire compétent.
-5. Ton ferme mais mesuré, conforme au droit de la consommation.`
-  : `1. Mentionner EXPLICITEMENT l'article L441-10 du Code de commerce (pénalités de retard légales, réservées aux professionnels)
-2. Reprendre TEL QUEL le taux et le montant des pénalités déjà calculés ci-dessus, sans les recalculer toi-même
-3. Mentionner l'indemnité forfaitaire de 40 € pour frais de recouvrement (art. D441-5 C.com.)
-4. Fixer un délai de 8 JOURS OUVRÉS pour régulariser sous peine de poursuites judiciaires
-5. Mentionner le recours possible à l'injonction de payer (art. 1405 CPC) et au recouvrement par huissier
-6. Ton ferme, professionnel, sans agressivité mais sans concession
-7. IMPORTANT — Titre de civilité : si la forme juridique de l'entreprise est mentionnée (SAS/SASU → dirigeant = "Président(e)" ; SARL/EURL → dirigeant = "Gérant(e)" ; autre/inconnue → rester neutre avec "Madame/Monsieur" sans titre de fonction). Ne jamais employer "Gérant(e)" pour une SAS ou SASU, ni "Président(e)" pour une SARL — ce sont des titres juridiques distincts et non interchangeables.`}
-
-Structure : Objet → Rappel des faits → Montant total dû avec calcul détaillé (reprendre les chiffres exacts fournis ci-dessus) → Mise en demeure formelle → Délai + conséquences → Formule de clôture
-
-MISE EN FORME — ce texte sera affiché tel quel dans un PDF simple, SANS interprétation du markdown : n'utilise JAMAIS de tableaux (pas de barres verticales |, pas de lignes de séparateurs ---), pas de gras (**), pas de titres avec #. Présente les montants en liste simple avec des tirets ou retours à la ligne classiques.
-
-IMPORTANT — Ne jamais affirmer des faits non fournis dans les informations ci-dessus (par exemple, ne pas prétendre que des relances amiables ont déjà été envoyées, sauf si cela est explicitement mentionné dans la mission/les détails du litige). Reste factuel et ne complète pas l'historique par des suppositions.
-
-Commence DIRECTEMENT par "MISE EN DEMEURE DE PAIEMENT". Pas d'introduction.`;
-  };
+  /* ── Génération IA : rappels et relances. Version 256 : la mise en demeure n'est plus rédigée par l'IA (FormalNoticeForm) ── */
 
   // Relance PRÉVENTIVE — pour une échéance pas encore dépassée. Ton amical, pas de menace, pas de pénalités (rien n'est dû, l'échéance n'est pas encore atteinte).
   const buildPreventivePrompt = (debtor, amount, dueDate, mission, clientEmail) => {
@@ -13064,21 +13493,12 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         const text = await callAI(prompt);
         setAutoLetter(text);
         setAutoStep("result");
-      } else if (!FORMAL_LETTER_ENABLED) {
-        // ── Échéance dépassée, mise en demeure suspendue → relance amiable, sans pénalités chiffrées ──
+      } else {
+        // ── Échéance dépassée → relance amiable, sans pénalités chiffrées. Version 256 : la mise en demeure a son propre
+        // bouton et son formulaire (texte fixe, sans IA) ──
         setAutoLetterType("amicable");
         const prompt = buildAmicablePrompt(autoCase.clientName, fmtEuro(autoCase.amount), dueDateLabel, autoCase.mission || "Mission freelance", Math.max(1, rawDiff), isPart);
         setAutoTotal(parseFloat(autoCase.amount) || 0);
-        const text = await callAI(prompt);
-        setAutoLetter(text);
-        setAutoStep("result");
-      } else {
-        // ── Échéance dépassée (ou non renseignée) → mise en demeure formelle ──
-        setAutoLetterType("formal");
-        const realDaysLate = Math.max(1, rawDiff);
-        const prompt = buildPrompt(autoCase.clientName, autoCase.amount, dueDateLabel || "Non renseignée", autoCase.mission || "Mission freelance", realDaysLate, isPart);
-        const { total } = computeDueTotal(autoCase.amount, realDaysLate, isPart);
-        setAutoTotal(total);
         const text = await callAI(prompt);
         setAutoLetter(text);
         setAutoStep("result");
@@ -13126,21 +13546,11 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         const text = await callAI(prompt);
         setManLetter(text);
         setManStep("result");
-      } else if (!FORMAL_LETTER_ENABLED) {
-        // ── Échéance dépassée, mise en demeure suspendue → relance amiable, sans pénalités chiffrées ──
+      } else {
+        // ── Échéance dépassée → relance amiable, sans pénalités chiffrées (version 256 : la mise en demeure a son bouton) ──
         setManLetterType("amicable");
         const prompt = buildAmicablePrompt(manDebtor, manAmount, dueDateLabel, manDetails || "Mission freelance", Math.max(1, rawDiff), isPart);
         setManTotal(parseFloat(manAmount) || 0);
-        const text = await callAI(prompt);
-        setManLetter(text);
-        setManStep("result");
-      } else {
-        // ── Échéance dépassée (ou non renseignée) → mise en demeure formelle ──
-        setManLetterType("formal");
-        const realDaysLate = Math.max(1, rawDiff);
-        const prompt = buildPrompt(manDebtor, manAmount, dueDateLabel || "Non renseignée", manDetails || "Mission freelance", realDaysLate, isPart);
-        const { total } = computeDueTotal(manAmount, realDaysLate, isPart);
-        setManTotal(total);
         const text = await callAI(prompt);
         setManLetter(text);
         setManStep("result");
@@ -13255,7 +13665,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       // Version 244 : propriétés du fichier, avec la mention lisible par machine (lettre rédigée avec l'aide de l'IA)
       const letterPdfTitle = isSilence ? "Relance" : isPreventive ? "Rappel d'échéance" : isAmicable ? "Relance de paiement" : "Mise en demeure";
       doc.setProperties({ title: letterPdfTitle, creator: `Freeley ${APP_VERSION}` });
-      markPdfAsAiGenerated(doc, letterPdfTitle);
+      if (letterType !== "formal") markPdfAsAiGenerated(doc, letterPdfTitle); // version 256 : la mise en demeure est un texte fixe
       const PW = 210, ML = 22, MR = 22, cw = PW - ML - MR;
       const NAVY = isSilence ? [30, 64, 175] : isPreventive ? [180, 140, 70] : isAmicable ? [154, 52, 18] : [26, 54, 93];
       const GOLD = [180, 140, 70];
@@ -13265,7 +13675,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(255,255,255);
       doc.text(isSilence ? "MESSAGE DE RELANCE" : isPreventive ? "RAPPEL AVANT ÉCHÉANCE" : isAmicable ? "RELANCE DE PAIEMENT" : "MISE EN DEMEURE DE PAIEMENT", ML, 15);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(200,215,235);
-      doc.text(`Établi le ${today} via Freeley${isSilence || isPreventive || isAmicable ? "" : " — Recouvrement Ferme"}`, ML, 23);
+      doc.text(`Établi le ${today} via Freeley`, ML, 23);
       let y = 42;
       doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40,40,40);
       const cleanText = cleanLetterText(letter);
@@ -13299,7 +13709,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...NAVY);
         doc.text(isPreventive || isAmicable ? "RÉGLER PAR CARTE" : "RÉGLER CETTE MISE EN DEMEURE PAR CARTE", ML + 4, y + 8);
         doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(80,80,80);
-        const totalLabel = total && total.toFixed ? total.toFixed(2) : total;
+        const totalLabel = fmtEuro(total);
         const boxText = isPreventive
           ? `Scanner ce code pour régler dès maintenant le montant de ${totalLabel} € avant l'échéance.`
           : isAmicable
@@ -13314,7 +13724,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     } catch(e) { alert("Erreur PDF : " + (e.message || "inconnue")); }
   };
 
-  const ResultScreen = ({ letter, onEdit, clientName, clientEmail, clientPhone, total, mission, type = "formal" }) => {
+  const ResultScreen = ({ letter, onEdit, clientName, clientEmail, clientPhone, total, mission, type = "formal", formalInfo = null }) => {
     const isAmicable = type === "amicable"; // version 237 : relance amiable d'un paiement en retard
     const isPreventive = type === "preventive" || isAmicable; // mêmes couleurs, aucune pénalité
     const isSilence = type === "silence";
@@ -13322,11 +13732,16 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     <div className="fade-up">
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background: isSilence ? "#EFF6FF" : isPreventive ? "#FFFBEB" : "#FEF2F2", border:`1px solid ${isSilence ? "#BFDBFE" : isPreventive ? "#FCD34D" : "#FCA5A5"}`, borderRadius:10, padding:"11px 16px" }}>
         <span>{isSilence ? "💬" : isPreventive ? "⏰" : "🚨"}</span>
-        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isSilence ? "#1E3A8A" : isPreventive ? "#92400E" : "#991B1B" }}>{isSilence ? "Message de relance prêt · Client silencieux" : isAmicable ? "Relance amiable prête · Sans pénalités ni mise en demeure" : isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isSilence ? "#1E3A8A" : isPreventive ? "#92400E" : "#991B1B" }}>{isSilence ? "Message de relance prêt · Client silencieux" : isAmicable ? "Relance amiable prête · Sans pénalités ni mise en demeure" : isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : formalInfo?.kind === "conso" ? "Mise en demeure prête · Aucun intérêt réclamé pour la période passée" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
       </div>
       <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"18px 20px", maxHeight:260, overflowY:"auto", marginBottom:14 }}>
         <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanLetterText(letter)}</pre>
       </div>
+      {type === "formal" && formalInfo && NOTICE_SEND_NOTES[formalInfo.sendMode] && (
+        <div data-testid="notice-send-note" style={{ display:"flex", gap:8, alignItems:"flex-start", background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:10, padding:"10px 14px", marginBottom:10, fontFamily:T.body, fontSize:12, color:"#9A3412", lineHeight:1.55 }}>
+          <span>📮</span><div>{NOTICE_SEND_NOTES[formalInfo.sendMode]}</div>
+        </div>
+      )}
 
       {/* Paiement du montant dû — non pertinent pour une relance "silence prolongé", aucun montant n'est nécessairement dû.
           Version 232 : le virement est rappelé à égalité avec la carte. */}
@@ -13342,7 +13757,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
       )}
       {!isSilence && (
       <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
-        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Carte bancaire (Stripe) : faire régler {isPreventive ? "" : "le montant total "}({total ? total.toFixed(2) : "0.00"} €) par carte</div>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Carte bancaire (Stripe) : faire régler {isPreventive ? "" : "le montant total "}({total ? fmtEuro(total) : "0"} €) par carte</div>
         <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:10 }}>
           {isAmicable ? "Le client règle en un clic, par carte." : isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien correspond au montant total réclamé dans la lettre : le client règle tout en un clic."}
         </div>
@@ -13484,7 +13899,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
               <div style={{ width:42, height:42, background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:13, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>🚨</div>
               <div>
                 <div style={{ fontFamily:T.display, fontSize:17, fontWeight:700, color:"#fff", lineHeight:1.2 }}>Recouvrement Ferme</div>
-                <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>{FORMAL_LETTER_ENABLED ? "Rappels avant échéance & mises en demeure" : "Rappels avant échéance & relances amiables"}</div>
+                <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>{FORMAL_LETTER_ENABLED ? "Rappels, relances amiables & mises en demeure" : "Rappels avant échéance & relances amiables"}</div>
               </div>
             </div>
             <button onClick={onClose} style={{ width:30, height:30, borderRadius:"50%", background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.18)", cursor:"pointer", color:"rgba(255,255,255,0.75)", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>×</button>
@@ -13541,7 +13956,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                       </div>
                       <div style={{ fontFamily:T.body, fontSize:12, color:"#7F1D1D", lineHeight:1.6 }}>
                         <strong>{autoCase.clientName || "Client sans nom"}</strong>
-                        {autoCase.amount ? <> — <strong>{fmtEuro(autoCase.amount)} € TTC</strong>{autoCase.what ? ` (${autoCase.what})` : ""}</> : null}
+                        {autoCase.amount ? <> — <strong>{fmtEuro(autoCase.amount)} €{String(profile?.tvaNumber || "").trim() ? " TTC" : ""}</strong>{autoCase.what ? ` (${autoCase.what})` : ""}</> : null}
                         {autoDiffDays !== null && (
                           autoIsLate
                             ? <> en retard de <strong>{Math.abs(autoDiffDays)} jour{Math.abs(autoDiffDays) > 1 ? "s" : ""}</strong></>
@@ -13563,8 +13978,12 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                     // amiable (avant : bloc « temporairement indisponible », sans rien pour relancer ce client).
                     const latePath = isFormalLetterPath(autoCase.dueDate);
                     const amicable = latePath && !FORMAL_LETTER_ENABLED;
+                    const noticeOn = latePath && FORMAL_LETTER_ENABLED; // version 256 : relance amiable, puis mise en demeure
                     return (
                       <>
+                        {noticeOn && (
+                          <div data-testid="recouvrement-notice-intro" style={{ fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", lineHeight:1.6, marginBottom:10 }}>Commence par une relance amiable. Si elle reste sans effet, prépare la mise en demeure.</div>
+                        )}
                         {amicable && (
                           <div data-testid="recouvrement-amiable-note" style={{ fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", lineHeight:1.6, marginBottom:10 }}>La mise en demeure formelle est suspendue pour l'instant (mise à jour des taux légaux). Freeley rédige une relance amiable, sans pénalités chiffrées.</div>
                         )}
@@ -13574,25 +13993,51 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                           onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 32px rgba(185,28,28,0.55)";}}
                           onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 6px 24px rgba(185,28,28,0.45)";}}
                         >
-                          <span style={{ fontSize:16 }}>⚡</span> {!latePath ? "Générer le rappel avant échéance" : amicable ? "Générer la relance amiable" : "Générer la mise en demeure"}
+                          <span style={{ fontSize:16 }}>⚡</span> {!latePath ? "Générer le rappel avant échéance" : "Générer la relance amiable"}
                         </button>
+                        {noticeOn && (noticeRatesReady ? (
+                          <button
+                            data-testid="notice-open"
+                            onClick={() => setAutoStep("notice")}
+                            style={{ width:"100%", marginTop:10, padding:"12px 16px", background:C.white, color:"#991B1B", border:"1.5px solid #FCA5A5", borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9 }}
+                          ><span style={{ fontSize:15 }}>🚨</span> Préparer la mise en demeure</button>
+                        ) : (
+                          <div data-testid="notice-rates-pending" style={{ marginTop:10, fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", lineHeight:1.6 }}>{NOTICE_RATES_MSG}</div>
+                        ))}
                       </>
                     );
                   })()}
                 </div>
 
+                {/* Version 256 : formulaire de la mise en demeure (texte fixe) */}
+                {autoStep === "notice" && (() => {
+                  const nc = noticeCaseFromEntry((history || []).find((c) => String(c.id) === String(autoCase.contractId)), profile);
+                  return (
+                    <FormalNoticeForm
+                      key={`auto-${autoCase.id}`}
+                      profile={profile}
+                      mode="auto"
+                      initial={autoNoticeDraft || nc.initial}
+                      invoices={nc.invoices}
+                      rateRef={nc.rateRef}
+                      onCancel={() => setAutoStep("alert")}
+                      onDone={({ text, total, info, draft }) => { setAutoNoticeDraft(draft); setAutoNoticeInfo(info); setAutoLetterType("formal"); setAutoLetter(text); setAutoTotal(total); setStripeLinkUrl(""); setStripeLinkCopied(false); setAutoStep("result"); }}
+                    />
+                  );
+                })()}
                 {/* Loading / Résultat mode auto */}
                 {autoStep === "loading" && <LoadingScreen dots={autoDots} type={autoLetterType} />}
                 {autoStep === "result" && (
                   <ResultScreen
                     letter={autoLetter}
-                    onEdit={() => { setAutoStep("alert"); setAutoLetter(""); }}
+                    onEdit={() => { if (autoLetterType === "formal") setAutoStep("notice"); else { setAutoStep("alert"); setAutoLetter(""); } }}
                     clientName={autoCase.clientName || "Client"}
                     clientEmail={autoCase.clientEmail}
                     clientPhone={autoCase.clientPhone}
                     total={autoTotal}
                     mission={autoCase.mission}
                     type={autoLetterType}
+                    formalInfo={autoLetterType === "formal" ? autoNoticeInfo : null}
                   />
                 )}
               </>
@@ -13694,19 +14139,19 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                           ))}
                         </div>
                         <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
-                          {!FORMAL_LETTER_ENABLED ? "Le message s'adapte à ton client : particulier ou professionnel." : manClientType === "particulier" ? "Taux d'intérêt légal consommateur — pas d'indemnité de 40€ (réservée aux pros)." : "Régime légal complet : BCE + 10 pts + indemnité de 40€."}
+                          Le message s'adapte à ton client : particulier ou professionnel.
                         </div>
                       </div>
                       <div style={{ marginBottom:12 }}>
-                        <label style={labelSt}>MONTANT TOTAL DÛ (€ TTC)</label>
-                        <input type="number" style={inputStyle} value={manAmount} onChange={e=>setManAmount(e.target.value)} placeholder="Ex : 1 500 (montant total de la facture impayée)" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
+                        <label style={labelSt}>MONTANT TOTAL DÛ (€)</label>
+                        <input type="number" style={inputStyle} value={manAmount} onChange={e=>setManAmount(e.target.value)} placeholder="Ex : 1500 (TVA comprise si tu la factures)" onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
                       </div>
                       <div style={{ marginBottom:12 }}>
                         <label style={labelSt}>DATE D'ÉCHÉANCE</label>
                         <input type="date" style={inputStyle} value={manDueDate} onChange={e=>setManDueDate(e.target.value)} onFocus={e=>e.target.style.borderColor="#DC2626"} onBlur={e=>e.target.style.borderColor=C.border} />
                         <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:5 }}>
                           {FORMAL_LETTER_ENABLED
-                            ? "Dépassée ou à venir — Freeley choisit automatiquement le bon courrier : rappel préventif (pas encore due) ou mise en demeure (en retard)."
+                            ? "Dépassée ou à venir : Freeley choisit le bon message. Un rappel amical si l'échéance est à venir, une relance amiable si elle est dépassée. Ensuite, si besoin, tu peux préparer une mise en demeure."
                             : "Dépassée ou à venir : Freeley choisit le bon message. Un rappel amical si l'échéance est à venir, une relance amiable sans pénalités si elle est dépassée (la mise en demeure formelle est suspendue pour l'instant)."}
                         </div>
                       </div>
@@ -13737,29 +14182,51 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                       {(() => {
                         const manFormalBlocked = false; // version 237 : échéance dépassée et mise en demeure suspendue → relance amiable
                         const manDisabled = manMode === "silence" ? !manDebtor.trim() : (!manDebtor.trim() || !manAmount.trim() || manFormalBlocked);
+                        const manLate = manMode === "paiement" && isIsoDay(manDueDate) && daysUntilIso(manDueDate) < 0; // version 256
                         return (
                         <button
                           onClick={generateManual}
                           disabled={manDisabled}
                           style={{ width:"100%", padding:"13px", background: manDisabled ? C.creamDD : (manMode === "silence" ? "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)"), color: manDisabled ? C.textL : "#fff", border:"none", borderRadius:11, cursor: manDisabled ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: manDisabled ? "none" : (manMode === "silence" ? "0 6px 22px rgba(37,99,235,0.4)" : "0 6px 22px rgba(185,28,28,0.4)"), transition:"all 0.2s" }}
                         >
-                          <span>{manMode === "silence" ? "💬" : "🚨"}</span> Générer
+                          <span>{manMode === "silence" ? "💬" : "🚨"}</span> {manLate ? "Générer la relance amiable" : "Générer"}
                         </button>
                         );
                       })()}
+                      {/* Version 256 : échéance dépassée → mise en demeure à texte fixe, en plus de la relance amiable */}
+                      {manMode === "paiement" && FORMAL_LETTER_ENABLED && isIsoDay(manDueDate) && daysUntilIso(manDueDate) < 0 && (noticeRatesReady ? (
+                        <button
+                          data-testid="notice-open-manual"
+                          disabled={!manDebtor.trim()}
+                          onClick={() => { setManNoticeDraft((d) => ({ ...(d || {}), kind: manClientType === "particulier" ? "conso" : "pro", debtorName: manDebtor, amount: manAmount, dueDate: manDueDate })); setManStep("notice"); }}
+                          style={{ width:"100%", marginTop:10, padding:"12px", background:C.white, color: manDebtor.trim() ? "#991B1B" : C.textL, border:`1.5px solid ${manDebtor.trim() ? "#FCA5A5" : C.border}`, borderRadius:11, cursor: manDebtor.trim() ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
+                        ><span>🚨</span> Préparer une mise en demeure</button>
+                      ) : (
+                        <div data-testid="notice-rates-pending-manual" style={{ marginTop:10, fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", lineHeight:1.6 }}>{NOTICE_RATES_MSG}</div>
+                      ))}
                     </>
+                  )}
+                  {manStep === "notice" && (
+                    <FormalNoticeForm
+                      profile={profile}
+                      mode="manual"
+                      initial={manNoticeDraft || {}}
+                      onCancel={() => setManStep("form")}
+                      onDone={({ text, total, info, draft }) => { setManNoticeDraft(draft); setManNoticeInfo(info); setManLetterType("formal"); setManLetter(text); setManTotal(total); setStripeLinkUrl(""); setStripeLinkCopied(false); setManStep("result"); }}
+                    />
                   )}
                   {manStep === "loading" && <LoadingScreen dots={manDots} type={manLetterType} />}
                   {manStep === "result" && (
                     <ResultScreen
                       letter={manLetter}
-                      onEdit={() => { setManStep("form"); setManLetter(""); }}
+                      onEdit={() => { if (manLetterType === "formal") setManStep("notice"); else { setManStep("form"); setManLetter(""); } }}
                       clientName={manDebtor}
                       clientEmail={manClientEmail}
                       clientPhone={manClientPhone}
                       total={manTotal}
                       mission={manDetails || "Prestation freelance"}
                       type={manLetterType}
+                      formalInfo={manLetterType === "formal" ? manNoticeInfo : null}
                     />
                   )}
                 </div>
@@ -13767,13 +14234,6 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
             </div>
           )}
 
-          {/* Note informative — visible seulement quand la mise en demeure formelle est active */}
-          {FORMAL_LETTER_ENABLED && (
-          <div style={{ marginTop:18, fontFamily:T.body, fontSize:10.5, color:C.textL, lineHeight:1.65, textAlign:"center", padding:"0 8px" }}>
-            Cette mise en demeure s'appuie sur les articles L441-10 et D441-5 du Code de commerce.<br/>
-            <span style={{ color:"#991B1B", fontWeight:600 }}>Indemnité forfaitaire de 40€ + pénalités BCE + 10 pts.</span>
-          </div>
-          )}
         </div>
       </div>
     </div>
@@ -15851,7 +16311,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {entry.isStandaloneInvoice ? (
                         <>
                           <button
-                            onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte", { clientSiret: entry.form?.clientSiret })}
+                            onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte", { clientSiret: entry.form?.clientSiret, serviceStart: entry.form?.startDate, serviceEnd: entry.form?.endDate })}
                             style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Télécharger la facture</button>
                           <SendElectronicInvoiceButton compact
@@ -15915,7 +16375,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                       {!entry.isStandaloneInvoice && Array.isArray(entry.avenants) && entry.avenants.map(av => (
                         <React.Fragment key={av.num}>
                           <button
-                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, entry.form?.freelanceAddress, entry.form?.clientSiret)}
+                            onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, entry.form?.freelanceAddress, entry.form?.clientSiret, { serviceStart: entry.form?.startDate, serviceEnd: entry.form?.endDate })}
                             style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                           >🧾 Facture avenant n°{av.num}</button>
                           <SendElectronicInvoiceButton compact
@@ -16713,7 +17173,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                         </div>
                       )}
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id, historyView.form?.freelanceAddress, historyView.form?.clientSiret)} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
+                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id, historyView.form?.freelanceAddress, historyView.form?.clientSiret, { serviceStart: historyView.form?.startDate, serviceEnd: historyView.form?.endDate })} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
                         <SendElectronicInvoiceButton compact
                           contractId={historyView.id} invoiceKey="avenant" avenantNum={av.num}
                           designation={`Avenant n°${av.num}`} montant={av.ajustementMontant} missionTitle={historyView.missionTitle}
@@ -17432,6 +17892,7 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
   const [resumeDismissed, setResumeDismissed] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [showRadarPicker, setShowRadarPicker] = useState(false);
+  const [needClientAddress, setNeedClientAddress] = useState(false); // version 257 : adresse du client obligatoire
 
   // Cherche une facture libre récente et pas encore payée, pour proposer de la reprendre
   // plutôt que d'en recréer une nouvelle (et donc un nouveau numéro) sans le vouloir.
@@ -17640,6 +18101,8 @@ ${freelanceName}`;
 
   const handleFakeDownload = async () => {
     if (!window.jspdf) { alert("PDF en cours de chargement, réessaie dans un instant."); return; }
+    // Version 257 : l'adresse du client est une mention obligatoire de la facture (avis d'Ordalie)
+    if (!String(form.clientAddress || "").trim()) { setNeedClientAddress(true); return; }
     setPdfGenerating(true);
     try {
       // 0. Facture d'un contrat : un seul numéro par acompte, enregistré dans le contrat (le même que
@@ -17697,6 +18160,7 @@ ${freelanceName}`;
         clientAddress: form.clientAddress,
         clientEmail: form.clientEmail,
         clientSiret: form.clientSiret,
+        serviceStart: form.startDate || "", serviceEnd: form.endDate || "", // version 257 : dates de la prestation
         profile: await profileWithPdfLogo(profile), // version 228 : un logo ajouté avant la v227 est ajusté (poids)
         typeClient: form.typeClient,
         qrBase64,
@@ -17858,6 +18322,7 @@ ${freelanceName}`;
               {form.freelanceActivity && <div style={{ fontFamily:T.body, fontSize:11, color:C.textM }}>{form.freelanceActivity}</div>}
               {freelanceAddressShown && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>{freelanceAddressShown}</div>}
               {hasSiret && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>SIRET : {form.freelanceSiret || profile?.siret}</div>}
+              {String(profile?.immatriculation || "").trim() && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:2 }}>{String(profile.immatriculation).trim()}</div>}
               {form.freelanceEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:2 }}>{form.freelanceEmail}</div>}
             </div>
             <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
@@ -17889,11 +18354,15 @@ ${freelanceName}`;
               <input
                 value={form.clientAddress}
                 onChange={e => setForm(f => ({ ...f, clientAddress: e.target.value }))}
-                placeholder="Adresse du client"
-                style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:4, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                placeholder="Adresse du client (obligatoire)"
+                data-testid="invoice-client-address"
+                style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:4, border:"none", borderBottom:`1px dashed ${needClientAddress && !String(form.clientAddress || "").trim() ? "#DC2626" : C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
                 onFocus={e=>e.target.style.borderBottomColor=C.navy}
                 onBlur={e=>e.target.style.borderBottomColor=C.border}
               />
+              {needClientAddress && !String(form.clientAddress || "").trim() && (
+                <div style={{ fontFamily:T.body, fontSize:10.5, color:"#B91C1C", marginTop:3 }}>Ajoute l'adresse du client : elle est obligatoire sur une facture.</div>
+              )}
               <input
                 value={form.clientEmail}
                 onChange={e => setForm(f => ({ ...f, clientEmail: e.target.value }))}
@@ -18020,6 +18489,24 @@ ${freelanceName}`;
             </div>
           </div>
 
+          {/* Version 257 (avis d'Ordalie) : quantité et prix unitaire ; dates de la prestation (cases dans une facture libre) */}
+          <div data-testid="invoice-service" style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, margin:"-6px 0 16px", lineHeight:1.6 }}>
+            Quantité : 1 (forfait) · Prix unitaire HT : {hasPrice ? `${fmt(acompte)} €` : "—"}
+            {contractId ? (
+              invoiceServicePeriod(form.startDate, form.endDate, parisTodayIso()) ? <div>{invoiceServicePeriod(form.startDate, form.endDate, parisTodayIso())}</div> : null
+            ) : (
+              <>
+                <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", marginTop:6 }}>
+                  <span>Prestation réalisée du</span>
+                  <input type="date" data-testid="invoice-service-start" value={form.startDate || ""} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} style={{ fontFamily:T.body, fontSize:11, color:C.navy, border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 6px", background:C.white }} />
+                  <span>au</span>
+                  <input type="date" data-testid="invoice-service-end" value={form.endDate || ""} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} style={{ fontFamily:T.body, fontSize:11, color:C.navy, border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 6px", background:C.white }} />
+                </div>
+                <div style={{ fontSize:9.5, marginTop:2 }}>Écrites sur la facture. Tu peux les laisser vides si la prestation a eu lieu le jour de la facture.</div>
+              </>
+            )}
+          </div>
+
           {/* Totaux */}
           <div style={{ background:C.creamD, borderRadius:9, padding:"14px 16px", marginBottom:18 }}>
             {[
@@ -18069,10 +18556,7 @@ ${freelanceName}`;
             borderTop:`1px solid ${C.borderL}`, paddingTop:12, marginBottom:20,
             fontFamily:T.body, fontSize:10, color:C.textL, lineHeight:1.6,
           }}>
-            {form.typeClient === "particulier"
-              ? "Intérêts de retard : en cas de retard de paiement, des intérêts au taux d'intérêt légal pourront être appliqués à compter d'une mise en demeure (article 1231-6 du Code civil)."
-              : "Pénalités de retard : taux BCE + 10 points (minimum légal : 3x le taux d'intérêt légal). Indemnité forfaitaire de recouvrement : 40€ (art. L441-10, D441-5 C. com.)."
-            }
+            {invoicePenaltyText(form.typeClient, parisTodayIso(), parisTodayIso())}
             <br/>Pas d'escompte pour paiement anticipé.
           </div>
         </div>
@@ -18195,6 +18679,9 @@ ${freelanceName}`;
 
         {/* Bouton télécharger PDF — juste après le bloc paiement */}
         <div style={{ padding:"0 24px 20px" }}>
+          {needClientAddress && !String(form.clientAddress || "").trim() && (
+            <div data-testid="invoice-need-address" style={{ fontFamily:T.body, fontSize:12, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 12px", marginBottom:10, lineHeight:1.5 }}>Ajoute l'adresse du client, plus haut dans la facture : c'est une mention obligatoire.</div>
+          )}
           <button onClick={handleFakeDownload} disabled={pdfGenerating} style={{
             width:"100%", padding:"12px",
             background: downloaded ? "#16A34A" : C.gold,
@@ -21219,8 +21706,32 @@ function FreeleyRoleBox({ name, kind = "contrat" }) {
   return (
     <div data-testid="freeley-role" style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:12, padding:"12px 14px", marginBottom:16, fontSize:12, color:"#475569", lineHeight:1.55, textAlign:"left" }}>
       <div style={{ fontWeight:700, color:"#1B2E4B", marginBottom:4 }}>Qui est votre prestataire ?</div>
-      {kind === "avenant" ? "Cet avenant" : "Ce contrat"} est conclu entre vous et {who}, professionnel indépendant, qui réalise la prestation et en est seul responsable. Freeley est l'outil en ligne que {who} utilise pour préparer, signer et gérer ses contrats. Freeley n'est pas partie à {ce}, ne référence ni ne classe aucun prestataire et ne perçoit aucune commission sur {ce}. Pour toute question sur la prestation, adressez-vous directement à {who}.
+      {kind === "avenant" ? "Cet avenant" : "Ce contrat"} est conclu entre vous et {who}, professionnel indépendant, qui réalise la prestation et en est seul responsable. Freeley est l'outil en ligne que {who} utilise pour préparer, signer et gérer ses contrats. Freeley n'est pas partie à {ce}, ne référence ni ne classe aucun prestataire et ne perçoit aucune commission sur {ce}. Pour toute question sur la prestation, adressez-vous directement à {who}.{" "}<a href="/?legal=clients" target="_blank" rel="noopener noreferrer" style={{ color:"#B8965A" }}>En savoir plus</a>
     </div>
+  );
+}
+
+// Version 255 : information des clients sur leurs données (art. 13 et 14 du RGPD, avis d'Ordalie), avant la signature.
+// Le responsable est le professionnel qui a envoyé le document ; Freeley traite les données pour son compte.
+const deNom = (n) => (/^[aeiouyhàâäéèêëîïôöûùü]/i.test(n) ? `d'${n}` : `de ${n}`);
+function ClientDataNotice({ name, email, kind = "contrat" }) {
+  const n = String(name || "").trim();
+  const who = n || "le professionnel qui vous a envoyé ce document";
+  const ofWho = n ? deNom(n) : "du professionnel qui vous a envoyé ce document";
+  const doc = kind === "avenant" ? "l'avenant" : kind === "accord" ? "l'accord" : "le contrat";
+  const mail = String(email || "").trim();
+  const p = { margin:"8px 0 0" };
+  return (
+    <details data-testid="client-data-notice" style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:12, padding:"10px 14px", marginBottom:16, fontSize:12, color:"#475569", lineHeight:1.55, textAlign:"left" }}>
+      <summary style={{ fontWeight:700, color:"#1B2E4B", cursor:"pointer" }}>Vos données personnelles</summary>
+      <p style={p}>Le responsable du traitement de vos données est {who}{mail ? `, joignable à ${mail}` : ""}. Freeley les traite pour son compte, comme sous-traitant.</p>
+      <p style={p}>Données concernées : votre identité, vos coordonnées, les informations de la mission et du paiement, votre signature, ainsi que l'adresse IP et le navigateur de votre appareil au moment de la signature. Elles viennent de vous ou {ofWho}.</p>
+      <p style={p}>Pourquoi : établir, signer et exécuter {doc}, le facturer s'il y a lieu, et garder la preuve de la signature. Bases légales : l'exécution du contrat (article 6.1.b du RGPD) et les obligations légales du professionnel, comme la conservation des factures (article 6.1.c du RGPD).</p>
+      <p style={p}>Qui les reçoit : {who}, Freeley et ses prestataires techniques (hébergement, base de données, envoi des emails, rédaction automatique). Certains sont établis hors de l'Union européenne, avec les garanties prévues par le RGPD.</p>
+      <p style={p}>Durée : tant que {who} conserve ces documents dans Freeley, en général pendant la relation puis pendant les délais légaux, par exemple dix ans pour les factures.</p>
+      <p style={p}>Vos droits : accès, rectification, effacement, limitation, opposition et portabilité. Exercez-les auprès {ofWho}. Vous pouvez aussi écrire à Freeley, qui lui transmettra votre demande, et adresser une réclamation à la CNIL (www.cnil.fr).</p>
+      <p style={p}>Freeley est lui-même responsable des données nécessaires à la sécurité du service et à l'outil « Retrouver mon contrat ».{" "}<a href="/?legal=confidentialite" target="_blank" rel="noopener noreferrer" style={{ color:"#B8965A" }}>Politique de confidentialité</a></p>
+    </details>
   );
 }
 
@@ -21523,6 +22034,7 @@ function ClientSignaturePage({ contractId }) {
           )}
 
           <FreeleyRoleBox name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} />
+          <ClientDataNotice name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} email={content.form?.freelanceEmail} />
           <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
             <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>CONTRAT SIGNÉ</div>
             <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
@@ -21635,6 +22147,7 @@ function ClientSignaturePage({ contractId }) {
           <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique du contrat</div>
         </div>
         <FreeleyRoleBox name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} />
+        <ClientDataNotice name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} email={content.form?.freelanceEmail} />
 
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           {textChangedNotice && (
@@ -21887,6 +22400,7 @@ function NdaSignaturePage({ ndaId }) {
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
           <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique — Accord de confidentialité (NDA)</div>
         </div>
+        <ClientDataNotice kind="accord" />
 
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>NDA À SIGNER</div>
@@ -22015,6 +22529,7 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
           <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique — Avenant n°{avenantNum}</div>
         </div>
         <FreeleyRoleBox kind="avenant" name={contractInfo?.form ? contractFreelanceName(resolveLegalStatus(contractInfo.form, contractInfo.contract)) : ""} />
+        <ClientDataNotice kind="avenant" name={contractInfo?.form ? contractFreelanceName(resolveLegalStatus(contractInfo.form, contractInfo.contract)) : ""} email={contractInfo?.form?.freelanceEmail} />
 
         <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
           <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>AVENANT À SIGNER</div>
@@ -22086,6 +22601,8 @@ function LegalFooter({ bottomSpace = 64 }) {
       <LegalLink page="confidentialite" style={link}>Confidentialité</LegalLink>
       <span aria-hidden="true">{" · "}</span>
       <LegalLink page="cgu" style={link}>CGU</LegalLink>
+      <span aria-hidden="true">{" · "}</span>
+      <LegalLink page="clients" style={link}>Pour les clients</LegalLink>
     </nav>
   );
 }
@@ -22107,6 +22624,8 @@ function ClientLegalNote({ who = null, text = null }) {
         <a href="/?legal=mentions" target="_blank" rel="noopener noreferrer" style={link}>Mentions légales</a>
         <span aria-hidden="true">{" · "}</span>
         <a href="/?legal=confidentialite" target="_blank" rel="noopener noreferrer" style={link}>Confidentialité</a>
+        <span aria-hidden="true">{" · "}</span>
+        <a href="/?legal=clients" target="_blank" rel="noopener noreferrer" style={link}>Fonctionnement de Freeley</a>
       </div>
     </div>
   );
@@ -22297,16 +22816,9 @@ function PolitiqueConfidentialitePage({ onBack }) {
       </Section>
 
       <Section title="Les deux rôles de Freeley">
-        <p>
-          Pour les données de ton compte et de ton profil, Freeley est responsable du traitement.
-        </p>
-        <p>
-          Pour les données de tes clients que tu saisis dans Freeley (contrats, factures, accords de
-          confidentialité, signatures), Freeley agit comme sous-traitant, pour ton compte et selon tes
-          instructions, au sens de l'article 28 du RGPD. C'est toi qui en es responsable, notamment
-          pour informer tes clients. Les engagements de Freeley en tant que sous-traitant figurent
-          dans les <LegalLink page="cgu" style={{ color:C.gold }}>CGU</LegalLink>.
-        </p>
+        <p>Pour les données de ton compte et de ton profil, Freeley est responsable du traitement.</p>
+        <p>Pour les données de tes clients que tu saisis dans Freeley (contrats, factures, accords de confidentialité, signatures), Freeley agit comme sous-traitant, pour ton compte et selon tes instructions, au sens de l'article 28 du RGPD. C'est toi qui en es responsable. Les engagements de Freeley en tant que sous-traitant figurent à l'article 10 des CGU. Pour ton compte, Freeley informe tes clients sur leur page de signature.</p>
+        <p>Freeley est en revanche responsable du traitement, pour ses propres besoins, des données nécessaires à la sécurité du service (journaux techniques), à l'outil « Retrouver mon contrat » et aux échanges avec le support.</p>
       </Section>
 
       <Section title="Quelles données sont traitées">
@@ -22349,30 +22861,32 @@ function PolitiqueConfidentialitePage({ onBack }) {
         <p>Seules les personnes et les prestataires qui en ont besoin y ont accès.</p>
         <p>Ces prestataires agissent pour le compte de Freeley, comme sous-traitants, et sont tenus de protéger tes données :</p>
         <ul>
-          <li>Supabase : base de données et authentification. Tes données sont stockées dans l'Union européenne, en Irlande.</li>
-          <li>Vercel : hébergement du site et exécution des fonctions du serveur.</li>
-          <li>Resend : envoi des emails automatiques.</li>
-          <li>Anthropic : rédaction et analyse de contenus, à partir des informations, des documents et des photos que tu lui soumets.</li>
-          <li>Cloudflare (service cdnjs) : seulement si l'outil qui fabrique les PDF ne se charge pas depuis Freeley. Une copie de secours est alors chargée depuis ce service, qui reçoit l'adresse IP de l'appareil.</li>
+          <li>Supabase (Supabase Pte. Ltd., Singapour, et Supabase, Inc., États-Unis, pour le support technique) : base de données et authentification. Il reçoit les données de ton compte, de ton profil et de tes documents. Elles sont hébergées dans l'Union européenne, en Irlande, avec leurs sauvegardes, et ses journaux techniques sont stockés dans l'Union européenne. Son support technique peut y accéder depuis Singapour ou les États-Unis.</li>
+          <li>Vercel (Vercel Inc., États-Unis) : hébergement du site et exécution des fonctions du serveur. Il traite les données qui passent par le site et par ces fonctions (formulaires, documents, emails à envoyer), aux États-Unis et dans les autres pays où il dispose de serveurs.</li>
+          <li>Resend (États-Unis) : envoi des emails automatiques. Il reçoit l'adresse et le contenu des emails, par exemple un contrat envoyé à un client, et les stocke aux États-Unis.</li>
+          <li>Anthropic (Anthropic, PBC, États-Unis) : rédaction et analyse automatiques de contenus. Il reçoit les informations, les documents et les photos que tu soumets à ces fonctions, et les traite aux États-Unis.</li>
+          <li>Cloudflare (Cloudflare, Inc., États-Unis), service cdnjs : seulement si l'outil qui fabrique les PDF ne se charge pas depuis Freeley. Une copie de secours est alors chargée depuis ce service, qui reçoit l'adresse IP de l'appareil.</li>
         </ul>
         <p>Ces services traitent des données pour leur propre compte, selon leurs propres conditions, et seulement si tu les utilises :</p>
         <ul>
-          <li>Stripe : paiements par carte sur ton compte Stripe, si tu proposes le paiement en ligne à tes clients.</li>
-          <li>Super PDP : transmission de tes factures électroniques, si tu connectes ton compte.</li>
-          <li>Google et LinkedIn : connexion avec ton compte Google ou LinkedIn, si tu la choisis.</li>
+          <li>Stripe (Stripe Payments Europe, Limited, Irlande) : paiements par carte sur ton compte Stripe, si tu proposes le paiement en ligne à tes clients.</li>
+          <li>Super PDP (France) : transmission de tes factures électroniques, si tu connectes ton compte.</li>
+          <li>Google (Google Ireland Limited) et LinkedIn (LinkedIn Ireland Unlimited Company) : connexion avec ton compte Google ou LinkedIn, si tu la choisis.</li>
           <li>L'API Recherche d'entreprises de l'État (recherche-entreprises.api.gouv.fr) : quand tu utilises le Radar Client, ton appareil l'interroge directement, avec le nom ou le numéro de l'entreprise recherchée.</li>
         </ul>
         <p>Tes clients reçoivent les documents que tu leur envoies. Les autorités peuvent recevoir des données quand la loi l'impose.</p>
       </Section>
 
       <Section title="Transferts hors de l'Union européenne">
-        <p>
-          Certains de ces prestataires et services sont établis hors de l'Union européenne, notamment
-          aux États-Unis. Pour les prestataires de Freeley, ces transferts sont encadrés soit par la
-          décision d'adéquation de la Commission européenne relative au cadre de protection des
-          données UE–États-Unis (Data Privacy Framework), lorsque le prestataire y est certifié, soit
-          par les clauses contractuelles types adoptées par la Commission européenne.
-        </p>
+        <p>Certains prestataires sont établis hors de l'Union européenne. Voici, pour chacun, la garantie qui encadre le transfert :</p>
+        <ul>
+          <li>Supabase (Singapour et États-Unis) : clauses contractuelles types de la Commission européenne, intégrées à son accord de traitement des données.</li>
+          <li>Vercel (États-Unis) : décision d'adéquation de la Commission européenne relative au cadre de protection des données UE–États-Unis (Data Privacy Framework), auquel Vercel est certifié.</li>
+          <li>Resend (États-Unis) : clauses contractuelles types de la Commission européenne, complétées par sa participation au Data Privacy Framework.</li>
+          <li>Anthropic (États-Unis) : clauses contractuelles types de la Commission européenne, intégrées à son accord de traitement des données.</li>
+          <li>Cloudflare (États-Unis) : Data Privacy Framework, auquel Cloudflare est certifié.</li>
+        </ul>
+        <p>Pour obtenir une copie de ces garanties, écris à{" "}<a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.</p>
       </Section>
 
       <Section title="Combien de temps tes données sont conservées">
@@ -22380,7 +22894,9 @@ function PolitiqueConfidentialitePage({ onBack }) {
           <li>Compte, profil et données d'utilisation : tant que ton compte est actif. Ils sont supprimés quand tu supprimes ton compte. Un compte inactif depuis trois ans peut être supprimé, après un avertissement par email.</li>
           <li>Documents, signatures et preuves : tant que ton compte est actif, pour que tu puisses les retrouver et prouver tes accords. Tu peux les supprimer à tout moment. Avant de supprimer ton compte, télécharge-les : tu dois toi-même conserver tes contrats et tes factures pendant les durées légales qui s'appliquent à ton activité, par exemple dix ans pour les factures.</li>
           <li>Échanges avec le support, y compris les messages de la bulle 💬 : trois ans après le dernier échange.</li>
-          <li>Journaux techniques : selon les durées de nos prestataires, et au plus un an.</li>
+          <li>Emails automatiques : Resend en garde une copie trente (30) jours, et ses sauvegardes sept (7) jours.</li>
+          <li>Contenus soumis à la rédaction et à l'analyse automatiques : Anthropic les supprime dans les trente (30) jours, sauf si la loi impose de les garder ou s'ils sont signalés pour un manquement à ses règles d'utilisation (jusqu'à deux ans). Freeley ne conserve pas les photos et les fichiers lus automatiquement.</li>
+          <li>Journaux techniques (connexions, erreurs, sécurité) : Supabase et Vercel les conservent pendant la durée prévue par l'offre utilisée par Freeley, le temps nécessaire à la sécurité et au diagnostic des erreurs. Freeley ne les conserve pas lui-même au-delà d'un an.</li>
         </ul>
       </Section>
 
@@ -22404,21 +22920,15 @@ function PolitiqueConfidentialitePage({ onBack }) {
       </Section>
 
       <Section title="Vous êtes client d'un utilisateur de Freeley ?">
-        <p>
-          Si un professionnel vous a envoyé, par Freeley, un contrat, un avenant ou un accord de
-          confidentialité à signer, une facture ou un lien de paiement, vos données (identité,
-          coordonnées, informations de la mission, signature, adresse IP et navigateur au moment de la
-          signature) sont traitées par Freeley pour son compte. Ce professionnel en est responsable :
-          adressez-lui d'abord vos questions et vos demandes (accès, rectification, effacement…). Vous
-          pouvez aussi écrire à{" "}
-          <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a> :
-          Freeley lui transmettra votre demande et l'aidera à y répondre.
-        </p>
-        <p>
-          Si vous payez par carte, le paiement est traité par Stripe, selon sa propre politique de
-          confidentialité. Si vous utilisez « Retrouver mon contrat », votre adresse email sert
-          uniquement à rechercher vos contrats signés et à vous envoyer leur lien.
-        </p>
+        <p>Si un professionnel vous a envoyé, par Freeley, un contrat, un avenant ou un accord de confidentialité à signer, une facture ou un lien de paiement, ce professionnel est responsable du traitement de vos données. Freeley les traite pour son compte, comme sous-traitant. Ces informations vous sont aussi présentées sur votre page de signature.</p>
+        <ul>
+          <li>Données : votre identité, vos coordonnées, les informations de la mission et du paiement, votre signature, ainsi que l'adresse IP et le navigateur de votre appareil au moment de la signature. Elles viennent de vous ou de ce professionnel.</li>
+          <li>Finalités et bases légales : établir, signer et exécuter le contrat, le facturer et garder la preuve de la signature, sur la base de l'exécution du contrat et des obligations légales du professionnel (article 6.1.b et 6.1.c du RGPD).</li>
+          <li>Destinataires : ce professionnel, Freeley et les prestataires listés plus haut, avec les garanties décrites pour les transferts hors de l'Union européenne.</li>
+          <li>Durée : tant que ce professionnel conserve ces documents dans Freeley, en général pendant la relation puis pendant les délais légaux, par exemple dix ans pour les factures.</li>
+        </ul>
+        <p>Pour exercer vos droits (accès, rectification, effacement, limitation, opposition, portabilité), adressez-vous d'abord à ce professionnel. Vous pouvez aussi écrire à{" "}<a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a> : Freeley lui transmettra votre demande et l'aidera à y répondre. Vous pouvez adresser une réclamation à la CNIL, sur www.cnil.fr.</p>
+        <p>Si vous payez par carte, le paiement est traité par Stripe, selon sa propre politique de confidentialité. Si vous utilisez « Retrouver mon contrat », votre adresse email sert uniquement à rechercher vos contrats signés et à vous envoyer leur lien ; Freeley est responsable de ce traitement, fondé sur son intérêt légitime à vous permettre de retrouver vos documents.</p>
       </Section>
 
       <Section title="Sécurité">
@@ -22432,12 +22942,17 @@ function PolitiqueConfidentialitePage({ onBack }) {
       </Section>
 
       <Section title="Cookies et stockage sur ton appareil">
-        <p>
-          Freeley n'utilise ni cookie publicitaire ni outil de mesure d'audience. L'application
-          enregistre seulement sur ton appareil les éléments strictement nécessaires à son
-          fonctionnement, comme ta session de connexion et certaines préférences. Ces éléments ne
-          nécessitent pas ton consentement.
-        </p>
+        <p>Freeley n'utilise ni cookie publicitaire ni outil de mesure d'audience. L'application enregistre seulement sur ton appareil les éléments suivants, tous nécessaires au service que tu demandes :</p>
+        <ul>
+          <li>Ta session de connexion, enregistrée par notre prestataire d'authentification : pour te garder connecté, jusqu'à ta déconnexion.</li>
+          <li>Une copie de ton profil (freeley_profile, freeley_profile_owner) : pour l'afficher sans attendre et ne perdre aucune modification. Elle est effacée à ta déconnexion.</li>
+          <li>Tes brouillons de contrats (freeley_current_draft, freeley_drafts_list, freeley_drafts_deleted) : pour ne rien perdre pendant la rédaction, jusqu'à leur suppression.</li>
+          <li>Tes analyses de contrats (freeley_scan_list, freeley_scan_results), jusqu'à leur suppression.</li>
+          <li>La liste de tes NDA (freeley_nda_list) et les alertes déjà lues (freeley_read_alerts), pour les afficher correctement.</li>
+          <li>L'écran et le document ouverts (freeley_screen, freeley_result_contract_id, freeley_history_view_id), pour te ramener au même endroit.</li>
+          <li>Le temps d'une visite seulement : la page à ouvrir après ta connexion (freeley_goto) et l'effacement des données de l'appareil après la suppression d'un compte (freeley_wipe).</li>
+        </ul>
+        <p>Ces éléments restent sur ton appareil jusqu'à ce qu'ils ne servent plus, ou jusqu'à ce que tu effaces les données de ton navigateur. Comme ils sont strictement nécessaires au service que tu demandes, ils ne nécessitent pas ton consentement (article 82 de la loi Informatique et Libertés). Freeley n'utilise aucun autre traceur.</p>
       </Section>
 
       <Section title="Mineurs">
@@ -22471,6 +22986,52 @@ function PolitiqueConfidentialitePage({ onBack }) {
   );
 }
 
+// Version 255 : page publique « Comment fonctionne Freeley pour les clients » (place de marché en ligne, art. L111-7
+// et D111-6 C. conso, avis d'Ordalie). Liée depuis le bas des pages des clients, l'encadré « Qui est votre
+// prestataire ? » et le bas des écrans de l'application.
+function ClientsInfoPage({ onBack }) {
+  const Section = ({ title, children }) => (
+    <>
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
+      {children}
+    </>
+  );
+  return (
+    <LegalPageLayout title="Comment fonctionne Freeley pour les clients" onBack={onBack}>
+      <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : novembre 2026</p>
+
+      <Section title="Avec qui vous signez">
+        <p>Le contrat de prestation présenté sur Freeley est conclu entre vous, le client, et le freelance identifié sur la page de signature. Ce freelance est un professionnel indépendant. Il est responsable de la prestation, de ses obligations d'information, de facturation et, le cas échéant, de rétractation.</p>
+      </Section>
+
+      <Section title="Le rôle de Freeley">
+        <p>Freeley fournit au freelance l'outil qui lui permet de créer ses contrats, de les faire signer et de les suivre. Freeley n'est pas partie au contrat et n'intervient pas dans son exécution.</p>
+      </Section>
+
+      <Section title="Ni référencement, ni classement">
+        <p>Freeley ne présente aucun annuaire de prestataires. Il ne référence ni ne classe aucun freelance, et ne propose aucun placement payant. Chaque client reçoit le lien de son contrat directement de son freelance.</p>
+      </Section>
+
+      <Section title="Paiements">
+        <p>Les paiements par carte sont traités par Stripe, sur le compte Stripe du freelance. Freeley ne reçoit aucune commission, ni sur ces paiements, ni sur le contrat.</p>
+      </Section>
+
+      <Section title="Vos droits et vos interlocuteurs">
+        <p>Le freelance vous donne les informations prévues par la loi avant la signature, dans le contrat et sur la page de signature, notamment les conditions du droit de rétractation lorsqu'il existe. Pour toute question sur la prestation, ou pour exercer vos droits, adressez-vous au freelance. Si vous êtes consommateur, vous pouvez recourir gratuitement au médiateur de la consommation dont il relève, après lui avoir adressé une réclamation écrite.</p>
+        <p>Le freelance est seul responsable de ses obligations fiscales et sociales liées à la prestation, notamment en matière de TVA.</p>
+      </Section>
+
+      <Section title="Vos données">
+        <p>Le freelance est responsable de vos données ; Freeley les traite pour son compte. Les détails figurent dans la{" "}<LegalLink page="confidentialite" style={{ color:C.gold }}>politique de confidentialité</LegalLink>.</p>
+      </Section>
+
+      <Section title="Contact">
+        <p>Pour signaler un problème lié à Freeley lui-même, écrivez à{" "}<a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.</p>
+      </Section>
+    </LegalPageLayout>
+  );
+}
+
 function CguPage({ onBack }) {
   const Section = ({ title, children }) => (
     <>
@@ -22483,12 +23044,7 @@ function CguPage({ onBack }) {
       <p style={{ fontStyle:"italic", color:C.textL }}>Dernière mise à jour : novembre 2026</p>
 
       <Section title="Article 1 — Objet et acceptation">
-        <p>
-          Les présentes conditions générales d'utilisation (les « CGU ») régissent l'accès et
-          l'utilisation du service Freeley, accessible sur freeley.fr (le « Service »). L'Utilisateur
-          les accepte lors de la création de son compte. L'utilisation du Service vaut acceptation
-          des CGU en vigueur.
-        </p>
+        <p>Les présentes conditions générales d'utilisation (les « CGU ») régissent l'accès et l'utilisation du service Freeley, accessible sur freeley.fr (le « Service »). L'Utilisateur les accepte par une action expresse lors de la création de son compte. Leurs modifications sont régies par l'article 17.</p>
       </Section>
 
       <Section title="Article 2 — Éditeur">
@@ -22539,21 +23095,8 @@ function CguPage({ onBack }) {
       </Section>
 
       <Section title="Article 5 — Absence de conseil juridique">
-        <p>
-          Freeley n'est pas un cabinet d'avocats et ne fournit aucun conseil juridique. Conformément à
-          la loi n° 71-1130 du 31 décembre 1971, Freeley n'exerce aucune activité de consultation
-          juridique ni de rédaction d'actes pour autrui. Les modèles proposés sont des documents
-          génériques que l'Utilisateur complète et personnalise lui-même.
-        </p>
-        <p>
-          L'Utilisateur reste seul responsable du choix, de l'utilisation, de l'interprétation et de la
-          personnalisation des documents, ainsi que de leur adéquation à sa situation. Il lui appartient
-          de relire et de vérifier chaque document avant de le signer, de l'envoyer ou de l'utiliser.
-          Malgré le soin apporté à leur mise à jour, Freeley ne garantit pas que les modèles soient
-          adaptés à chaque situation, ni qu'ils reflètent à tout instant l'évolution de la loi et de la
-          jurisprudence. Pour toute situation particulière, l'Utilisateur est invité à consulter un
-          professionnel du droit.
-        </p>
+        <p>Freeley n'est pas un cabinet d'avocats et ne fournit pas de consultation juridique. Les documents du Service sont établis automatiquement à partir de modèles, de clauses fixes, et des choix et informations saisis par l'Utilisateur. Les analyses de contrats et les autres aides proposées sont produites automatiquement, à titre d'information ; elles ne remplacent pas l'avis d'un professionnel du droit sur une situation particulière.</p>
+        <p>L'Utilisateur reste seul responsable du choix, de l'utilisation, de l'interprétation et de la personnalisation des documents, ainsi que de leur adéquation à sa situation. Il lui appartient de relire et de vérifier chaque document avant de le signer, de l'envoyer ou de l'utiliser. Malgré le soin apporté à leur mise à jour, Freeley ne garantit pas que les modèles soient adaptés à chaque situation, ni qu'ils reflètent à tout instant l'évolution de la loi et de la jurisprudence. Pour toute situation particulière, l'Utilisateur est invité à consulter un professionnel du droit.</p>
       </Section>
 
       <Section title="Article 6 — Contenus produits avec l'intelligence artificielle">
@@ -22596,34 +23139,21 @@ function CguPage({ onBack }) {
       </Section>
 
       <Section title="Article 9 — Signature électronique">
-        <p>
-          Le Service permet de signer des documents au moyen d'une signature électronique simple, au
-          sens du règlement (UE) n° 910/2014 dit « eIDAS », accompagnée d'un horodatage. Chaque signature
-          est enregistrée avec une preuve : la date et l'heure du serveur de Freeley, l'adresse IP et le
-          navigateur de l'appareil utilisé, et l'empreinte numérique (SHA-256) du document signé. Une fois
-          signé, un document ne peut plus être modifié dans le Service. Il appartient à l'Utilisateur de
-          vérifier que ce niveau de signature convient à l'usage qu'il en fait.
-        </p>
+        <p>Le Service permet de signer des documents au moyen d'une signature électronique simple, au sens du règlement (UE) n° 910/2014 dit « eIDAS », accompagnée d'un horodatage. Chaque signature est enregistrée avec une preuve : la date et l'heure du serveur de Freeley, l'adresse IP et le navigateur de l'appareil utilisé, et l'empreinte numérique (SHA-256) du document signé. Une fois signé, un document ne peut plus être modifié dans le Service.</p>
+        <p>Le signataire est identifié par la possession du lien personnel que l'Utilisateur lui a transmis ou, pour une signature en présence, par sa présence auprès de l'Utilisateur. Les éléments enregistrés constituent des éléments de preuve qui peuvent être contestés ; ils ne créent pas de présomption irréfragable. La convention de preuve de l'article 18 ne lie que Freeley et l'Utilisateur : elle ne détermine pas la preuve opposable aux autres signataires. Il appartient à l'Utilisateur de vérifier que ce niveau de signature convient à l'usage qu'il en fait.</p>
       </Section>
 
       <Section title="Article 10 — Données personnelles des clients de l'Utilisateur">
-        <p>
-          Lorsque l'Utilisateur saisit des données personnelles concernant ses clients ou d'autres
-          personnes, il agit en qualité de responsable du traitement et Freeley en qualité de
-          sous-traitant, au sens de l'article 28 du RGPD. Ces données (identité, coordonnées,
-          informations de mission et de facturation, signatures) concernent les clients et prospects
-          de l'Utilisateur, leurs représentants et les signataires des documents. Elles sont traitées
-          pour fournir le Service, pendant toute la durée de son utilisation. Freeley s'engage à :
-        </p>
+        <p>Lorsque l'Utilisateur saisit des données personnelles concernant ses clients ou d'autres personnes, il agit en qualité de responsable du traitement et Freeley en qualité de sous-traitant, au sens de l'article 28 du RGPD. Ces données (identité, coordonnées, informations de mission et de facturation, signatures) concernent les clients et prospects de l'Utilisateur, leurs représentants et les signataires des documents. Elles sont traitées pour fournir le Service, pendant toute la durée de son utilisation. Pour le compte de l'Utilisateur, Freeley informe les signataires sur leur page de signature. Freeley s'engage à :</p>
         <ul>
           <li>traiter ces données uniquement pour fournir le Service, selon les instructions de l'Utilisateur, qui résultent de son utilisation du Service, et l'informer si une instruction lui paraît contraire au RGPD ou à une autre règle de protection des données ;</li>
           <li>garantir leur confidentialité, veiller à ce que les personnes autorisées à les traiter soient tenues au secret, et mettre en œuvre des mesures de sécurité appropriées ;</li>
-          <li>ne recourir qu'aux sous-traitants ultérieurs listés dans la Politique de confidentialité, que l'Utilisateur autorise de manière générale, leur imposer les mêmes obligations de protection des données, et informer l'Utilisateur de tout changement afin qu'il puisse s'y opposer en supprimant son compte ;</li>
+          <li>ne recourir qu'aux sous-traitants ultérieurs listés dans la Politique de confidentialité, et leur imposer les mêmes obligations de protection des données. Avant tout ajout ou remplacement d'un sous-traitant ultérieur, Freeley en informe l'Utilisateur par écrit au moins trente (30) jours à l'avance, en précisant les traitements concernés, le pays de traitement et, le cas échéant, le mécanisme de transfert. L'Utilisateur peut s'y opposer par écrit pendant ce délai. Les parties recherchent alors une solution ; à défaut, l'Utilisateur peut mettre fin, sans pénalité, aux traitements concernés et récupérer ses données. Freeley demeure responsable envers l'Utilisateur de l'exécution, par ses sous-traitants ultérieurs, de leurs obligations de protection des données ;</li>
           <li>ne transférer ces données hors de l'Union européenne qu'avec les garanties prévues par le RGPD, décrites dans la Politique de confidentialité ;</li>
           <li>l'aider, compte tenu des informations dont il dispose, à répondre aux demandes des personnes concernées et à respecter ses obligations de sécurité, de notification des violations, d'analyse d'impact et de consultation de la CNIL ;</li>
           <li>l'informer dans les meilleurs délais après avoir pris connaissance d'une violation de ces données ;</li>
-          <li>supprimer ces données lors de la suppression du compte, sauf obligation légale de conservation, l'Utilisateur pouvant les télécharger auparavant ;</li>
-          <li>mettre à sa disposition les informations nécessaires pour démontrer le respect de ces obligations, et contribuer aux audits dans des conditions raisonnables.</li>
+          <li>à la fin du Service, au choix de l'Utilisateur, lui restituer les données traitées pour son compte dans un format exploitable, ou les supprimer ainsi que leurs copies, sauf obligation légale de conservation ;</li>
+          <li>mettre à sa disposition les informations nécessaires pour démontrer le respect de ces obligations, et permettre les audits et inspections prévus à l'article 28 du RGPD.</li>
         </ul>
       </Section>
 
@@ -22637,24 +23167,9 @@ function CguPage({ onBack }) {
       </Section>
 
       <Section title="Article 12 — Responsabilité">
-        <p>
-          Freeley n'est responsable que des dommages directs et prouvés résultant d'un manquement qui
-          lui est imputable. Ne sont pas indemnisés les dommages indirects, notamment la perte de
-          chiffre d'affaires, de clientèle, de données ou d'opportunité, ni les conséquences d'un
-          document utilisé sans relecture, de données inexactes saisies par l'Utilisateur ou de
-          l'inadéquation d'un document à sa situation.
-        </p>
-        <p>
-          La responsabilité totale de Freeley est limitée au plus élevé des deux montants suivants :
-          les sommes versées par l'Utilisateur à Freeley au cours des douze mois précédant le fait
-          générateur, ou cent (100) euros. Ces limitations ne s'appliquent pas en cas de faute lourde
-          ou dolosive de Freeley, ni aux dommages corporels.
-        </p>
-        <p>
-          Freeley ne répond pas des services fournis par des tiers que l'Utilisateur choisit
-          d'utiliser, notamment Stripe, Super PDP, Google ou LinkedIn, qui relèvent de leurs propres
-          conditions.
-        </p>
+        <p>Freeley répond des dommages directs résultant d'un manquement qui lui est imputable, dans les conditions prévues par la loi. Ne sont pas indemnisés les dommages indirects, notamment la perte de chiffre d'affaires, de clientèle ou d'opportunité, ni les conséquences d'un document utilisé sans relecture, de données inexactes saisies par l'Utilisateur ou de l'inadéquation d'un document à sa situation. La perte ou l'altération de documents directement imputable à un manquement de Freeley n'est pas exclue par principe comme dommage indirect.</p>
+        <p>Dans les limites permises par la loi, la responsabilité totale de Freeley est limitée au plus élevé des deux montants suivants : les sommes versées par l'Utilisateur à Freeley au cours des douze mois précédant le fait générateur, ou cent (100) euros. Ce plafond et ces exclusions ne s'appliquent pas en cas de faute lourde ou dolosive de Freeley, aux dommages corporels, aux responsabilités que la loi interdit de limiter, ni lorsqu'ils priveraient de sa substance une obligation essentielle de Freeley.</p>
+        <p>Freeley ne répond pas des services fournis par des tiers que l'Utilisateur choisit et souscrit directement, notamment Stripe, Super PDP, Google ou LinkedIn, qui relèvent de leurs propres conditions. Cette exclusion ne limite pas la responsabilité de Freeley au titre des prestataires qu'il choisit lui-même pour fournir le Service.</p>
       </Section>
 
       <Section title="Article 13 — Propriété intellectuelle">
@@ -22670,60 +23185,25 @@ function CguPage({ onBack }) {
       </Section>
 
       <Section title="Article 14 — Signalement de contenus illicites">
-        <p>
-          Toute personne peut signaler à Freeley un contenu conservé dans le Service qu'elle estime
-          illicite, en écrivant à{" "}
-          <a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>.
-          Le signalement indique, autant que possible : les raisons pour lesquelles le contenu est
-          jugé illicite, l'endroit précis où il se trouve (par exemple le lien reçu), le nom et
-          l'adresse email de son auteur, sauf lorsque la loi permet un signalement anonyme, et une
-          déclaration confirmant qu'il est fait de bonne foi et que ses informations sont exactes et
-          complètes.
-        </p>
-        <p>
-          Freeley accuse réception du signalement, l'examine rapidement, avec soin et objectivité,
-          puis informe son auteur de sa décision et des recours possibles. Les signalements sont
-          examinés par une personne, sans outil automatique de modération.
-        </p>
-        <p>
-          Lorsque Freeley retire un contenu, en restreint l'accès, ou suspend ou supprime un compte,
-          il en informe l'Utilisateur concerné et lui en donne les raisons, sauf si la loi s'y oppose.
-          L'Utilisateur peut contester la décision en écrivant à la même adresse ; il peut aussi
-          saisir les juridictions compétentes.
-        </p>
-        <p>
-          Cette adresse est le point de contact unique de Freeley, pour les Utilisateurs comme pour
-          les autorités des États membres, la Commission européenne et le Comité européen des services
-          numériques, au sens des articles 11 et 12 du règlement (UE) 2022/2065 sur les services
-          numériques. Les échanges ont lieu en français ou en anglais.
-        </p>
+        <p>Toute personne peut signaler à Freeley un contenu conservé dans le Service qu'elle estime illicite, en écrivant à{" "}<a href="mailto:contact.freeley@gmail.com" style={{ color:C.gold }}>contact.freeley@gmail.com</a>. Le signalement doit permettre de fournir : une explication suffisamment étayée des raisons pour lesquelles le contenu est jugé illicite, l'emplacement électronique exact du contenu (par exemple le lien reçu), le nom et l'adresse électronique de son auteur, sauf l'exception prévue à l'article 16, paragraphe 2, c), du règlement (UE) 2022/2065, et une déclaration confirmant qu'il est fait de bonne foi et que ses informations sont exactes et complètes.</p>
+        <p>Freeley accuse réception du signalement, l'examine rapidement, avec soin et objectivité, puis informe son auteur de sa décision et des recours possibles. Les signalements sont examinés par une personne, sans outil automatique de modération.</p>
+        <p>Lorsque Freeley retire un contenu, en restreint l'accès, ou suspend ou supprime un compte, il communique à la personne concernée, sauf si la loi s'y oppose, un exposé des motifs clair et spécifique, comprenant les éléments exigés par l'article 17 du règlement (UE) 2022/2065 : la mesure prise et, le cas échéant, sa durée et sa portée, les faits et circonstances retenus, le recours éventuel à des moyens automatisés, le fondement légal ou contractuel de la décision et les voies de recours. L'Utilisateur peut contester la décision en écrivant à la même adresse ; il peut aussi saisir les juridictions compétentes.</p>
+        <p>Cette adresse est le point de contact unique de Freeley, pour les Utilisateurs comme pour les autorités des États membres, la Commission européenne et le Comité européen des services numériques, au sens des articles 11 et 12 du règlement (UE) 2022/2065 sur les services numériques. Les échanges ont lieu en français ou en anglais.</p>
       </Section>
 
       <Section title="Article 15 — Durée, suspension et résiliation">
-        <p>
-          Les CGU s'appliquent pendant toute la durée d'utilisation du Service. L'Utilisateur peut
-          supprimer son compte à tout moment depuis l'application. Freeley peut suspendre ou
-          supprimer un compte en cas de manquement grave aux CGU, de fraude ou d'utilisation illicite,
-          après en avoir informé l'Utilisateur, sauf urgence, et en lui donnant les raisons de sa
-          décision dans les conditions de l'article 14. Avant la suppression de son compte,
-          l'Utilisateur est invité à télécharger ses documents.
-        </p>
+        <p>Les CGU s'appliquent pendant toute la durée d'utilisation du Service. L'Utilisateur peut supprimer son compte à tout moment depuis l'application.</p>
+        <p>Freeley peut suspendre ou supprimer un compte en cas de manquement grave aux CGU, de fraude ou d'utilisation illicite. Sauf urgence ou obligation légale, Freeley notifie d'abord à l'Utilisateur le manquement précis reproché, les motifs de la mesure envisagée et un délai raisonnable pour y remédier. Toute suspension est limitée à ce qui est nécessaire et motivée, dans les conditions de l'article 14.</p>
+        <p>Avant la suppression d'un compte par Freeley, l'Utilisateur dispose de trente (30) jours pour télécharger ses documents, sauf interdiction légale. À la fin du traitement, les données sont restituées ou supprimées conformément à l'article 10.</p>
       </Section>
 
       <Section title="Article 16 — Prix">
-        <p>
-          Le Service est actuellement gratuit. Freeley pourra proposer des offres payantes. Aucune
-          fonctionnalité payante ne sera facturée sans l'accord exprès de l'Utilisateur, et toute
-          évolution tarifaire sera annoncée au moins trente (30) jours à l'avance.
-        </p>
+        <p>Le Service est actuellement gratuit. Freeley pourra proposer des offres payantes. Chaque offre payante précise son prix, sa périodicité, sa durée, son renouvellement et ses modalités de résiliation. Elle n'est activée qu'après son acceptation expresse par l'Utilisateur.</p>
+        <p>Toute hausse de prix applicable à un abonnement en cours est annoncée au moins trente (30) jours à l'avance et requiert l'accord exprès de l'Utilisateur ; à défaut, celui-ci peut résilier son abonnement avant l'entrée en vigueur de la hausse.</p>
       </Section>
 
       <Section title="Article 17 — Modification des CGU">
-        <p>
-          Freeley peut modifier les CGU. L'Utilisateur est informé des modifications importantes au
-          moins quinze (15) jours avant leur entrée en vigueur. S'il ne les accepte pas, il peut
-          supprimer son compte. À défaut, la poursuite de l'utilisation du Service vaut acceptation.
-        </p>
+        <p>Freeley peut faire évoluer les CGU. Toute modification substantielle est présentée à l'Utilisateur avec sa date d'entrée en vigueur, au moins quinze (15) jours à l'avance, et ne lui est applicable qu'après son acceptation expresse. La poursuite de l'utilisation du Service ou l'absence de réponse ne vaut pas, à elle seule, acceptation d'une modification substantielle. Si l'Utilisateur ne l'accepte pas, il peut supprimer son compte.</p>
       </Section>
 
       <Section title="Article 18 — Convention de preuve">
@@ -22858,6 +23338,14 @@ export default function App() {
     return (
       <ErrorBoundary>
         <CguPage />
+      </ErrorBoundary>
+    );
+  }
+  // Version 255 : page publique pour les clients des freelances
+  if (legalParam === "clients") {
+    return (
+      <ErrorBoundary>
+        <ClientsInfoPage />
       </ErrorBoundary>
     );
   }
