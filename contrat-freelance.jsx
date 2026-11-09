@@ -1129,7 +1129,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "265";
+const APP_VERSION = "266";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -10572,7 +10572,7 @@ const ICON_PATHS = {
   grid: <><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></>,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>,
-  message: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />,
+  message: <><path d="M20 4H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4l4 4 4-4h4a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z" /><path d="M7.5 9h9" /><path d="M7.5 12.5h6" /></>,
   help: <><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2.2-2.4 3.7" /><path d="M12 17h.01" /></>,
   camera: <><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /><circle cx="12" cy="12.5" r="3.5" /></>,
   sparkle: <path d="M12 5.5l1.8 4.7 4.7 1.8-4.7 1.8L12 18.5l-1.8-4.7-4.7-1.8 4.7-1.8z" />,
@@ -10959,9 +10959,9 @@ function FeedbackBubble() {
           background: C.navy || "#1E1B4B", border:"none", cursor:"pointer",
           boxShadow:"0 4px 16px rgba(0,0,0,0.25)",
           display:"flex", alignItems:"center", justifyContent:"center",
-          fontSize:20,
+          fontSize:20, color:"#fff",
         }}
-      ><Ico name="message" size={21} stroke={2} /></button>
+      ><Ico name="message" size={22} stroke={2} /></button>
 
       {open && (
         <div className="freeley-floating freeley-feedback-panel" style={{
