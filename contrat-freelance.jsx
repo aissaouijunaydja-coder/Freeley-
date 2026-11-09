@@ -107,8 +107,44 @@ const globalStyle = document.createElement("style");
 globalStyle.textContent = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { overflow-x: hidden; max-width: 100vw; }
-  body { background: #F7F5F0; }
-  ::selection { background: #1B2E4B22; }
+  body { background: #F7F7FB; }
+  button, input, select, textarea { font-family: 'DM Sans', system-ui, sans-serif; }
+  /* Version 259 : écran d'accueil façon « Indigo » (cartes d'outils, cadre blanc du formulaire) */
+  .ft-tools-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .ft-tool { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px; background: #FFFFFF; border: 1px solid #E6E6EF; border-radius: 14px; cursor: pointer; font-family: 'DM Sans', system-ui, sans-serif; color: #13111C; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease, transform .15s ease; }
+  .ft-tool:hover { border-color: #C7D2FE; box-shadow: 0 6px 18px rgba(67,56,202,0.08); transform: translateY(-1px); }
+  .ft-tool:focus-visible { outline: 2px solid #4F46E5; outline-offset: 2px; }
+  .ft-tool-open, .ft-tool-open:hover { border-color: #A5B4FC; background: #F5F6FF; transform: none; }
+  .ft-tool-ico { width: 40px; height: 40px; border-radius: 11px; background: #EEF0FF; color: #4338CA; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .ft-tool-txt { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+  .ft-tool-label { font-size: 14px; font-weight: 600; line-height: 1.3; color: #13111C; }
+  .ft-tool-desc { font-size: 12.5px; line-height: 1.4; color: #6B6A7B; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ft-tool-chev { color: #A3A2B3; flex-shrink: 0; display: flex; transition: transform .2s ease; }
+  .ft-tool-open .ft-tool-chev { transform: rotate(180deg); color: #4338CA; }
+  /* Version 260 : menu sur le côté, sur les grands écrans */
+  .ft-sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 248px; z-index: 30; background: #FFFFFF; border-right: 1px solid #E6E6EF; padding: 16px 14px 20px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; font-family: 'DM Sans', system-ui, sans-serif; }
+  .ft-side-logo { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 8px; border: none; background: transparent; cursor: pointer; text-align: left; }
+  .ft-side-new { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: none; border-radius: 12px; background: #4338CA; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 16px rgba(67,56,202,0.22); transition: background .15s ease; }
+  .ft-side-new:hover { background: #3730A3; }
+  .ft-side-nav { display: flex; flex-direction: column; gap: 2px; }
+  .ft-side-group { padding: 14px 10px 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #6B6A7B; }
+  .ft-side-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 0 10px; border: none; border-radius: 10px; background: transparent; color: #3F3E4E; font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; transition: background .15s ease, color .15s ease; }
+  .ft-side-item:hover { background: #F4F4FA; color: #13111C; }
+  .ft-side-item-active, .ft-side-item-active:hover { background: #EEF0FF; color: #4338CA; font-weight: 600; }
+  .ft-side-item:focus-visible, .ft-side-new:focus-visible, .ft-side-logo:focus-visible { outline: 2px solid #4F46E5; outline-offset: 2px; }
+  .ft-side-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #4338CA; color: #FFFFFF; font-size: 11.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  @media (min-width: 1100px) { body.ft-has-sidebar { padding-left: 248px; } }
+  .ft-wizard { background: #FFFFFF; border: 1px solid #E6E6EF; border-radius: 20px; box-shadow: 0 1px 3px rgba(19,17,28,0.05), 0 10px 30px rgba(19,17,28,0.04); padding: 32px 36px 36px; }
+  @media (max-width: 860px) { .ft-tools-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 640px) {
+    .ft-tools-grid { gap: 8px; }
+    .ft-tool { padding: 10px; gap: 10px; border-radius: 12px; }
+    .ft-tool-ico { width: 34px; height: 34px; border-radius: 9px; }
+    .ft-tool-desc, .ft-tool-chev, .ft-tools-sub { display: none; }
+    .ft-tool-label { font-size: 13px; }
+    .ft-wizard { padding: 22px 16px 26px; border-radius: 16px; }
+  }
+  ::selection { background: #4338CA22; }
   input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.3); opacity: 0.5; cursor: pointer; }
   input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
@@ -117,7 +153,7 @@ globalStyle.textContent = `
   @keyframes cardFadeOut { 0% { opacity:1; transform:translateX(0) scaleY(1); max-height:300px; margin-bottom:12px; } 60% { opacity:0; transform:translateX(40px) scaleY(0.85); } 100% { opacity:0; transform:translateX(60px) scaleY(0); max-height:0; margin-bottom:0; padding:0; } }
   @keyframes magicShimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
   @keyframes toastSlideIn { from { opacity:0; transform:translateX(-50%) translateY(-16px) scale(0.95); } to { opacity:1; transform:translateX(-50%) translateY(0) scale(1); } }
-  @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(27,46,75,0.18); } 50% { box-shadow: 0 0 0 8px rgba(27,46,75,0); } }
+  @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(30,27,75,0.18); } 50% { box-shadow: 0 0 0 8px rgba(30,27,75,0); } }
   @keyframes ndaShimmer { 0% { background-position: -400% center; } 100% { background-position: 400% center; } }
   @keyframes bellRing { 0%,100% { transform:rotate(0deg); } 15% { transform:rotate(18deg); } 30% { transform:rotate(-14deg); } 45% { transform:rotate(10deg); } 60% { transform:rotate(-7deg); } 75% { transform:rotate(4deg); } }
   @keyframes alertSlideDown { from { opacity:0; transform:translateY(-10px) scale(0.97); } to { opacity:1; transform:translateY(0) scale(1); } }
@@ -125,7 +161,7 @@ globalStyle.textContent = `
   @keyframes cameraPopIn { 0% { opacity:0; transform:scale(0.88) translateY(10px); } 65% { transform:scale(1.025) translateY(-2px); } 100% { opacity:1; transform:scale(1) translateY(0); } }
   .bell-btn:hover .bell-icon { animation: bellRing 0.6s ease both; }
   .alert-row { transition: background 0.15s, transform 0.15s; }
-  .alert-row:hover { background: #F7F5F0 !important; transform: translateX(3px); }
+  .alert-row:hover { background: #F7F7FB !important; transform: translateX(3px); }
   .instant-action-btn { transition: transform .22s cubic-bezier(.22,.68,0,1.2), box-shadow .22s ease, border-color .18s ease !important; }
   .instant-action-btn:hover { transform: translateY(-4px) !important; }
   .whatsapp-btn:hover { background: #1ea34b !important; box-shadow: 0 8px 28px rgba(37,211,102,0.45) !important; }
@@ -137,10 +173,10 @@ globalStyle.textContent = `
   .fade-up-4 { animation-delay: .26s; }
   .fade-up-5 { animation-delay: .33s; }
   .btn-primary { transition: all .2s; }
-  .btn-primary:hover:not(:disabled) { background: #152438 !important; transform: translateY(-1px); box-shadow: 0 8px 24px #1B2E4B30 !important; }
-  .btn-secondary:hover { background: #F0EDE6 !important; border-color: #1B2E4B88 !important; }
+  .btn-primary:hover:not(:disabled) { background: #152438 !important; transform: translateY(-1px); box-shadow: 0 8px 24px #4338CA30 !important; }
+  .btn-secondary:hover { background: #F0EDE6 !important; border-color: #4338CA88 !important; }
   .plan-card { transition: transform .2s, box-shadow .2s; }
-  .plan-card:hover { transform: translateY(-3px); box-shadow: 0 16px 48px #1B2E4B14 !important; }
+  .plan-card:hover { transform: translateY(-3px); box-shadow: 0 16px 48px #4338CA14 !important; }
   body.freeley-window-open .freeley-floating { display: none !important; }
   /* Version 226 : sur téléphone, les bulles (aide et message) sont plus petites, empilées contre le bord droit, et
      cachées pendant que tu écris dans une case : elles couvraient du texte et des boutons. */
@@ -172,28 +208,36 @@ document.addEventListener("focusout", () => {
 
 /* ─── Tokens ─── */
 const C = {
-  navy:    "#1B2E4B",
-  navyD:   "#0F1C2D",
-  navyL:   "#2A4167",
-  gold:    "#B8965A",
-  goldL:   "#D4AF7A",
-  cream:   "#F7F5F0",
-  creamD:  "#EDE9DF",
-  creamDD: "#E0DAD0",
+  // Version 258 : nouveau design « Indigo ». Les noms restent (navy, gold, cream…) pour ne rien casser :
+  // seules les valeurs changent. Les PDF (contrat, facture…) ont leurs propres couleurs et ne changent pas.
+  navy:    "#4338CA", // couleur principale : boutons, éléments actifs
+  navyD:   "#312E81",
+  navyL:   "#4F46E5",
+  gold:    "#4F46E5", // l'ancien doré devient l'indigo d'accent : petits titres, liens
+  goldL:   "#C7D2FE", // accent clair, posé sur un fond indigo
+  goldBg:  "#E0E7FF", // fond indigo très clair des boutons secondaires (texte foncé dessus)
+  ink:     "#1E1B4B", // titres
+  cream:   "#F7F7FB",
+  creamD:  "#F0F0F7",
+  creamDD: "#E2E2EC",
   white:   "#FFFFFF",
-  text:    "#1A1A1A",
-  textM:   "#4A4A4A",
-  textL:   "#8A8780",
-  border:  "#D8D4CB",
-  borderL: "#EDE9DF",
+  text:    "#13111C",
+  textM:   "#4B4A5C",
+  textL:   "#6B6A7B",
+  border:  "#DCDCE6",
+  borderL: "#ECECF3",
   error:   "#C0392B",
   success: "#2D6A4F",
 };
 
 const T = {
-  display: "'Playfair Display', Georgia, serif",
+  display: "'DM Sans', system-ui, sans-serif", // version 258 : titres en DM Sans (avant : Playfair Display)
   body:    "'DM Sans', system-ui, sans-serif",
 };
+
+// Version 258 : le logo ne change pas. Le mot « Freeley » à côté de l'image garde sa police et son bleu d'avant.
+const LOGO_FONT = "'Playfair Display', Georgia, serif";
+const LOGO_NAVY = "#1B2E4B";
 
 /* ─── Constants ─── */
 const STEPS = ["Tes infos", "La mission", "Paiement", "Contrat"];
@@ -641,7 +685,7 @@ const buildRetractationForm = (f = {}) => [
   "Date :",
   "(*) Rayez la mention inutile.",
 ].join("\n\n");
-const RETRACTATION_BOX_STYLE = { maxHeight:200, overflowY:"auto", whiteSpace:"pre-wrap", fontSize:10.5, color:"#334155", lineHeight:1.55, background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:10, padding:"10px 12px", marginBottom:12, textAlign:"left" };
+const RETRACTATION_BOX_STYLE = { maxHeight:200, overflowY:"auto", whiteSpace:"pre-wrap", fontSize:10.5, color:"#334155", lineHeight:1.55, background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:12, padding:"10px 12px", marginBottom:12, textAlign:"left" };
 
 // Adresse officielle de Freeley. Stripe y renvoie le client après un paiement (avant, sans adresse
 // fournie, le serveur le renvoyait vers l'ancienne adresse freeley-ten.vercel.app).
@@ -701,10 +745,10 @@ const PROOF_LOCK_NOTE = "Toute modification du texte, même d'un seul caractère
 function SignatureProofBlock({ proof, docLabel = "du contrat", signed = true, compact = false }) {
   if (!signed) return null;
   const lines = signatureProofLines(proof, docLabel);
-  const box = { background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:10, padding: compact ? "10px 12px" : "12px 14px", marginTop: compact ? 8 : 14, marginBottom: compact ? 10 : 0, fontFamily:"'DM Sans', sans-serif", textAlign:"left" };
+  const box = { background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:12, padding: compact ? "10px 12px" : "12px 14px", marginTop: compact ? 8 : 14, marginBottom: compact ? 10 : 0, fontFamily:"'DM Sans', sans-serif", textAlign:"left" };
   return (
     <div data-testid="signature-proof" style={box}>
-      <div style={{ fontSize:12, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>🔒 Preuve de signature</div>
+      <div style={{ fontSize:12, fontWeight:700, color:"#1E1B4B", marginBottom:6 }}><IcoI name="lock" />Preuve de signature</div>
       {lines.length ? lines.map((l, i) => (
         <div key={i} style={{ fontSize:11, color:"#475569", lineHeight:1.55, overflowWrap:"anywhere" }}>{l}</div>
       )) : (
@@ -742,7 +786,7 @@ function EarlyPaymentBlockedModal({ payNotBefore, onClose }) {
       style={{ position:"fixed", inset:0, zIndex:10050, background:"rgba(10,20,40,0.6)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
     >
       <div role="dialog" aria-modal="true" data-testid="early-payment-blocked" style={{ background:C.white, borderRadius:16, width:"100%", maxWidth:440, maxHeight:"90vh", overflowY:"auto", padding:"20px 20px 18px", boxShadow:"0 24px 60px rgba(0,0,0,0.3)", fontFamily:T.body, textAlign:"left" }}>
-        <div style={{ fontSize:16, fontWeight:800, color:"#92400E", marginBottom:10, lineHeight:1.4 }}>⏳ Pas de paiement avant le {frDate(payNotBefore)}</div>
+        <div style={{ fontSize:16, fontWeight:800, color:"#92400E", marginBottom:10, lineHeight:1.4 }}><IcoI name="hourglass" />Pas de paiement avant le {frDate(payNotBefore)}</div>
         <p style={{ fontSize:13, color:C.text, lineHeight:1.6, margin:"0 0 10px" }}>
           Ce contrat a été signé chez le client ou ailleurs que dans tes locaux. Pour ce type de contrat, la loi interdit d'exiger ou de recevoir un paiement, même un acompte, avant le <strong>{frDate(payNotBefore)}</strong> (article L221-10 du Code de la consommation).
         </p>
@@ -752,7 +796,7 @@ function EarlyPaymentBlockedModal({ payNotBefore, onClose }) {
         <p style={{ fontSize:12.5, color:C.textM, lineHeight:1.6, margin:"0 0 14px" }}>
           Pour te protéger, Freeley bloque donc les boutons de paiement jusqu'à cette date. Tu pourras alors envoyer ta facture, ton lien de paiement ou ta relance.
         </p>
-        <button onClick={onClose} style={{ width:"100%", padding:"11px 12px", background:"#92400E", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#fff" }}>J'ai compris</button>
+        <button onClick={onClose} style={{ width:"100%", padding:"11px 12px", background:"#92400E", border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#fff" }}>J'ai compris</button>
       </div>
     </div>,
     document.body
@@ -767,7 +811,7 @@ function ContentDeliveredModal({ saving, error, onCancel, onConfirm }) {
       style={{ position:"fixed", inset:0, zIndex:10050, background:"rgba(10,20,40,0.6)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
     >
       <div role="dialog" aria-modal="true" style={{ background:C.white, borderRadius:16, width:"100%", maxWidth:440, maxHeight:"90vh", overflowY:"auto", padding:"20px 20px 18px", boxShadow:"0 24px 60px rgba(0,0,0,0.3)", fontFamily:T.body }}>
-        <div style={{ fontSize:16, fontWeight:800, color:C.navy, marginBottom:10, lineHeight:1.4 }}>📦 Tu viens de fournir le contenu ?</div>
+        <div style={{ fontSize:16, fontWeight:800, color:C.ink, marginBottom:10, lineHeight:1.4 }}><IcoI name="package" />Tu viens de fournir le contenu ?</div>
         <p style={{ fontSize:13, color:C.text, lineHeight:1.6, margin:"0 0 10px" }}>
           Touche « Oui » seulement au moment où tu envoies vraiment le contenu à ton client : les fichiers, un lien de téléchargement ou un accès.
         </p>
@@ -776,8 +820,8 @@ function ContentDeliveredModal({ saving, error, onCancel, onConfirm }) {
         </p>
         {error && <div style={{ fontSize:12, color:"#B91C1C", marginBottom:10, lineHeight:1.5 }}>{error}</div>}
         <div style={{ display:"flex", gap:10 }}>
-          <button onClick={onCancel} disabled={saving} style={{ flex:1, padding:"11px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.textM }}>Annuler</button>
-          <button onClick={onConfirm} disabled={saving} style={{ flex:1, padding:"11px 12px", background: saving ? "#E5E7EB" : "#1D4ED8", border:"none", borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color: saving ? C.textL : "#fff" }}>{saving ? "Enregistrement…" : "Oui, je viens de le fournir"}</button>
+          <button onClick={onCancel} disabled={saving} style={{ flex:1, padding:"11px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.textM }}>Annuler</button>
+          <button onClick={onConfirm} disabled={saving} style={{ flex:1, padding:"11px 12px", background: saving ? "#E5E7EB" : "#1D4ED8", border:"none", borderRadius:12, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color: saving ? C.textL : "#fff" }}>{saving ? "Enregistrement…" : "Oui, je viens de le fournir"}</button>
         </div>
       </div>
     </div>,
@@ -1085,7 +1129,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "257";
+const APP_VERSION = "265";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -2909,7 +2953,7 @@ function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, on
   const [badges, setBadges] = useState([]);
   const [saved, setSaved]   = useState(false);
 
-  const BADGES = ["Payeur rapide ⚡", "Super communication 💬", "Brief clair 🎯"];
+  const BADGES = ["Payeur rapide", "Super communication", "Brief clair"];
 
   const toggleBadge = (b) => setBadges(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b]);
 
@@ -2924,7 +2968,7 @@ function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, on
     <div
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{
-        position:"fixed", inset:0, background:"rgba(15,28,45,0.7)",
+        position:"fixed", inset:0, background:"rgba(19,17,28,0.7)",
         zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center",
         padding:"12px", backdropFilter:"blur(5px)",
       }}
@@ -2938,16 +2982,16 @@ function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, on
       }}>
         {saved ? (
           <div style={{ animation:"fadeUp 0.3s ease both" }}>
-            <div style={{ fontSize:52, marginBottom:12 }}>🌟</div>
-            <div style={{ fontFamily:T.display, fontSize:20, color:C.navy, fontWeight:700, marginBottom:6 }}>Note enregistrée !</div>
+            <div style={{ fontSize:52, marginBottom:12 }}><IcoI name="award" size={48} stroke={1.8} gap={0} /></div>
+            <div style={{ fontFamily:T.display, fontSize:20, color:C.ink, fontWeight:700, marginBottom:6 }}>Note enregistrée !</div>
             <div style={{ fontFamily:T.body, fontSize:13, color:C.textL }}>Merci pour votre retour sur cette mission.</div>
           </div>
         ) : (
           <>
             {/* Header */}
             <div style={{ marginBottom:20 }}>
-              <div style={{ fontSize:36, marginBottom:10 }}>🌟</div>
-              <div style={{ fontFamily:T.display, fontSize:19, fontWeight:700, color:C.navy, lineHeight:1.25, marginBottom:4 }}>
+              <div style={{ fontSize:36, marginBottom:10 }}><IcoI name="award" size={36} stroke={1.8} gap={0} /></div>
+              <div style={{ fontFamily:T.display, fontSize:19, fontWeight:700, color:C.ink, lineHeight:1.25, marginBottom:4 }}>
                 Noter votre expérience avec {clientName || clientCompany || "ce client"}
               </div>
               {clientCompany && (
@@ -2996,7 +3040,7 @@ function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, on
                       borderRadius:20, cursor:"pointer",
                       fontFamily:T.body, fontSize:12, fontWeight:600,
                       transition:"all 0.15s",
-                      boxShadow: badges.includes(b) ? "0 3px 10px #1B2E4B25" : "none",
+                      boxShadow: badges.includes(b) ? "0 3px 10px #4338CA25" : "none",
                     }}
                   >{b}</button>
                 ))}
@@ -3009,7 +3053,7 @@ function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, on
                 onClick={onClose}
                 style={{
                   flex:1, padding:"12px", background:C.white,
-                  border:`1.5px solid ${C.border}`, borderRadius:12,
+                  border:`1.5px solid ${C.border}`, borderRadius:14,
                   cursor:"pointer", fontFamily:T.body, fontSize:13,
                   fontWeight:600, color:C.textM, transition:"all 0.15s",
                 }}
@@ -3023,17 +3067,17 @@ function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, on
                   flex:2, padding:"12px",
                   background: stars > 0 ? `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)` : C.creamDD,
                   color: stars > 0 ? C.white : C.textL,
-                  border:"none", borderRadius:12,
+                  border:"none", borderRadius:14,
                   cursor: stars > 0 ? "pointer" : "not-allowed",
                   fontFamily:T.body, fontSize:13, fontWeight:700,
-                  boxShadow: stars > 0 ? "0 6px 20px #1B2E4B30" : "none",
+                  boxShadow: stars > 0 ? "0 6px 20px #4338CA30" : "none",
                   transition:"all 0.15s",
                   display:"flex", alignItems:"center", justifyContent:"center", gap:7,
                 }}
-                onMouseOver={e=>{ if(stars>0){ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 10px 28px #1B2E4B40"; }}}
-                onMouseOut={e=>{ e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow=stars>0?"0 6px 20px #1B2E4B30":"none"; }}
+                onMouseOver={e=>{ if(stars>0){ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 10px 28px #4338CA40"; }}}
+                onMouseOut={e=>{ e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow=stars>0?"0 6px 20px #4338CA30":"none"; }}
               >
-                <span>⭐</span> Enregistrer la note
+                <span><IcoI name="award" size={16} stroke={1.8} gap={0} /></span> Enregistrer la note
               </button>
             </div>
           </>
@@ -3050,7 +3094,7 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
     <div
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{
-        position:"fixed", inset:0, background:"rgba(15,28,45,0.65)",
+        position:"fixed", inset:0, background:"rgba(19,17,28,0.65)",
         zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center",
         padding:"12px", backdropFilter:"blur(4px)",
         animation:"fadeUp 0.2s ease both",
@@ -3066,13 +3110,13 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:22 }}>
           <div style={{ display:"flex", alignItems:"center", gap:12 }}>
             <div style={{
-              width:40, height:40, borderRadius:12,
+              width:40, height:40, borderRadius:14,
               background:"linear-gradient(135deg, #065F46 0%, #059669 100%)",
               display:"flex", alignItems:"center", justifyContent:"center",
               fontSize:20, boxShadow:"0 4px 12px #05966930", flexShrink:0,
-            }}>⚡</div>
+            }}><IcoI name="bolt" size={20} stroke={1.8} gap={0} /></div>
             <div>
-              <div style={{ fontFamily:T.display, fontSize:19, fontWeight:700, color:C.navy, lineHeight:1.2 }}>
+              <div style={{ fontFamily:T.display, fontSize:19, fontWeight:700, color:C.ink, lineHeight:1.2 }}>
                 Personnaliser la relance client
               </div>
               <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, marginTop:2 }}>
@@ -3083,7 +3127,7 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
           <button
             onClick={onClose}
             style={{
-              width:32, height:32, borderRadius:8,
+              width:32, height:32, borderRadius:10,
               background:C.creamD, border:`1px solid ${C.border}`,
               cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
               fontSize:18, color:C.textL, flexShrink:0, lineHeight:1,
@@ -3106,7 +3150,7 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
               width:"100%", padding:"14px 16px",
               fontFamily:T.body, fontSize:13, color:C.text, lineHeight:1.7,
               background:C.cream, border:`1.5px solid ${C.border}`,
-              borderRadius:12, resize:"vertical", outline:"none",
+              borderRadius:14, resize:"vertical", outline:"none",
               minHeight:130, maxHeight:280,
               transition:"border-color 0.15s",
             }}
@@ -3126,7 +3170,7 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
             style={{
               flex:1, padding:"13px 0",
               background:C.white, border:`1.5px solid ${C.border}`,
-              borderRadius:12, cursor:"pointer",
+              borderRadius:14, cursor:"pointer",
               fontFamily:T.body, fontSize:13, fontWeight:600, color:C.textM,
               transition:"all 0.15s",
             }}
@@ -3142,7 +3186,7 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
                 ? "linear-gradient(135deg, #065F46 0%, #059669 100%)"
                 : C.creamDD,
               color: msg.trim() ? "#fff" : C.textL,
-              border:"none", borderRadius:12,
+              border:"none", borderRadius:14,
               cursor: msg.trim() ? "pointer" : "not-allowed",
               fontFamily:T.body, fontSize:13, fontWeight:700,
               boxShadow: msg.trim() ? "0 6px 20px #05966935" : "none",
@@ -3152,7 +3196,7 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
             onMouseOver={e => { if (msg.trim()) { e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 10px 28px #05966945"; }}}
             onMouseOut={e => { e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow=msg.trim()?"0 6px 20px #05966935":"none"; }}
           >
-            <span>🚀</span> Envoyer la relance personnalisée
+            <span><IcoI name="send" size={16} stroke={1.8} gap={0} /></span> Envoyer la relance personnalisée
           </button>
         </div>
       </div>
@@ -3165,15 +3209,15 @@ function RelanceModal({ msg, setMsg, onClose, onSend }) {
 // « En cours » : rien de tout ça n'existe plus) et tutoiement, comme le reste de l'application.
 const HELP_FAQ = [
   {
-    q: "🔗 Mon client n'a pas reçu le lien ?",
-    a: "Pas de panique. Dans Mes contrats, ouvre le contrat et choisis l'envoi au client à distance. Appuie sur « 📋 Copier le lien », puis envoie-le à ton client par SMS, WhatsApp ou email.",
+    q: "Mon client n'a pas reçu le lien ?",
+    a: "Pas de panique. Dans Mes contrats, ouvre le contrat et choisis l'envoi au client à distance. Appuie sur « Copier le lien », puis envoie-le à ton client par SMS, WhatsApp ou email.",
   },
   {
-    q: "📄 Comment générer la facture ?",
-    a: "Dans Mes contrats, appuie sur le contrat pour l'ouvrir : les boutons « 🧾 Facture acompte » et « 🧾 Facture solde » sont là. Pour une facture sans contrat, utilise l'outil « Facture », en haut de l'écran principal.",
+    q: "Comment générer la facture ?",
+    a: "Dans Mes contrats, appuie sur le contrat pour l'ouvrir : les boutons « Facture acompte » et « Facture solde » sont là. Pour une facture sans contrat, utilise l'outil « Facture », en haut de l'écran principal.",
   },
   {
-    q: "⚠️ L'écran a planté ou affiche une erreur ?",
+    q: "L'écran a planté ou affiche une erreur ?",
     a: "Recharge la page avec le bouton ↻ de ton navigateur. Tes contrats sont enregistrés dans ton compte : tu les retrouves dans Mes contrats. Si le problème revient, écris-nous avec le bouton ci-dessous.",
   },
 ];
@@ -3187,7 +3231,7 @@ function HelpModal({ onClose }) {
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position:"fixed", inset:0,
-        background:"rgba(15,28,45,0.65)",
+        background:"rgba(19,17,28,0.65)",
         zIndex:99999,
         display:"flex", alignItems:"center", justifyContent:"center",
         padding:"12px",
@@ -3200,7 +3244,7 @@ function HelpModal({ onClose }) {
           background:C.white,
           borderRadius:24,
           width:"100%", maxWidth:460,
-          boxShadow:"0 32px 80px #1B2E4B22",
+          boxShadow:"0 32px 80px #4338CA22",
           border:`1px solid ${C.border}`,
           overflow:"hidden",
         }}
@@ -3224,7 +3268,7 @@ function HelpModal({ onClose }) {
             onMouseOver={e => e.currentTarget.style.background="rgba(255,255,255,0.28)"}
             onMouseOut={e => e.currentTarget.style.background="rgba(255,255,255,0.15)"}
           >×</button>
-          <div style={{ fontSize:36, marginBottom:10 }}>⚡</div>
+          <div style={{ fontSize:36, marginBottom:10 }}><IcoI name="bolt" size={36} stroke={1.8} gap={0} /></div>
           <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:"#fff", marginBottom:6 }}>
             Besoin d'un coup de main ?
           </div>
@@ -3237,7 +3281,7 @@ function HelpModal({ onClose }) {
         <div style={{ padding:"20px 24px 24px" }}>
           <div style={{
             border:`1px solid ${C.border}`,
-            borderRadius:14,
+            borderRadius:16,
             overflow:"hidden",
             marginBottom:20,
           }}>
@@ -3257,7 +3301,7 @@ function HelpModal({ onClose }) {
                   onMouseOver={e => { if (expanded !== i) e.currentTarget.style.background = C.creamD + "88"; }}
                   onMouseOut={e => { if (expanded !== i) e.currentTarget.style.background = C.white; }}
                 >
-                  <span style={{ fontSize:13, fontWeight:600, color:C.navy, lineHeight:1.45 }}>
+                  <span style={{ fontSize:13, fontWeight:600, color:C.ink, lineHeight:1.45 }}>
                     {item.q}
                   </span>
                   <span style={{
@@ -3289,18 +3333,18 @@ function HelpModal({ onClose }) {
             display:"flex", alignItems:"flex-start", gap:10,
             background:"linear-gradient(135deg, #FFFBEB 0%, #FEF9EE 100%)",
             border:"1px solid #FDE68A",
-            borderRadius:12,
+            borderRadius:14,
             padding:"14px 16px",
           }}>
-            <span style={{ fontSize:18, flexShrink:0 }}>💡</span>
+            <span style={{ fontSize:18, flexShrink:0 }}><IcoI name="info" size={18} stroke={1.8} gap={0} /></span>
             <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.65, flex:1 }}>
               <strong>Pas trouvé ta réponse ?</strong> Écris-nous : on te répond par email.
               {/* Version 242 : avant, la note renvoyait à un « bouton de réinitialisation ci-dessus » qui n'existe pas ici */}
               <button
                 data-testid="help-write-us"
                 onClick={() => { onClose(); window.dispatchEvent(new CustomEvent("freeley-open-feedback")); }}
-                style={{ display:"block", marginTop:10, padding:"9px 14px", background:C.navy, color:"#fff", border:"none", borderRadius:10, fontFamily:T.body, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
-              >💬 Écrire à Freeley</button>
+                style={{ display:"block", marginTop:10, padding:"9px 14px", background:C.navy, color:"#fff", border:"none", borderRadius:12, fontFamily:T.body, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
+              ><IcoI name="message" />Écrire à Freeley</button>
             </div>
           </div>
         </div>
@@ -3327,7 +3371,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Comment télécharger un contrat en PDF après un bug ?",
-    a: "Appuie sur « Relancer et corriger », puis ouvre ton contrat dans Mes contrats et appuie sur « ⬇ PDF du contrat ».",
+    a: "Appuie sur « Relancer et corriger », puis ouvre ton contrat dans Mes contrats et appuie sur « PDF du contrat ».",
   },
 ];
 
@@ -3362,7 +3406,7 @@ class ErrorBoundary extends React.Component {
     return (
       <div style={{
         minHeight: "100vh",
-        background: "linear-gradient(160deg, #F7F5F0 0%, #EDE9DF 100%)",
+        background: "linear-gradient(160deg, #F7F7FB 0%, #F0F0F7 100%)",
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: "24px", fontFamily: "'DM Sans', system-ui, sans-serif",
       }}>
@@ -3370,21 +3414,21 @@ class ErrorBoundary extends React.Component {
           maxWidth: 480, width: "100%",
           background: "#FFFFFF",
           borderRadius: 24,
-          boxShadow: "0 32px 80px rgba(27,46,75,0.12)",
-          border: "1px solid #D8D4CB",
+          boxShadow: "0 32px 80px rgba(30,27,75,0.12)",
+          border: "1px solid #DCDCE6",
           overflow: "hidden",
           animation: "fadeUp 0.4s cubic-bezier(.22,.68,0,1.2) both",
         }}>
 
           {/* Header band */}
           <div style={{
-            background: "linear-gradient(135deg, #1B2E4B 0%, #2A4167 100%)",
+            background: "linear-gradient(135deg, #4338CA 0%, #4F46E5 100%)",
             padding: "28px 32px 24px",
             textAlign: "center",
           }}>
-            <div style={{ fontSize: 48, marginBottom: 10 }}>🛠️</div>
+            <div style={{ fontSize: 48, marginBottom: 10 }}></div>
             <div style={{
-              fontFamily: "'Playfair Display', Georgia, serif",
+              fontFamily: "'DM Sans', system-ui, sans-serif",
               fontSize: 20, fontWeight: 700, color: "#FFFFFF",
               lineHeight: 1.3, marginBottom: 8,
             }}>
@@ -3412,34 +3456,34 @@ class ErrorBoundary extends React.Component {
                 padding: "16px 20px",
                 background: fixed
                   ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)"
-                  : "linear-gradient(135deg, #1B2E4B 0%, #2A4167 100%)",
+                  : "linear-gradient(135deg, #4338CA 0%, #4F46E5 100%)",
                 color: "#FFFFFF",
                 border: "none",
-                borderRadius: 14,
+                borderRadius: 16,
                 cursor: fixed ? "default" : "pointer",
                 fontSize: 15,
                 fontWeight: 700,
                 fontFamily: "inherit",
-                boxShadow: fixed ? "0 6px 20px rgba(45,106,79,0.35)" : "0 8px 28px rgba(27,46,75,0.30)",
+                boxShadow: fixed ? "0 6px 20px rgba(45,106,79,0.35)" : "0 8px 28px rgba(30,27,75,0.30)",
                 transition: "all 0.25s",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                 marginBottom: 14,
               }}
-              onMouseOver={e => { if (!fixed) { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 14px 36px rgba(27,46,75,0.40)"; }}}
-              onMouseOut={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = fixed ? "0 6px 20px rgba(45,106,79,0.35)" : "0 8px 28px rgba(27,46,75,0.30)"; }}
+              onMouseOver={e => { if (!fixed) { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 14px 36px rgba(30,27,75,0.40)"; }}}
+              onMouseOut={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = fixed ? "0 6px 20px rgba(45,106,79,0.35)" : "0 8px 28px rgba(30,27,75,0.30)"; }}
             >
               {fixed ? (
-                <><span>✅</span> Application relancée — chargement…</>
+                <><span><IcoI name="checkCircle" size={16} stroke={1.8} gap={0} /></span> Application relancée — chargement…</>
               ) : (
-                <><span>⚡</span> Relancer et corriger l'application</>
+                <><span><IcoI name="bolt" size={16} stroke={1.8} gap={0} /></span> Relancer et corriger l'application</>
               )}
             </button>
 
             {/* Séparateur */}
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-              <div style={{ flex: 1, height: 1, background: "#D8D4CB" }} />
-              <span style={{ fontSize: 11, color: "#8A8780", fontWeight: 600, letterSpacing: "0.1em" }}>OU</span>
-              <div style={{ flex: 1, height: 1, background: "#D8D4CB" }} />
+              <div style={{ flex: 1, height: 1, background: "#DCDCE6" }} />
+              <span style={{ fontSize: 11, color: "#6B6A7B", fontWeight: 600, letterSpacing: "0.1em" }}>OU</span>
+              <div style={{ flex: 1, height: 1, background: "#DCDCE6" }} />
             </div>
 
             {/* Bouton FAQ assistant */}
@@ -3448,10 +3492,10 @@ class ErrorBoundary extends React.Component {
               style={{
                 width: "100%",
                 padding: "14px 20px",
-                background: faqOpen ? "#F7F5F0" : "#FFFFFF",
-                color: "#1B2E4B",
-                border: `2px solid ${faqOpen ? "#B8965A" : "#D8D4CB"}`,
-                borderRadius: 14,
+                background: faqOpen ? "#F7F7FB" : "#FFFFFF",
+                color: "#1E1B4B",
+                border: `2px solid ${faqOpen ? "#4F46E5" : "#DCDCE6"}`,
+                borderRadius: 16,
                 cursor: "pointer",
                 fontSize: 14,
                 fontWeight: 600,
@@ -3460,43 +3504,43 @@ class ErrorBoundary extends React.Component {
                 transition: "all 0.2s",
                 marginBottom: faqOpen ? 16 : 0,
               }}
-              onMouseOver={e => { if (!faqOpen) { e.currentTarget.style.borderColor = "#B8965A"; e.currentTarget.style.background = "#FFFBEB"; }}}
-              onMouseOut={e => { if (!faqOpen) { e.currentTarget.style.borderColor = "#D8D4CB"; e.currentTarget.style.background = "#FFFFFF"; }}}
+              onMouseOver={e => { if (!faqOpen) { e.currentTarget.style.borderColor = "#4F46E5"; e.currentTarget.style.background = "#FFFBEB"; }}}
+              onMouseOut={e => { if (!faqOpen) { e.currentTarget.style.borderColor = "#DCDCE6"; e.currentTarget.style.background = "#FFFFFF"; }}}
             >
-              <span>🤖</span>
+              <span><IcoI name="sparkle" size={16} stroke={1.8} gap={0} /></span>
               Voir les questions fréquentes
-              <span style={{ marginLeft: "auto", fontSize: 16, color: "#8A8780", transform: faqOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+              <span style={{ marginLeft: "auto", fontSize: 16, color: "#6B6A7B", transform: faqOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
             </button>
 
             {/* Mini-FAQ déroulante */}
             {faqOpen && (
               <div style={{ animation: "fadeUp 0.25s ease both" }}>
                 <div style={{
-                  background: "#F7F5F0",
-                  border: "1px solid #D8D4CB",
-                  borderRadius: 12,
+                  background: "#F7F7FB",
+                  border: "1px solid #DCDCE6",
+                  borderRadius: 14,
                   overflow: "hidden",
                 }}>
                   {FAQ_ITEMS.map((item, i) => (
-                    <div key={i} style={{ borderBottom: i < FAQ_ITEMS.length - 1 ? "1px solid #D8D4CB" : "none" }}>
+                    <div key={i} style={{ borderBottom: i < FAQ_ITEMS.length - 1 ? "1px solid #DCDCE6" : "none" }}>
                       <button
                         onClick={() => this.setState(s => ({ faqExpanded: s.faqExpanded === i ? null : i }))}
                         style={{
                           width: "100%", padding: "13px 16px",
-                          background: faqExpanded === i ? "#EDE9DF" : "transparent",
+                          background: faqExpanded === i ? "#F0F0F7" : "transparent",
                           border: "none", cursor: "pointer",
                           display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10,
                           textAlign: "left", fontFamily: "inherit",
                           transition: "background 0.15s",
                         }}
-                        onMouseOver={e => { if (faqExpanded !== i) e.currentTarget.style.background = "#EDE9DF66"; }}
+                        onMouseOver={e => { if (faqExpanded !== i) e.currentTarget.style.background = "#F0F0F766"; }}
                         onMouseOut={e => { if (faqExpanded !== i) e.currentTarget.style.background = "transparent"; }}
                       >
-                        <span style={{ fontSize: 13, fontWeight: 600, color: "#1B2E4B", lineHeight: 1.45 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "#1E1B4B", lineHeight: 1.45 }}>
                           {item.q}
                         </span>
                         <span style={{
-                          fontSize: 14, color: "#8A8780", flexShrink: 0, marginTop: 1,
+                          fontSize: 14, color: "#6B6A7B", flexShrink: 0, marginTop: 1,
                           transform: faqExpanded === i ? "rotate(45deg)" : "none",
                           transition: "transform 0.2s",
                           display: "inline-block",
@@ -3507,7 +3551,7 @@ class ErrorBoundary extends React.Component {
                           padding: "0 16px 14px",
                           fontSize: 12, lineHeight: 1.7, color: "#4A4A4A",
                           animation: "fadeUp 0.2s ease both",
-                          background: "#EDE9DF",
+                          background: "#F0F0F7",
                         }}>
                           {item.a}
                         </div>
@@ -3522,10 +3566,10 @@ class ErrorBoundary extends React.Component {
                   padding: "12px 16px",
                   background: "linear-gradient(135deg, #FFFBEB 0%, #FEF9EE 100%)",
                   border: "1px solid #FDE68A",
-                  borderRadius: 10,
+                  borderRadius: 12,
                   display: "flex", alignItems: "flex-start", gap: 10,
                 }}>
-                  <span style={{ fontSize: 18, flexShrink: 0 }}>💡</span>
+                  <span style={{ fontSize: 18, flexShrink: 0 }}><IcoI name="info" size={18} stroke={1.8} gap={0} /></span>
                   <div style={{ fontSize: 12, color: "#92400E", lineHeight: 1.6 }}>
                     <strong>Pas trouvé ta réponse ?</strong> Appuie sur{" "}
                     <span style={{ fontWeight: 700 }}>« Relancer et corriger »</span> : la plupart du temps,
@@ -3577,7 +3621,7 @@ const ACCOUNT_JUST_DELETED = (() => {
 })();
 // Message juste après un échec de la suppression du compte (réponse de api/delete-account, version 239)
 const deleteAccountErrorMessage = (status, body) => {
-  const help = " Si ça recommence, préviens-nous avec la bulle 💬 en bas de l'écran.";
+  const help = " Si ça recommence, préviens-nous avec la bulle en bas de l'écran.";
   if (status === 401) return "Ta session a expiré. Reconnecte-toi, puis recommence la suppression.";
   if (body && body.dataDeleted) return "Tes données ont bien été effacées, mais la fermeture de ton compte a échoué. Réessaie pour terminer la suppression." + help;
   if (body && body.partial) return "La suppression s'est arrêtée en route : une partie de tes données a pu être effacée, mais ton compte existe toujours. Réessaie pour terminer la suppression." + help;
@@ -3951,7 +3995,7 @@ function buildContractPdfDoc({ form: rawForm = {}, contract = "", freelanceSigna
   const HEADER_H = 16, FOOTER_H = 14, BODY_TOP = HEADER_H + 8, BODY_BOT = PH - FOOTER_H - 6;
 
   // ── Palette document premium ──
-  const NAVY   = [26, 54, 93];    // #1a365d
+  const NAVY   = [26, 54, 93];    // #312E81
   const NAVYL  = [43, 108, 176];  // #2b6cb0
   const NAVYLT = [235, 241, 250]; // fond bleu très clair
   const DARK   = [44, 62, 80];    // #2c3e50
@@ -5430,7 +5474,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     e.preventDefault();
     const ctx = remoteSigCanvasRef.current.getContext("2d");
     const p = getRemoteSigPos(e);
-    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#4338CA"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
     setRemoteSigHasStrokes(true);
   };
   const endRemoteSigDraw = () => { remoteSigDrawingRef.current = false; };
@@ -5709,7 +5753,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     return (
       <>
         {accountDeletedNotice && (
-          <div data-testid="account-deleted-notice" role="status" style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:10000, width:"calc(100% - 32px)", maxWidth:460, boxSizing:"border-box", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, padding:"12px 40px 12px 16px", boxShadow:"0 8px 28px rgba(0,0,0,0.12)", fontFamily:T.body, fontSize:13.5, color:"#166534", lineHeight:1.5 }}>
+          <div data-testid="account-deleted-notice" role="status" style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:10000, width:"calc(100% - 32px)", maxWidth:460, boxSizing:"border-box", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:14, padding:"12px 40px 12px 16px", boxShadow:"0 8px 28px rgba(0,0,0,0.12)", fontFamily:T.body, fontSize:13.5, color:"#166534", lineHeight:1.5 }}>
             ✓ Ton compte a bien été supprimé, avec toutes tes données.
             <button onClick={() => setAccountDeletedNotice(false)} aria-label="Fermer" style={{ position:"absolute", top:6, right:8, background:"none", border:"none", fontSize:18, color:"#166534", cursor:"pointer", padding:4, lineHeight:1 }}>×</button>
           </div>
@@ -5872,6 +5916,13 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     onDrafts: () => goToScreen("drafts"),
     onCGU: () => goToScreen("cgu"),
     onMyNdas: () => goToScreen("mes-ndas"),
+    // Version 260 : menu sur le côté (grands écrans) — écran actif et outils
+    activeScreen: screen,
+    onNda: () => { goToScreen("app"); setShowNdaModal(true); },
+    onRecouvrement: () => { goToScreen("app"); setShowRecouvrementModal(true); },
+    onScanner: () => { goToScreen("app"); setShowScannerModal(true); },
+    onInvoice: () => { goToScreen("app"); openFreeInvoice(); },
+    onRadar: () => { goToScreen("app"); setShowRadarModal(true); },
     onProfile: () => goToScreen("profile"),
     // Version 237 : la fenêtre Recouvrement Ferme n'existe que sur l'écran principal : on y va (avant, depuis le
     // tableau de bord ou Mes contrats, un clic sur l'alerte ne montrait rien)
@@ -5914,7 +5965,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         }}>
           <div style={{
             background:"#F2F2F7",
-            borderRadius:14,
+            borderRadius:16,
             width:"100%", maxWidth:290,
             boxShadow:"0 24px 64px rgba(0,0,0,0.35)",
             overflow:"hidden",
@@ -5925,13 +5976,13 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
             <div style={{ padding:"24px 20px 20px", textAlign:"center" }}>
               {/* Icône caméra façon iOS */}
               <div style={{
-                width:56, height:56, borderRadius:14,
+                width:56, height:56, borderRadius:16,
                 background:"linear-gradient(145deg, #1C1C1E 0%, #2C2C2E 100%)",
                 display:"flex", alignItems:"center", justifyContent:"center",
                 margin:"0 auto 14px",
                 boxShadow:"0 4px 14px rgba(0,0,0,0.22)",
               }}>
-                <span style={{ fontSize:28 }}>📷</span>
+                <span style={{ fontSize:28 }}><IcoI name="camera" size={28} stroke={1.8} gap={0} /></span>
               </div>
               <div style={{
                 fontSize:17, fontWeight:600, color:"#1C1C1E",
@@ -6016,7 +6067,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
             boxShadow:"0 6px 24px rgba(0,0,0,0.28)",
             whiteSpace:"nowrap",
           }}>
-            <span style={{ fontSize:14 }}>🚫</span>
+            <span style={{ fontSize:14 }}><IcoI name="alert" size={14} stroke={1.8} gap={0} /></span>
             {cameraDeniedContext === "scanner"
               ? "L'accès à l'appareil photo a été refusé. Vous pouvez toujours importer un fichier depuis votre appareil."
               : "L'accès à l'appareil photo a été refusé. Vous pouvez toujours remplir les champs manuellement."}
@@ -6065,46 +6116,46 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     const scanList = (() => { try { return JSON.parse(localStorage.getItem("freeley_scan_list")||"[]"); } catch(e){return [];} })();
     const [selectedScan, setSelectedScanIdx] = [scanList[0], 0];
     return (<Shell><div style={{maxWidth:520,margin:"0 auto",padding:"20px"}}>
-      <button onClick={()=>{ goToScreen("history"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#1B2E4B",fontSize:13,marginBottom:16}}>← Retour à l'historique</button>
-      <h2 style={{fontFamily:"Georgia,serif",fontSize:22,color:"#1B2E4B",marginBottom:8}}>Mes analyses de contrats</h2>
-      <p style={{fontSize:13,color:"#8A8780",marginBottom:20}}>{scanList.length} analyse{scanList.length > 1 ? "s" : ""} sauvegardée{scanList.length > 1 ? "s" : ""}</p>
+      <button onClick={()=>{ goToScreen("history"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#1E1B4B",fontSize:13,marginBottom:16}}>← Retour à l'historique</button>
+      <h2 style={{fontFamily:"Georgia,serif",fontSize:22,color:"#1E1B4B",marginBottom:8}}>Mes analyses de contrats</h2>
+      <p style={{fontSize:13,color:"#6B6A7B",marginBottom:20}}>{scanList.length} analyse{scanList.length > 1 ? "s" : ""} sauvegardée{scanList.length > 1 ? "s" : ""}</p>
       {scanList.map((scan, idx) => {
         const findings = scan.aiFindings || [];
         const ext = scan.extractedData || {};
         const dangers = findings.filter(f=>f.level==="danger").length;
         const warnings = findings.filter(f=>f.level==="warning").length;
         return (
-          <details key={idx} style={{marginBottom:12, border:"1.5px solid #D8D4CB", borderRadius:12, overflow:"hidden"}}>
-            <summary style={{padding:"14px 16px", cursor:"pointer", fontFamily:"sans-serif", fontSize:14, fontWeight:600, color:"#1B2E4B", background:"#FAFAFA", listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-              <span>🔍 {ext.mission || "Analyse de contrat"} · {scan.date || ""}</span>
-              <span style={{fontSize:12}}>{dangers > 0 ? `🔴 ${dangers}` : ""} {warnings > 0 ? `🟡 ${warnings}` : ""} {dangers === 0 && warnings === 0 ? "🟢" : ""}</span>
+          <details key={idx} style={{marginBottom:12, border:"1.5px solid #DCDCE6", borderRadius:14, overflow:"hidden"}}>
+            <summary style={{padding:"14px 16px", cursor:"pointer", fontFamily:"sans-serif", fontSize:14, fontWeight:600, color:"#1E1B4B", background:"#FAFAFA", listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+              <span><IcoI name="search" size={16} stroke={1.8} gap={0} /> {ext.mission || "Analyse de contrat"} · {scan.date || ""}</span>
+              <span style={{fontSize:12}}>{dangers > 0 ? <><span style={{ display:"inline-block", width:8, height:8, borderRadius:4, background:"#DC2626", marginRight:4 }} />{dangers}</> : ""} {warnings > 0 ? <><span style={{ display:"inline-block", width:8, height:8, borderRadius:4, background:"#D97706", marginRight:4 }} />{warnings}</> : ""} {dangers === 0 && warnings === 0 ? "" : ""}</span>
             </summary>
             <div style={{padding:"14px 16px"}}>
-              {ext.client && <p style={{fontSize:12,color:"#8A8780",marginBottom:12}}>Client : {ext.client}</p>}
-              {findings.map((f,i)=>(<div key={i} style={{background:f.level==="danger"?"#FEF2F2":f.level==="warning"?"#FFFBEB":"#F0FDF4",border:"1.5px solid "+(f.level==="danger"?"#FECACA":f.level==="warning"?"#FDE68A":"#BBF7D0"),borderRadius:10,padding:"12px 14px",marginBottom:10}}>
+              {ext.client && <p style={{fontSize:12,color:"#6B6A7B",marginBottom:12}}>Client : {ext.client}</p>}
+              {findings.map((f,i)=>(<div key={i} style={{background:f.level==="danger"?"#FEF2F2":f.level==="warning"?"#FFFBEB":"#F0FDF4",border:"1.5px solid "+(f.level==="danger"?"#FECACA":f.level==="warning"?"#FDE68A":"#BBF7D0"),borderRadius:12,padding:"12px 14px",marginBottom:10}}>
                 <div style={{fontWeight:700,color:f.level==="danger"?"#DC2626":f.level==="warning"?"#D97706":"#16A34A",fontSize:11,marginBottom:3}}>{f.level==="danger"?"DANGER":f.level==="warning"?"À NÉGOCIER":"CONFORME"}</div>
-                <div style={{fontWeight:600,fontSize:13,color:"#1B2E4B",marginBottom:3}}>{f.article}</div>
+                <div style={{fontWeight:600,fontSize:13,color:"#1E1B4B",marginBottom:3}}>{f.article}</div>
                 <div style={{fontSize:12,color:"#4A4A4A",lineHeight:1.6}}>{f.text}</div>
-                {f.fix && (f.level==="danger" || f.level==="warning") && <div style={{fontSize:12,color:"#4A4A4A",lineHeight:1.6,marginTop:8,padding:"8px 10px",background:"#FFFFFFB3",borderRadius:8,whiteSpace:"pre-wrap"}}><strong>{f.level==="danger" ? "Clause à proposer : " : "Message pour le client : "}</strong><em>{f.fix}</em></div>}
+                {f.fix && (f.level==="danger" || f.level==="warning") && <div style={{fontSize:12,color:"#4A4A4A",lineHeight:1.6,marginTop:8,padding:"8px 10px",background:"#FFFFFFB3",borderRadius:10,whiteSpace:"pre-wrap"}}><strong>{f.level==="danger" ? "Clause à proposer : " : "Message pour le client : "}</strong><em>{f.fix}</em></div>}
               </div>))}
               <div style={{display:"flex", gap:8, marginTop:8}}>
-              <button onClick={()=>downloadScanReportPDF(findings, ext.mission || "Analyse de contrat")} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer"}}>
-                ⬇ Télécharger PDF
+              <button onClick={()=>downloadScanReportPDF(findings, ext.mission || "Analyse de contrat")} style={{padding:"8px 14px", background:C.goldBg, border:"none", borderRadius:10, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer"}}>
+                <IcoI name="download" />Télécharger PDF
               </button>
               <button onClick={()=>{
                 const newList = scanList.filter((_,i)=>i!==idx);
                 localStorage.setItem("freeley_scan_list", JSON.stringify(newList));
                 if (newList.length === 0) { localStorage.removeItem("freeley_scan_results"); setHasScanResults(false); goToScreen("history"); }
                 else { window.location.reload(); }
-              }} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer"}}>
-                🗑 Supprimer cette analyse
+              }} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:10, color:"#DC2626", fontSize:12, cursor:"pointer"}}>
+                <IcoI name="trash" />Supprimer cette analyse
               </button>
               </div>
             </div>
           </details>
         );
       })}
-      {scanList.length === 0 && <p style={{color:"#8A8780",fontSize:13}}>Aucune analyse sauvegardée.</p>}
+      {scanList.length === 0 && <p style={{color:"#6B6A7B",fontSize:13}}>Aucune analyse sauvegardée.</p>}
     </div></Shell>);
   }
   if (screen === "mes-ndas") {
@@ -6131,47 +6182,47 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       {AuthModalEl}
       <Header {...headerProps} />
       <div style={{maxWidth:640,margin:"0 auto",padding:"24px 16px 80px"}}>
-        <button onClick={()=>{ goToScreen("app"); }} style={{background:"none",border:"none",cursor:"pointer",color:C.navy,fontSize:13,marginBottom:16,fontFamily:T.body}}>← Retour</button>
-        <h2 style={{fontFamily:T.display,fontSize:22,color:C.navy,marginBottom:8}}>Mes NDA</h2>
+        <button onClick={()=>{ goToScreen("app"); }} style={{background:"none",border:"none",cursor:"pointer",color:C.ink,fontSize:13,marginBottom:16,fontFamily:T.body}}>← Retour</button>
+        <h2 style={{fontFamily:T.display,fontSize:22,color:C.ink,marginBottom:8}}>Mes NDA</h2>
         <p style={{fontSize:13,color:C.textL,marginBottom:20,fontFamily:T.body}}>
           {myNdasLoading ? "Chargement…" : `${myNdas.length} NDA sauvegardé${myNdas.length > 1 ? "s" : ""}`}
         </p>
         {!myNdasLoading && myNdas.length === 0 && (
-          <div style={{textAlign:"center", padding:"40px 20px", background:C.creamD, borderRadius:12, fontFamily:T.body, fontSize:13, color:C.textL}}>
+          <div style={{textAlign:"center", padding:"40px 20px", background:C.creamD, borderRadius:14, fontFamily:T.body, fontSize:13, color:C.textL}}>
             Aucun NDA généré pour le moment.<br/>Utilise « NDA Express » depuis le menu pour en créer un.
           </div>
         )}
         {myNdas.map((n) => (
-          <details key={n.id} style={{marginBottom:12, border:`1.5px solid ${C.border}`, borderRadius:12, overflow:"hidden"}}>
-            <summary style={{padding:"14px 16px", cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600, color:C.navy, background:C.creamD, listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:6}}>
-              <span>🔒 {n.partie_a} ↔ {n.partie_b}</span>
+          <details key={n.id} style={{marginBottom:12, border:`1.5px solid ${C.border}`, borderRadius:14, overflow:"hidden"}}>
+            <summary style={{padding:"14px 16px", cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600, color:C.ink, background:C.creamD, listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:6}}>
+              <span><IcoI name="lock" size={16} stroke={1.8} gap={0} /> {n.partie_a} ↔ {n.partie_b}</span>
               <span style={{fontSize:11, color:C.textL, fontWeight:500}}>
                 {n.created_at ? new Date(n.created_at).toLocaleDateString("fr-FR") : ""}
-                {n.status === "signed" ? " · ✓ Signé" : n.status === "pending_signature" ? " · ⏳ En attente" : ""}
+                {n.status === "signed" ? " · ✓ Signé" : n.status === "pending_signature" ? " · En attente" : ""}
               </span>
             </summary>
             <div style={{padding:"14px 16px"}}>
               {n.objet && <p style={{fontSize:12,color:C.textL,marginBottom:10,fontFamily:T.body}}>{n.objet}</p>}
-              <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", maxHeight:260, overflowY:"auto", marginBottom:12 }}>
+              <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", maxHeight:260, overflowY:"auto", marginBottom:12 }}>
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(n.content)}</pre>
               </div>
               <NdaSignatureCertificate partieA={n.partie_a} partieB={n.partie_b} freelanceSignature={n.freelance_signature} clientSignature={n.client_signature} signedAt={n.signed_at} createdAt={n.created_at} proof={n.signature_proof || null} />
               <div style={{display:"flex", gap:8, marginBottom: (n.status === "signed" || ndaSignLinks[n.id]) ? 10 : 0}}>
-                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at, n.status === "signed" ? (n.signature_proof || null) : null)} style={{padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}>⬇ Télécharger PDF</button>
-                <button onClick={()=>deleteNda(n.id)} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:8, color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:T.body}}>🗑 Supprimer</button>
+                <button onClick={()=>downloadNdaPDF(n.content, n.nda_ref, n.partie_a, n.partie_b, n.freelance_signature, n.client_signature, n.signed_at, n.created_at, n.status === "signed" ? (n.signature_proof || null) : null)} style={{padding:"8px 14px", background:C.goldBg, border:"none", borderRadius:10, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body}}><IcoI name="download" />Télécharger PDF</button>
+                <button onClick={()=>deleteNda(n.id)} style={{padding:"8px 14px", background:"none", border:"1px solid #FECACA", borderRadius:10, color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:T.body}}><IcoI name="trash" />Supprimer</button>
               </div>
               {n.status !== "signed" && !ndaSignLinks[n.id] && (
                 <button
                   onClick={()=>requestSignatureFor(n)}
                   disabled={ndaSignGenerating === n.id}
-                  style={{width:"100%", padding:"9px 14px", background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:8, color:C.navy, fontSize:12, fontWeight:700, cursor: ndaSignGenerating === n.id ? "default" : "pointer", fontFamily:T.body, display:"flex", alignItems:"center", justifyContent:"center", gap:6}}
-                >{ndaSignGenerating === n.id ? "Génération du lien…" : <><span>✍️</span> Envoyer pour signature à distance</>}</button>
+                  style={{width:"100%", padding:"9px 14px", background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:10, color:C.navy, fontSize:12, fontWeight:700, cursor: ndaSignGenerating === n.id ? "default" : "pointer", fontFamily:T.body, display:"flex", alignItems:"center", justifyContent:"center", gap:6}}
+                >{ndaSignGenerating === n.id ? "Génération du lien…" : <><span><IcoI name="pen" size={16} stroke={1.8} gap={0} /></span> Envoyer pour signature à distance</>}</button>
               )}
               {ndaSignLinks[n.id] && n.status !== "signed" && (
-                <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8, padding:"10px 12px" }}>
+                <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"10px 12px" }}>
                   <div style={{ display:"flex", gap:8 }}>
-                    <input readOnly value={ndaSignLinks[n.id]} style={{ flex:1, padding:"7px 9px", border:"1px solid #BBF7D0", borderRadius:6, fontFamily:T.body, fontSize:10.5, color:"#166534", background:"#fff" }} onFocus={e=>e.target.select()} />
-                    <button onClick={()=>copySignLinkFor(n.id)} style={{ flexShrink:0, padding:"7px 12px", background:"#166534", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700 }}>{ndaSignCopied === n.id ? "Copié !" : "Copier"}</button>
+                    <input readOnly value={ndaSignLinks[n.id]} style={{ flex:1, padding:"7px 9px", border:"1px solid #BBF7D0", borderRadius:8, fontFamily:T.body, fontSize:10.5, color:"#166534", background:"#fff" }} onFocus={e=>e.target.select()} />
+                    <button onClick={()=>copySignLinkFor(n.id)} style={{ flexShrink:0, padding:"7px 12px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700 }}>{ndaSignCopied === n.id ? "Copié !" : "Copier"}</button>
                   </div>
                 </div>
               )}
@@ -6184,8 +6235,8 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   if (screen === "reset-password") return (
     <Shell noFooter>
       <div style={{ maxWidth:420, margin:"80px auto", padding:"0 20px" }}>
-        <h2 style={{ fontFamily:"Georgia, serif", fontSize:24, color:"#1B2E4B", marginBottom:8 }}>Nouveau mot de passe</h2>
-        <p style={{ fontSize:13, color:"#8A8780", marginBottom:24 }}>Choisis un nouveau mot de passe pour ton compte.</p>
+        <h2 style={{ fontFamily:"Georgia, serif", fontSize:24, color:"#1E1B4B", marginBottom:8 }}>Nouveau mot de passe</h2>
+        <p style={{ fontSize:13, color:"#6B6A7B", marginBottom:24 }}>Choisis un nouveau mot de passe pour ton compte.</p>
         <ResetPasswordForm onSuccess={() => goToScreen("app")} />
       </div>
     </Shell>
@@ -6273,7 +6324,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       {relanceToast && (
         <div style={{ position:"fixed", top:80, left:"50%", transform:"translateX(-50%)", zIndex:9999, pointerEvents:"none", animation:"toastSlideIn 0.35s cubic-bezier(.22,.68,0,1.2) both" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10, background:"linear-gradient(135deg, #065F46 0%, #059669 100%)", color:"#fff", borderRadius:50, padding:"13px 26px", fontFamily:T.body, fontSize:13, fontWeight:600, boxShadow:"0 8px 32px #05966940", whiteSpace:"nowrap" }}>
-            <span style={{ fontSize:16 }}>✉️</span>
+            <span style={{ display:"flex", color:"#4338CA" }}><Ico name="mail" size={18} /></span>
             Relance sur-mesure envoyée avec succès à votre client !
           </div>
         </div>
@@ -6401,18 +6452,18 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       {AuthModalEl}
       <Header {...headerProps} onPricing={() => { setPaywall(false); goToScreen("pricing"); }} onHistory={() => { setPaywall(false); goToScreen("history"); }} />
       <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:"calc(100vh - 64px)", padding:24 }}>
-        <div className="fade-up" style={{ maxWidth:500, width:"100%", background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 40px", boxShadow:"0 24px 64px #1B2E4B0F" }}>
+        <div className="fade-up" style={{ maxWidth:500, width:"100%", background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 40px", boxShadow:"0 24px 64px #4338CA0F" }}>
           <div style={{ textAlign:"center", marginBottom:36 }}>
-            <div style={{ width:56, height:56, background:C.creamD, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 20px", fontSize:24 }}>🔒</div>
-            <h2 style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:600, marginBottom:10 }}>Limite gratuite atteinte</h2>
+            <div style={{ width:56, height:56, background:C.creamD, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 20px", fontSize:24 }}><IcoI name="lock" size={24} stroke={1.8} gap={0} /></div>
+            <h2 style={{ fontFamily:T.display, fontSize:26, color:C.ink, fontWeight:600, marginBottom:10 }}>Limite gratuite atteinte</h2>
             <p style={{ fontFamily:T.body, color:C.textM, fontSize:14, lineHeight:1.7 }}>
-              Tes <strong style={{color:C.navy}}>2 contrats gratuits</strong> ont été utilisés.<br/>Choisis la formule qui te convient.
+              Tes <strong style={{color:C.ink}}>2 contrats gratuits</strong> ont été utilisés.<br/>Choisis la formule qui te convient.
             </p>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:28 }}>
-            <MiniPlanCard icon="📦" title="À l'unité" price="4€" sub="par contrat" color="#3B7DD8" onSelect={() => handlePurchase("unite")} />
-            <MiniPlanCard icon="🌙" title="Mensuel" price="17€" sub="/mois · illimité" color={C.gold} recommended onSelect={() => handlePurchase("mensuel")} />
-            <MiniPlanCard icon="☀️" title="Annuel" price="149€" sub="/an · ~12,40€/mois" color="#7C4DFF" onSelect={() => handlePurchase("annuel")} />
+            <MiniPlanCard icon="" title="À l'unité" price="4€" sub="par contrat" color="#6366F1" onSelect={() => handlePurchase("unite")} />
+            <MiniPlanCard icon="" title="Mensuel" price="17€" sub="/mois · illimité" color={C.gold} recommended onSelect={() => handlePurchase("mensuel")} />
+            <MiniPlanCard icon="" title="Annuel" price="149€" sub="/an · ~12,40€/mois" color="#7C4DFF" onSelect={() => handlePurchase("annuel")} />
           </div>
           <button onClick={() => setPaywall(false)} style={{ display:"block", margin:"0 auto", background:"none", border:"none", color:C.textL, fontSize:12, cursor:"pointer", fontFamily:T.body, textDecoration:"underline" }}>
             ← Revenir en arrière
@@ -6450,9 +6501,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         }}
         onMouseOver={e => { e.currentTarget.style.transform="translateY(-3px) scale(1.08)"; e.currentTarget.style.boxShadow=`0 12px 32px ${C.navy}60`; }}
         onMouseOut={e => { e.currentTarget.style.transform="translateY(0) scale(1)"; e.currentTarget.style.boxShadow=`0 6px 24px ${C.navy}50`; }}
-      >
-        ❓
-      </button>
+      ><Ico name="help" size={22} stroke={2} /></button>
 
       {showSubscriptionModal && (
         <SubscriptionModal
@@ -6482,7 +6531,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
       {showRadarModal && (
         <RadarClientModal
           onClose={() => setShowRadarModal(false)}
-          useLabel="✅ Utiliser cette entreprise pour ce contrat"
+          useLabel="Utiliser cette entreprise pour ce contrat"
           unavailableNote="Ton contrat est déjà rédigé : pour un autre client, commence un nouveau contrat. Tu peux copier ces informations."
           onSelectCompany={(loading || step >= 3) ? undefined : (c) => {
             setForm(f => ({
@@ -6541,7 +6590,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
             boxShadow:"0 8px 32px #05966940",
             whiteSpace:"nowrap",
           }}>
-            <span style={{ fontSize:16 }}>✉️</span>
+            <span style={{ fontSize:16 }}><IcoI name="mail" size={16} stroke={1.8} gap={0} /></span>
             Relance sur-mesure envoyée avec succès à votre client !
           </div>
         </div>
@@ -6570,16 +6619,16 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         />
 
       ) : step < 3 ? (
-        <div style={{ maxWidth:680, margin:"0 auto", padding:"24px 16px 100px" }}>
+        <div style={{ maxWidth:680, margin:"0 auto", padding:"24px 16px 100px" }}><div className="ft-wizard">
 
           {/* Scan results banner */}
           {authUser && hasScanResults && (
             <div className="fade-up" style={{
               display:"flex", alignItems:"center", justifyContent:"space-between",
               background:"#EFF6FF", border:"1px solid #BFDBFE",
-              borderRadius:8, padding:"10px 16px", marginBottom:16, fontFamily:T.body, fontSize:13,
+              borderRadius:10, padding:"10px 16px", marginBottom:16, fontFamily:T.body, fontSize:13,
             }}>
-              <span style={{ color:"#1D4ED8" }}>🔍 Vous avez des résultats de scan en attente</span>
+              <span style={{ color:"#1D4ED8" }}><IcoI name="search" />Vous avez des résultats de scan en attente</span>
               <span onClick={() => goToScreen("scan-results")} style={{ fontSize:12, color:"#1D4ED8", cursor:"pointer", textDecoration:"underline", fontWeight:600 }}>
                 Voir les résultats →
               </span>
@@ -6589,7 +6638,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
           {/* Ancien bandeau abonnement retiré (en attente de refonte) */}
 
           {/* Stepper */}
-          <div className="fade-up" style={{ display:"flex", alignItems:"center", marginBottom:48 }}>
+          <div className="fade-up" style={{ display:"flex", alignItems:"center", marginBottom:36 }}>
             {STEPS.slice(0,3).map((s,i) => (
               <div key={s} style={{ display:"flex", alignItems:"center", flex: i < 2 ? 1 : "none" }}>
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
@@ -6601,10 +6650,10 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     fontSize:12, fontWeight:"600", fontFamily:T.body,
                     color: i <= step ? C.white : C.textL,
                     transition:"all 0.3s",
-                    boxShadow: i === step ? `0 0 0 4px #1B2E4B18` : "none",
+                    boxShadow: i === step ? `0 0 0 4px #4338CA18` : "none",
                   }}>{i < step ? "✓" : i+1}</div>
-                  <span style={{ fontSize:9, fontFamily:T.body, fontWeight:500, letterSpacing:"0.1em", color: i === step ? C.navy : C.textL, marginTop:6, whiteSpace:"nowrap" }}>
-                    {s.toUpperCase()}
+                  <span style={{ fontSize:12.5, fontFamily:T.body, fontWeight: i === step ? 600 : 500, letterSpacing:0, color: i === step ? C.ink : C.textL, marginTop:8, whiteSpace:"nowrap" }}>
+                    {s}
                   </span>
                 </div>
                 {i < 2 && <div style={{ flex:1, height:1.5, background: i < step ? C.navy : C.border, margin:"0 10px", marginBottom:16, transition:"background 0.3s" }} />}
@@ -6636,7 +6685,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               <button
                 onClick={() => setShowRadarModal(true)}
                 style={{ fontFamily:T.body, fontSize:11, fontWeight:700, color:"#7C3AED", background:"none", border:"none", cursor:"pointer", padding:0, marginBottom:10, display:"block" }}
-              >🛡️ Chercher via Radar Client (pré-remplir depuis une vraie entreprise)</button>
+              ><IcoI name="shield" />Chercher via Radar Client (pré-remplir depuis une vraie entreprise)</button>
               <Field label="Nom du client *" value={form.clientName} onChange={v=>update("clientName",v)} placeholder="Marie Martin" error={errors.clientName} delay={2} />
               <Field label="Entreprise" value={form.clientCompany} onChange={v=>update("clientCompany",v)} placeholder="Startup SAS (optionnel)" delay={3} />
               <Field label="Email du client *" value={form.clientEmail} onChange={v=>update("clientEmail",v)} placeholder="marie@startup.com" type="email" error={errors.clientEmail} delay={4} />
@@ -6651,10 +6700,10 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     display:"flex", alignItems:"center", gap:10,
                     background:"linear-gradient(135deg, #FFFBEB 0%, #FEF9EE 100%)",
                     border:"1.5px solid #FCD34D",
-                    borderRadius:10, padding:"10px 14px", marginTop:-10, marginBottom:14,
+                    borderRadius:12, padding:"10px 14px", marginTop:-10, marginBottom:14,
                     animation:"fadeUp 0.3s ease both",
                   }}>
-                    <span style={{ fontSize:18, flexShrink:0 }}>⭐</span>
+                    <span style={{ fontSize:18, flexShrink:0 }}><IcoI name="award" size={18} stroke={1.8} gap={0} /></span>
                     <div style={{ flex:1 }}>
                       <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:2 }}>
                         Note moyenne de ce client : {rating.avg}/5
@@ -6706,10 +6755,10 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               <div className="fade-up fade-up-1" style={{
                 display:"flex", alignItems:"flex-start", gap:10,
                 background:"#FFFBEB", border:"1px solid #FDE68A",
-                borderRadius:8, padding:"12px 14px", marginBottom:24,
+                borderRadius:10, padding:"12px 14px", marginBottom:24,
                 fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6,
               }}>
-                <span style={{ fontSize:15, marginTop:1 }}>💡</span>
+                <span style={{ fontSize:15, marginTop:1 }}><IcoI name="info" size={15} stroke={1.8} gap={0} /></span>
                 <span><strong>Plus tu es précis, plus ton contrat sera protecteur.</strong> Mentionne les livrables exacts, le nombre de pages/écrans, les technologies, et ce qui n'est <em>pas</em> inclus dans la mission.</span>
               </div>
 
@@ -6718,7 +6767,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               <ToggleGroup
                 label="Domaine d'activité *"
                 options={["artisanat","digital","conseil","autre"]}
-                labels={["🛠️ Métier Manuel / Artisanat","💻 Digital / Tech / Création","🧠 Conseil / Formation / Services","🔮 Autre / Général"]}
+                labels={["Métier Manuel / Artisanat","Digital / Tech / Création","Conseil / Formation / Services","Autre / Général"]}
                 value={form.categorieMetier}
                 onChange={v=>update("categorieMetier",v)}
                 tooltip="Adapte automatiquement les clauses du contrat : propriété intellectuelle pour le digital, garantie de conformité aux normes pour l'artisanat, confidentialité pour le conseil."
@@ -6742,7 +6791,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               <div className="fade-up fade-up-1" style={{
                 display:"flex", alignItems:"flex-start", gap:10,
                 background:"#EFF6FF", border:"1px solid #BFDBFE",
-                borderRadius:8, padding:"12px 14px", marginBottom:24,
+                borderRadius:10, padding:"12px 14px", marginBottom:24,
                 fontFamily:T.body, fontSize:12, color:"#1E40AF", lineHeight:1.6,
               }}>
                 <span style={{ fontSize:15, marginTop:1 }}>ℹ️</span>
@@ -6779,7 +6828,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     const current = effectivePaymentMethods(form, profile, stripeConnectReady);
                     const on = current.includes(m.id);
                     return (
-                      <label key={m.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 12px", border:`1.5px solid ${on ? C.navy : C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13, color:C.navy, background: on ? "#F1F5F9" : "#fff" }}>
+                      <label key={m.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 12px", border:`1.5px solid ${on ? C.navy : C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, color:C.ink, background: on ? "#F1F5F9" : "#fff" }}>
                         <input type="checkbox" name="paymentMethods" value={m.id} checked={on} onChange={() => update("paymentMethods", on ? current.filter(x => x !== m.id) : [...current, m.id])} />
                         {m.label}
                       </label>
@@ -6795,7 +6844,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               </div>
 
               {/* Mention juriste — clauses de protection (retard de paiement, dédommagement, bonne conduite, suspension, assurance, interlocuteur, préavis) */}
-              <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8, marginBottom:18, fontFamily:T.body, fontSize:11.5, color:"#166534", lineHeight:1.5 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, marginBottom:18, fontFamily:T.body, fontSize:11.5, color:"#166534", lineHeight:1.5 }}>
                 <span style={{ fontSize:15 }}>✓</span>
                 Les clauses de protection ci-dessous ont fait l'objet d'une revue juridique par une juriste en droit des affaires et du numérique.
               </div>
@@ -6817,13 +6866,13 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     padding:"16px 18px",
                     background: lateOn ? "#F0FDF4" : C.white,
                     border:`1.5px solid ${lateOn ? "#86EFAC" : C.border}`,
-                    borderRadius:10, cursor: latePro ? "default" : "pointer",
+                    borderRadius:12, cursor: latePro ? "default" : "pointer",
                     transition:"all 0.2s",
                   }}
                 >
                   {/* Toggle pill */}
                   <div style={{
-                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    width:42, height:24, borderRadius:14, flexShrink:0, marginTop:1,
                     background: lateOn ? "#16A34A" : C.creamDD,
                     position:"relative", transition:"background 0.2s",
                     opacity: latePro ? 0.7 : 1,
@@ -6864,12 +6913,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     padding:"16px 18px",
                     background: form.clauseDedit ? "#F0FDF4" : C.white,
                     border:`1.5px solid ${form.clauseDedit ? "#86EFAC" : C.border}`,
-                    borderRadius:10, cursor:"pointer",
+                    borderRadius:12, cursor:"pointer",
                     transition:"all 0.2s",
                   }}
                 >
                   <div style={{
-                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    width:42, height:24, borderRadius:14, flexShrink:0, marginTop:1,
                     background: form.clauseDedit ? "#16A34A" : C.creamDD,
                     position:"relative", transition:"background 0.2s",
                   }}>
@@ -6904,12 +6953,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     padding:"16px 18px",
                     background: form.clauseRespect ? "#F0FDF4" : C.white,
                     border:`1.5px solid ${form.clauseRespect ? "#86EFAC" : C.border}`,
-                    borderRadius:10, cursor:"pointer",
+                    borderRadius:12, cursor:"pointer",
                     transition:"all 0.2s",
                   }}
                 >
                   <div style={{
-                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    width:42, height:24, borderRadius:14, flexShrink:0, marginTop:1,
                     background: form.clauseRespect ? "#16A34A" : C.creamDD,
                     position:"relative", transition:"background 0.2s",
                   }}>
@@ -6944,12 +6993,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     padding:"16px 18px",
                     background: form.clauseSuspension ? "#F0FDF4" : C.white,
                     border:`1.5px solid ${form.clauseSuspension ? "#86EFAC" : C.border}`,
-                    borderRadius:10, cursor:"pointer",
+                    borderRadius:12, cursor:"pointer",
                     transition:"all 0.2s",
                   }}
                 >
                   <div style={{
-                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    width:42, height:24, borderRadius:14, flexShrink:0, marginTop:1,
                     background: form.clauseSuspension ? "#16A34A" : C.creamDD,
                     position:"relative", transition:"background 0.2s",
                   }}>
@@ -6984,12 +7033,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                       padding:"16px 18px",
                       background: form.contenuNumeriquePret ? "#EFF6FF" : C.white,
                       border:`1.5px solid ${form.contenuNumeriquePret ? "#93C5FD" : C.border}`,
-                      borderRadius:10, cursor:"pointer",
+                      borderRadius:12, cursor:"pointer",
                       transition:"all 0.2s",
                     }}
                   >
                     <div style={{
-                      width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                      width:42, height:24, borderRadius:14, flexShrink:0, marginTop:1,
                       background: form.contenuNumeriquePret ? "#2563EB" : C.creamDD,
                       position:"relative", transition:"background 0.2s",
                     }}>
@@ -7031,12 +7080,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     padding:"16px 18px",
                     background: form.clauseSecurite ? "#F0FDF4" : C.white,
                     border:`1.5px solid ${form.clauseSecurite ? "#86EFAC" : C.border}`,
-                    borderRadius:10, cursor:"pointer",
+                    borderRadius:12, cursor:"pointer",
                     transition:"all 0.2s",
                   }}
                 >
                   <div style={{
-                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    width:42, height:24, borderRadius:14, flexShrink:0, marginTop:1,
                     background: form.clauseSecurite ? "#16A34A" : C.creamDD,
                     position:"relative", transition:"background 0.2s",
                   }}>
@@ -7071,12 +7120,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     padding:"16px 18px",
                     background: form.clauseInterlocuteur ? "#F0FDF4" : C.white,
                     border:`1.5px solid ${form.clauseInterlocuteur ? "#86EFAC" : C.border}`,
-                    borderRadius:10, cursor:"pointer",
+                    borderRadius:12, cursor:"pointer",
                     transition:"all 0.2s",
                   }}
                 >
                   <div style={{
-                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    width:42, height:24, borderRadius:14, flexShrink:0, marginTop:1,
                     background: form.clauseInterlocuteur ? "#16A34A" : C.creamDD,
                     position:"relative", transition:"background 0.2s",
                   }}>
@@ -7111,12 +7160,12 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                     padding:"16px 18px",
                     background: form.clausePreavis ? "#F0FDF4" : C.white,
                     border:`1.5px solid ${form.clausePreavis ? "#86EFAC" : C.border}`,
-                    borderRadius:10, cursor:"pointer",
+                    borderRadius:12, cursor:"pointer",
                     transition:"all 0.2s",
                   }}
                 >
                   <div style={{
-                    width:42, height:24, borderRadius:12, flexShrink:0, marginTop:1,
+                    width:42, height:24, borderRadius:14, flexShrink:0, marginTop:1,
                     background: form.clausePreavis ? "#16A34A" : C.creamDD,
                     position:"relative", transition:"background 0.2s",
                   }}>
@@ -7151,8 +7200,8 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                 if (form.clauseSecurite && !String(profile?.assurance || "").trim()) notes.push("La clause d'assurance annonce que tes assurances sont indiquées dans le contrat. Indique ton assurance dans ton profil, ou décoche la clause.");
                 if (!notes.length) return null;
                 return (
-                  <div style={{ padding:"12px 16px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:8, color:"#92400E", fontSize:12.5, fontFamily:T.body, lineHeight:1.6, marginTop:8 }}>
-                    {notes.map((n, i) => <div key={i} style={{ marginBottom: i < notes.length - 1 ? 8 : 0 }}>⚠️ {n}</div>)}
+                  <div style={{ padding:"12px 16px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:10, color:"#92400E", fontSize:12.5, fontFamily:T.body, lineHeight:1.6, marginTop:8 }}>
+                    {notes.map((n, i) => <div key={i} style={{ marginBottom: i < notes.length - 1 ? 8 : 0 }}><IcoI name="alert" size={16} stroke={1.8} gap={0} /> {n}</div>)}
                     <span onClick={goToProfileFacturation} style={{ display:"inline-block", marginTop:8, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Compléter mon profil →</span>
                     <div style={{ marginTop:6, fontSize:11.5, color:"#A16207" }}>Tu peux quand même générer le contrat maintenant.</div>
                   </div>
@@ -7160,7 +7209,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               })()}
 
               {apiError && (
-                <div style={{ padding:"12px 16px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, color:C.error, fontSize:13, fontFamily:T.body, marginTop:8 }}>
+                <div style={{ padding:"12px 16px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, color:C.error, fontSize:13, fontFamily:T.body, marginTop:8 }}>
                   {apiError}
                 </div>
 
@@ -7171,10 +7220,10 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                 <div className="fade-up fade-up-5" style={{
                   display:"flex", alignItems:"center", justifyContent:"space-between",
                   background:"#EFF6FF", border:"1px solid #BFDBFE",
-                  borderRadius:8, padding:"12px 16px", marginTop:8,
+                  borderRadius:10, padding:"12px 16px", marginTop:8,
                   fontFamily:T.body, fontSize:13,
                 }}>
-                  <span style={{ color:"#1E40AF" }}>🔐 Un compte est requis pour générer ton contrat</span>
+                  <span style={{ color:"#1E40AF" }}><IcoI name="lock" />Un compte est requis pour générer ton contrat</span>
                   <span onClick={() => { setAuthMode("signup"); setShowAuthModal(true); }} style={{ fontSize:12, color:C.navy, cursor:"pointer", fontWeight:600, textDecoration:"underline", whiteSpace:"nowrap", marginLeft:12 }}>
                     Créer un compte gratuit →
                   </span>
@@ -7191,7 +7240,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               display:"flex", alignItems:"center", gap:6,
               textDecoration:"underline", textDecorationStyle:"dotted",
             }}>
-              <span>💾</span> Enregistrer comme brouillon
+              <span><IcoI name="save" size={16} stroke={1.8} gap={0} /></span> Enregistrer comme brouillon
             </button>
           </div>
 
@@ -7210,7 +7259,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                 fontFamily:T.body, fontSize:12.5, fontWeight:600, lineHeight:1.45,
                 boxShadow:"0 8px 32px #15803D40",
               }}>
-                <span style={{ fontSize:15, flexShrink:0 }}>✅</span>
+                <span style={{ fontSize:15, flexShrink:0 }}><IcoI name="checkCircle" size={15} stroke={1.8} gap={0} /></span>
                 <span>{typeof draftSavedToast === "string" ? draftSavedToast : "Brouillon enregistré."}</span>
               </div>
             </div>
@@ -7221,16 +7270,16 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
             {step > 0 ? (
               <button className="btn-secondary" onClick={() => { setStep(s=>s-1); setErrors({}); }} style={{
                 padding:"12px 24px", background:"transparent", border:`1.5px solid ${C.border}`,
-                color:C.textM, borderRadius:8, cursor:"pointer", fontSize:14, fontFamily:T.body, fontWeight:500,
+                color:C.textM, borderRadius:10, cursor:"pointer", fontSize:14, fontFamily:T.body, fontWeight:500,
               }}>← Retour</button>
             ) : <div />}
             <button className="btn-primary" onClick={handleNext} disabled={loading} style={{
               padding:"14px 36px", background: loading ? C.creamDD : C.navy,
               color: loading ? C.textL : C.white,
-              border:"none", borderRadius:8, cursor: loading ? "not-allowed" : "pointer",
+              border:"none", borderRadius:10, cursor: loading ? "not-allowed" : "pointer",
               fontSize:14, fontFamily:T.body, fontWeight:600, letterSpacing:"0.04em",
               minWidth:200, display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-              boxShadow: loading ? "none" : "0 4px 16px #1B2E4B28",
+              boxShadow: loading ? "none" : "0 4px 16px #4338CA28",
             }}>
               {loading ? (
                 <>
@@ -7242,6 +7291,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
           </div>
 
         </div>
+        </div>
 
       ) : (
         /* ── CONTRACT RESULT ── */
@@ -7249,14 +7299,14 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
 
           {/* Top bar */}
           <div className="fade-up" style={{
-            background:C.navy, borderRadius:12, padding:"18px 16px",
+            background:C.navy, borderRadius:14, padding:"18px 16px",
             display:"flex", alignItems:"flex-start", justifyContent:"space-between",
             marginBottom:24, flexWrap:"wrap", gap:12,
-            boxShadow:"0 8px 32px #1B2E4B30",
+            boxShadow:"0 8px 32px #4338CA30",
           }}>
             <div>
               <div style={{ fontFamily:T.display, fontSize:18, color:C.white, marginBottom:4 }}>Contrat généré ✓</div>
-              <div style={{ fontFamily:T.body, fontSize:12, color:"#8BA3C0" }}>
+              <div style={{ fontFamily:T.body, fontSize:12, color:"#C7D2FE" }}>
                 {form.missionTitle} · <span style={{color:C.goldL}}>{form.clientName}</span>
               </div>
             </div>
@@ -7264,7 +7314,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               <button onClick={() => setShowTactileSign(true)} style={{
                 padding:"11px 16px",
                 background:"linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)",
-                color:C.white, border:"none", borderRadius:8, cursor:"pointer",
+                color:C.white, border:"none", borderRadius:10, cursor:"pointer",
                 fontSize:13, fontFamily:T.body, fontWeight:700, transition:"all .2s",
                 boxShadow:"0 4px 14px #6366F140",
                 display:"flex", alignItems:"center", gap:8,
@@ -7272,7 +7322,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               }}
                 onMouseOver={e=>{ e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow="0 8px 24px #6366F160"; }}
                 onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 4px 14px #6366F140"; }}
-              >✍️ Signer et envoyer au client</button>
+              ><IcoI name="pen" />Signer et envoyer au client</button>
 
               {/* ── Signature à distance ── */}
               {!remoteSignLink && !showRemoteSignPad && (
@@ -7281,45 +7331,45 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                   style={{
                     padding:"11px 16px",
                     background: "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
-                    color: C.white, border:"none", borderRadius:8,
+                    color: C.white, border:"none", borderRadius:10,
                     cursor: "pointer",
                     fontSize:13, fontFamily:T.body, fontWeight:700,
                     display:"flex", alignItems:"center", gap:8,
                     width:"100%", justifyContent:"center",
                   }}
-                >📲 Envoyer au client pour signature à distance</button>
+                ><IcoI name="send" />Envoyer au client pour signature à distance</button>
               )}
 
               {showRemoteSignPad && !remoteSignLink && (
-                <div style={{ width:"100%", background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
+                <div style={{ width:"100%", background:"#0D2818", border:"1.5px solid #15803D", borderRadius:12, padding:"14px 16px" }}>
                   <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:4 }}>Signe d'abord ta part avant d'envoyer le lien au client</div>
-                  <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginBottom:10 }}>Le client signera ensuite de son côté, sur son propre appareil.</div>
+                  <div style={{ fontFamily:T.body, fontSize:11, color:"#C7D2FE", marginBottom:10 }}>Le client signera ensuite de son côté, sur son propre appareil.</div>
                   <canvas
                     ref={remoteSigCanvasRef}
                     width={420} height={120}
                     onMouseDown={startRemoteSigDraw} onMouseMove={drawRemoteSig} onMouseUp={endRemoteSigDraw} onMouseLeave={endRemoteSigDraw}
                     onTouchStart={startRemoteSigDraw} onTouchMove={drawRemoteSig} onTouchEnd={endRemoteSigDraw}
-                    style={{ width:"100%", height:110, border:"2px dashed #22C55E", borderRadius:8, background:"#FFFDF9", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
+                    style={{ width:"100%", height:110, border:"2px dashed #22C55E", borderRadius:10, background:"#FFFFFF", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
                   />
                   <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={clearRemoteSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"transparent", border:"1.5px solid #2A4167", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#8BA3C0" }}>Effacer</button>
+                    <button onClick={clearRemoteSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"transparent", border:"1.5px solid #4F46E5", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#C7D2FE" }}>Effacer</button>
                     <button
                       onClick={handleRemoteSign}
                       disabled={!remoteSigHasStrokes || remoteSignLoading}
                       style={{
                         flex:1, padding:"10px",
-                        background: (remoteSigHasStrokes && !remoteSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#2A4167",
-                        color: (remoteSigHasStrokes && !remoteSignLoading) ? C.white : "#8BA3C0",
-                        border:"none", borderRadius:8, cursor: (remoteSigHasStrokes && !remoteSignLoading) ? "pointer" : "not-allowed",
+                        background: (remoteSigHasStrokes && !remoteSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#4F46E5",
+                        color: (remoteSigHasStrokes && !remoteSignLoading) ? C.white : "#C7D2FE",
+                        border:"none", borderRadius:10, cursor: (remoteSigHasStrokes && !remoteSignLoading) ? "pointer" : "not-allowed",
                         fontFamily:T.body, fontSize:13, fontWeight:700,
                       }}
-                    >{remoteSignLoading ? "Création du lien…" : "✅ Valider ma signature et créer le lien"}</button>
+                    >{remoteSignLoading ? "Création du lien…" : <><IcoI name="checkCircle" />Valider ma signature et créer le lien</>}</button>
                   </div>
                 </div>
               )}
 
               {remoteSignLink && (
-                <div style={{ width:"100%", background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
+                <div style={{ width:"100%", background:"#0D2818", border:"1.5px solid #15803D", borderRadius:12, padding:"14px 16px" }}>
                   <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:8 }}>✓ Lien de signature prêt !</div>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:12 }}>
                     Envoie ce lien à ton client (SMS, email, WhatsApp). Il pourra lire et signer le contrat depuis son téléphone. Tu seras notifié dans ton historique une fois signé.
@@ -7327,16 +7377,16 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
                   <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                     <button
                       onClick={() => { navigator.clipboard.writeText(remoteSignLink); setRemoteSignCopied(true); setTimeout(()=>setRemoteSignCopied(false), 2500); }}
-                      style={{ flex:1, minWidth:120, padding:"10px", background: remoteSignCopied ? "#15803D" : "#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:8, cursor:"pointer", fontSize:12.5, fontWeight:600 }}
-                    >{remoteSignCopied ? "✓ Copié !" : "📋 Copier le lien"}</button>
+                      style={{ flex:1, minWidth:120, padding:"10px", background: remoteSignCopied ? "#15803D" : "#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:10, cursor:"pointer", fontSize:12.5, fontWeight:600 }}
+                    >{remoteSignCopied ? "✓ Copié !" : <><IcoI name="copy" />Copier le lien</>}</button>
                     <a
                       href={`sms:?body=${encodeURIComponent("Bonjour, merci de signer le contrat via ce lien sécurisé : " + remoteSignLink)}`}
-                      style={{ flex:1, minWidth:120, padding:"10px", background:"#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:8, textAlign:"center", fontSize:12.5, fontWeight:600, textDecoration:"none" }}
-                    >💬 Envoyer par SMS</a>
+                      style={{ flex:1, minWidth:120, padding:"10px", background:"#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:10, textAlign:"center", fontSize:12.5, fontWeight:600, textDecoration:"none" }}
+                    ><IcoI name="message" />Envoyer par SMS</a>
                     <a
                       href={`mailto:${form.clientEmail || ""}?subject=${encodeURIComponent("Signature du contrat — " + (form.missionTitle||""))}&body=${encodeURIComponent("Bonjour,\n\nMerci de signer le contrat via ce lien sécurisé :\n" + remoteSignLink + "\n\nCordialement.")}`}
-                      style={{ flex:1, minWidth:120, padding:"10px", background:"#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:8, textAlign:"center", fontSize:12.5, fontWeight:600, textDecoration:"none" }}
-                    >✉️ Envoyer par email</a>
+                      style={{ flex:1, minWidth:120, padding:"10px", background:"#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:10, textAlign:"center", fontSize:12.5, fontWeight:600, textDecoration:"none" }}
+                    ><IcoI name="mail" />Envoyer par email</a>
                   </div>
                 </div>
               )}
@@ -7362,23 +7412,23 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
               )}
 
               <button onClick={() => downloadPDF(undefined, undefined, undefined, undefined, undefined, resultEntry?.retractationWaivedAt)} disabled={pdfLoading || !jsPDFReady} style={{
-                padding:"10px 16px", background: (pdfLoading||!jsPDFReady) ? "#2A4167" : C.gold,
-                color: (pdfLoading||!jsPDFReady) ? "#5A7A9A" : C.navyD,
-                border:"none", borderRadius:7, cursor:(pdfLoading||!jsPDFReady)?"not-allowed":"pointer",
+                padding:"10px 16px", background: (pdfLoading||!jsPDFReady) ? C.creamDD : C.goldBg,
+                color: (pdfLoading||!jsPDFReady) ? C.textL : C.navyD,
+                border:"none", borderRadius:9, cursor:(pdfLoading||!jsPDFReady)?"not-allowed":"pointer",
                 fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
                 flex:1, minWidth:0,
-              }}>{pdfLoading ? "PDF…" : !jsPDFReady ? "Chargement…" : "⬇ Télécharger PDF"}</button>
+              }}>{pdfLoading ? "PDF…" : !jsPDFReady ? "Chargement…" : <><IcoI name="download" />Télécharger PDF</>}</button>
               <button onClick={copyContract} style={{
                 padding:"10px 16px",
-                background: copied ? "#1E4A3A" : "#253D5E",
-                color: copied ? "#6FCFA0" : "#8BA3C0",
-                border:`1px solid ${copied ? "#2D6A4F" : "#354F6E"}`,
-                borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, transition:"all .2s",
+                background: copied ? "#1E4A3A" : "#3730A3",
+                color: copied ? "#6FCFA0" : "#C7D2FE",
+                border:`1px solid ${copied ? "#2D6A4F" : "#6366F1"}`,
+                borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, transition:"all .2s",
                 flex:1, minWidth:0,
               }}>{copied ? "✓ Copié" : "Copier"}</button>
               <button onClick={() => { startFreshContract(); }} style={{
-                padding:"10px 14px", background:"transparent", color:"#5A7A9A",
-                border:"1px solid #354F6E", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body,
+                padding:"10px 14px", background:"transparent", color:C.goldL,
+                border:"1px solid #6366F1", borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body,
                 flexShrink:0,
               }}>↩</button>
             </div>
@@ -8280,11 +8330,11 @@ function RecetteNoteLines({ entry, rows, profile, onAdd }) {
         const row = rows.find((r) => sameRecettePayment(r, info));
         return row ? (
           <div key={info.kind} data-testid={`recette-noted-${info.kind}`} style={{ fontFamily:T.body, fontSize:11.5, color:"#166534", lineHeight:1.5 }}>
-            📒 {info.label} : reçu le {isoDayLong(row.received_on)}, {RECETTE_METHOD_PHRASE[row.method] || "par un autre moyen"}{row.source === "stripe" ? " (Stripe)" : ""}. C'est noté dans ton livre des recettes.
+            <IcoI name="book" size={14} stroke={1.8} gap={0} /> {info.label} : reçu le {isoDayLong(row.received_on)}, {RECETTE_METHOD_PHRASE[row.method] || "par un autre moyen"}{row.source === "stripe" ? " (Stripe)" : ""}. C'est noté dans ton livre des recettes.
           </div>
         ) : (
           <div key={info.kind} data-testid={`recette-missing-${info.kind}`} style={{ fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.5 }}>
-            📒 {info.label} : la date où tu l'as reçu n'est pas encore notée dans ton livre des recettes.{" "}
+            <IcoI name="book" size={14} stroke={1.8} gap={0} /> {info.label} : la date où tu l'as reçu n'est pas encore notée dans ton livre des recettes.{" "}
             <button data-testid={`recette-add-${info.kind}`} onClick={() => onAdd(info.kind)} style={{ background:"none", border:"none", padding:0, color:"#92400E", fontFamily:T.body, fontSize:11.5, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Ajouter la date</button>
           </div>
         );
@@ -8321,7 +8371,7 @@ function RecetteDialog({ mode = "paiement", info = {}, initial = null, dateRequi
     onConfirm({ receivedOn: date, method, amountCents: cents, note: note.trim(), client: client.trim(), nature: nature.trim(), invoiceNumber: invoice.trim() });
   };
   const label = { fontFamily:T.body, fontSize:11, fontWeight:700, color:C.textM, letterSpacing:"0.04em", marginBottom:5, display:"block" };
-  const input = { width:"100%", boxSizing:"border-box", padding:"10px 12px", border:`1.5px solid ${C.border}`, borderRadius:9, fontFamily:T.body, fontSize:14, color:C.text, background:C.white, outline:"none" };
+  const input = { width:"100%", boxSizing:"border-box", padding:"10px 12px", border:`1.5px solid ${C.border}`, borderRadius:11, fontFamily:T.body, fontSize:14, color:C.text, background:C.white, outline:"none" };
   const shownError = localError || error;
   return createPortal(
     <div
@@ -8329,8 +8379,8 @@ function RecetteDialog({ mode = "paiement", info = {}, initial = null, dateRequi
       style={{ position:"fixed", inset:0, zIndex:10050, background:"rgba(10,20,40,0.6)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
     >
       <div role="dialog" aria-modal="true" data-testid="recette-dialog" style={{ background:C.white, borderRadius:16, width:"100%", maxWidth:440, maxHeight:"90vh", overflowY:"auto", padding:"20px 20px 18px", boxShadow:"0 24px 60px rgba(0,0,0,0.3)", fontFamily:T.body }}>
-        <div style={{ fontSize:16, fontWeight:800, color:C.navy, marginBottom:6, lineHeight:1.4 }}>
-          {refund ? "↩️ Ajouter un remboursement" : libre ? (initial ? "✏️ Modifier la recette" : "➕ Ajouter une recette") : (initial ? "✏️ Modifier le paiement reçu" : "✓ Paiement reçu")}
+        <div style={{ fontSize:16, fontWeight:800, color:C.ink, marginBottom:6, lineHeight:1.4 }}>
+          {refund ? "↩️ Ajouter un remboursement" : libre ? (initial ? <><IcoI name="pen" />Modifier la recette</> : "Ajouter une recette") : (initial ? <><IcoI name="pen" />Modifier le paiement reçu</> : "✓ Paiement reçu")}
         </div>
         {!libre && (
           <div data-testid="recette-dialog-what" style={{ fontSize:12.5, color:C.textM, lineHeight:1.5, marginBottom:14 }}>
@@ -8384,8 +8434,8 @@ function RecetteDialog({ mode = "paiement", info = {}, initial = null, dateRequi
         </div>
         {shownError && <div data-testid="recette-error" style={{ fontSize:12, color:"#B91C1C", marginBottom:10, lineHeight:1.5 }}>{shownError}</div>}
         <div style={{ display:"flex", gap:10 }}>
-          <button onClick={onCancel} disabled={saving} style={{ flex:1, padding:"11px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.textM }}>Annuler</button>
-          <button data-testid="recette-save" onClick={submit} disabled={saving} style={{ flex:1, padding:"11px 12px", background: saving ? "#E5E7EB" : "#166534", border:"none", borderRadius:10, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color: saving ? C.textL : "#fff" }}>{saving ? "Enregistrement…" : "Enregistrer"}</button>
+          <button onClick={onCancel} disabled={saving} style={{ flex:1, padding:"11px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.textM }}>Annuler</button>
+          <button data-testid="recette-save" onClick={submit} disabled={saving} style={{ flex:1, padding:"11px 12px", background: saving ? "#E5E7EB" : "#166534", border:"none", borderRadius:12, cursor: saving ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color: saving ? C.textL : "#fff" }}>{saving ? "Enregistrement…" : "Enregistrer"}</button>
         </div>
       </div>
     </div>,
@@ -8471,13 +8521,13 @@ function RecettesPage({ profile, authUser, onBack }) {
     catch (e) { console.error("[livre des recettes] PDF", e); alert("Le PDF n'a pas pu être créé. Vérifie ta connexion, puis réessaie."); }
   };
 
-  const card = { background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"18px 18px", marginBottom:16, boxShadow:"0 2px 12px #1B2E4B06" };
-  const smallBtn = { padding:"9px 14px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:9, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:C.navy };
+  const card = { background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"18px 18px", marginBottom:16, boxShadow:"0 2px 12px #4338CA06" };
+  const smallBtn = { padding:"9px 14px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:C.ink };
   return (
     <div data-testid="recettes-page" style={{ maxWidth:860, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Mes contrats</button>
       <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:10 }}>LIVRE DES RECETTES</div>
-      <h1 style={{ fontFamily:T.display, fontSize:30, color:C.navy, fontWeight:600, lineHeight:1.2, marginBottom:8 }}>Livre des recettes</h1>
+      <h1 style={{ fontFamily:T.display, fontSize:30, color:C.ink, fontWeight:600, lineHeight:1.2, marginBottom:8 }}>Livre des recettes</h1>
       <p style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.65, marginBottom:20 }}>
         Toutes les sommes que tu as reçues, dans l'ordre des dates. Un paiement par carte s'ajoute tout seul. Un virement, un chèque ou des espèces s'ajoutent quand tu marques le paiement comme reçu dans ton contrat.
       </p>
@@ -8504,19 +8554,19 @@ function RecettesPage({ profile, authUser, onBack }) {
           {/* Totaux */}
           <div data-testid="recettes-totals" style={card}>
             <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:4 }}>Total reçu en {year}</div>
-            <div data-testid="recettes-total" style={{ fontFamily:T.display, fontSize:30, color:C.navy, fontWeight:700, marginBottom:4 }}>{fmtCents(totals.total)}</div>
+            <div data-testid="recettes-total" style={{ fontFamily:T.display, fontSize:30, color:C.ink, fontWeight:700, marginBottom:4 }}>{fmtCents(totals.total)}</div>
             {totals.refunds < 0 && <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:4 }}>Remboursements déjà retirés : {fmtCents(totals.refunds)}</div>}
             <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:14 }}>Montants payés par tes clients, avant les frais de Stripe.</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))", gap:8, marginBottom:14 }}>
               {totals.quarters.map((q, i) => (
-                <div key={i} data-testid={`recettes-q${i + 1}`} style={{ background:C.cream, borderRadius:10, padding:"10px 12px" }}>
+                <div key={i} data-testid={`recettes-q${i + 1}`} style={{ background:C.cream, borderRadius:12, padding:"10px 12px" }}>
                   <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:700 }}>{i + 1}{i === 0 ? "er" : "e"} trimestre</div>
-                  <div style={{ fontFamily:T.body, fontSize:14, color:C.navy, fontWeight:700, marginTop:2 }}>{fmtCents(q)}</div>
+                  <div style={{ fontFamily:T.body, fontSize:14, color:C.ink, fontWeight:700, marginTop:2 }}>{fmtCents(q)}</div>
                 </div>
               ))}
             </div>
             <details>
-              <summary style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:700, cursor:"pointer" }}>Voir le total de chaque mois</summary>
+              <summary style={{ fontFamily:T.body, fontSize:12.5, color:C.ink, fontWeight:700, cursor:"pointer" }}>Voir le total de chaque mois</summary>
               <div style={{ marginTop:10, display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(170px, 1fr))", gap:"4px 18px" }}>
                 {totals.months.map((c, i) => i <= lastMonth && (
                   <div key={i} data-testid={`recettes-m${i + 1}`} style={{ display:"flex", justifyContent:"space-between", fontFamily:T.body, fontSize:12.5, color:C.text, padding:"4px 0", borderBottom:`1px solid ${C.borderL || C.border}` }}>
@@ -8536,7 +8586,7 @@ function RecettesPage({ profile, authUser, onBack }) {
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 {toComplete.map(({ info }) => (
-                  <div key={`${info.contractId}|${info.kind}|${info.avenantNum ?? ""}`} data-testid="recettes-to-complete-item" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap", background:"#fff", border:"1px solid #FDE68A", borderRadius:9, padding:"9px 12px" }}>
+                  <div key={`${info.contractId}|${info.kind}|${info.avenantNum ?? ""}`} data-testid="recettes-to-complete-item" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap", background:"#fff", border:"1px solid #FDE68A", borderRadius:11, padding:"9px 12px" }}>
                     <div style={{ fontFamily:T.body, fontSize:12.5, color:C.text, minWidth:0 }}>
                       <div style={{ fontWeight:700 }}>{info.nature}</div>
                       <div style={{ color:C.textM }}>{[info.client, info.invoiceNumber ? `facture ${info.invoiceNumber}` : "", fmtCents(Math.round(info.amount * 100))].filter(Boolean).join(" · ")}</div>
@@ -8550,15 +8600,15 @@ function RecettesPage({ profile, authUser, onBack }) {
 
           {/* Actions */}
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14 }}>
-            <button data-testid="recettes-add" onClick={() => { setDialogError(""); setDialog({ mode: "libre", info: {} }); }} style={smallBtn}>➕ Ajouter une recette</button>
+            <button data-testid="recettes-add" onClick={() => { setDialogError(""); setDialog({ mode: "libre", info: {} }); }} style={smallBtn}>Ajouter une recette</button>
             <button data-testid="recettes-add-refund" onClick={() => { setDialogError(""); setDialog({ mode: "remboursement", info: {} }); }} style={smallBtn}>↩️ Ajouter un remboursement</button>
-            <button data-testid="recettes-csv" onClick={exportCsv} style={smallBtn}>⬇ Tableau {year} (CSV)</button>
-            <button data-testid="recettes-pdf" onClick={exportPdf} style={smallBtn}>⬇ PDF {year}</button>
+            <button data-testid="recettes-csv" onClick={exportCsv} style={smallBtn}><IcoI name="download" />Tableau {year} (CSV)</button>
+            <button data-testid="recettes-pdf" onClick={exportPdf} style={smallBtn}><IcoI name="download" />PDF {year}</button>
           </div>
           {notice && <div data-testid="recettes-notice" style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:10 }}>{notice}</div>}
           {dups.size > 0 && (
             <div data-testid="recettes-duplicates" style={{ ...card, background:"#FEF2F2", borderColor:"#FECACA", fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
-              ⚠️ Un même paiement est noté deux fois (repère « noté deux fois » ci-dessous). Vérifie que ton client n'a pas payé deux fois. Sinon, supprime la ligne en trop.
+              <IcoI name="alert" />Un même paiement est noté deux fois (repère « noté deux fois » ci-dessous). Vérifie que ton client n'a pas payé deux fois. Sinon, supprime la ligne en trop.
             </div>
           )}
 
@@ -8570,11 +8620,11 @@ function RecettesPage({ profile, authUser, onBack }) {
               const libreRow = String(r.source_key || "").startsWith("libre:");
               const manual = r.source === "manuel";
               return (
-                <div key={r.id} data-testid="recette-row" style={{ background:C.white, border:`1px solid ${dups.has(r) ? "#FCA5A5" : C.border}`, borderRadius:12, padding:"12px 14px" }}>
+                <div key={r.id} data-testid="recette-row" style={{ background:C.white, border:`1px solid ${dups.has(r) ? "#FCA5A5" : C.border}`, borderRadius:14, padding:"12px 14px" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"flex-start" }}>
                     <div style={{ minWidth:0 }}>
                       <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, fontWeight:700 }}>{isoDayFr(r.received_on)} · {recetteMethodLabel(r)}</div>
-                      <div style={{ fontFamily:T.body, fontSize:13.5, color:C.navy, fontWeight:700, marginTop:2, wordBreak:"break-word" }}>{r.nature || (r.kind === "remboursement" ? "Remboursement" : "Recette")}</div>
+                      <div style={{ fontFamily:T.body, fontSize:13.5, color:C.ink, fontWeight:700, marginTop:2, wordBreak:"break-word" }}>{r.nature || (r.kind === "remboursement" ? "Remboursement" : "Recette")}</div>
                       <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, marginTop:2, wordBreak:"break-word" }}>{[r.client, r.invoice_number ? `facture ${r.invoice_number}` : ""].filter(Boolean).join(" · ") || "—"}</div>
                       {r.note && <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, marginTop:2, wordBreak:"break-word" }}>{r.note}</div>}
                       {dups.has(r) && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#B91C1C", fontWeight:700, marginTop:3 }}>Noté deux fois</div>}
@@ -8802,14 +8852,14 @@ function DownloadAllDocumentsButton({ profile, compact = false }) {
       setResult({ kind: "error", text: "Le téléchargement a échoué. Vérifie ta connexion et réessaie." });
     } finally { setBusy(false); setProgress(null); }
   };
-  const label = busy ? (progress ? `Préparation… ${progress.d} / ${progress.t}` : "Préparation…") : "📦 Tout télécharger (contrats et factures)";
+  const label = busy ? (progress ? `Préparation… ${progress.d} / ${progress.t}` : "Préparation…") : <><IcoI name="package" />Tout télécharger (contrats et factures)</>;
   const color = result?.kind === "error" ? "#B91C1C" : result?.kind === "warn" ? "#92400E" : "#166534";
   return (
     <div data-testid="download-all">
       <button data-testid="download-all-btn" onClick={run} disabled={busy}
         style={compact
           ? { background:"none", border:"none", color:C.textL, fontSize:12, cursor: busy ? "wait" : "pointer", fontFamily:T.body, padding:0, textDecoration:"underline" }
-          : { padding:"10px 16px", background: busy ? C.creamDD : C.navy, border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:700, cursor: busy ? "wait" : "pointer", fontFamily:T.body }}
+          : { padding:"10px 16px", background: busy ? C.creamDD : C.navy, border:"none", borderRadius:12, color:"#fff", fontSize:13, fontWeight:700, cursor: busy ? "wait" : "pointer", fontFamily:T.body }}
       >{label}</button>
       {result && <div data-testid="download-all-result" style={{ marginTop:8, fontFamily:T.body, fontSize:12, color, lineHeight:1.5 }}>{result.text}</div>}
     </div>
@@ -8979,7 +9029,7 @@ CONSIGNES :
     e.preventDefault();
     const ctx = freelanceSigCanvasRef.current.getContext("2d");
     const p = getFreelanceSigPos(e);
-    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#4338CA"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
     setFreelanceSigHasStrokes(true);
   };
   const endFreelanceSigDraw = () => { freelanceSigDrawing.current = false; };
@@ -9005,7 +9055,7 @@ CONSIGNES :
     e.preventDefault();
     const ctx = clientSigCanvasRef.current.getContext("2d");
     const p = getClientSigPos(e);
-    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#4338CA"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
     setClientSigHasStrokes(true);
   };
   const endClientSigDraw = () => { clientSigDrawing.current = false; };
@@ -9098,7 +9148,7 @@ CONSIGNES :
   const handleGenerateAvenantPaymentLink = async () => {
     if (!effectiveAjustement || effectiveAjustement <= 0 || avenantPaymentLoading) return;
     if (!stripeConnectReady) {
-      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
+      alert("Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
       if (onGoToProfileTva) onGoToProfileTva();
       return;
     }
@@ -9150,7 +9200,7 @@ CONSIGNES :
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position:"fixed", inset:0,
-        background:"rgba(15,28,45,0.72)",
+        background:"rgba(19,17,28,0.72)",
         backdropFilter:"blur(5px)",
         zIndex:9000,
         display:"flex", alignItems:"center", justifyContent:"center",
@@ -9176,11 +9226,11 @@ CONSIGNES :
           <div style={{ position:"absolute", top:-20, right:-20, width:80, height:80, borderRadius:"50%", background:"rgba(251,191,36,0.15)", pointerEvents:"none" }} />
           <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:4 }}>
             <div style={{
-              width:40, height:40, borderRadius:10, flexShrink:0,
+              width:40, height:40, borderRadius:12, flexShrink:0,
               background:"rgba(255,255,255,0.2)",
               display:"flex", alignItems:"center", justifyContent:"center",
               fontSize:20,
-            }}>📝</div>
+            }}><IcoI name="pen" size={20} stroke={1.8} gap={0} /></div>
             <div>
               <div style={{ fontFamily:T.display, fontSize:18, color:C.white, fontWeight:700, lineHeight:1.2 }}>
                 Créer un Avenant
@@ -9194,7 +9244,7 @@ CONSIGNES :
             onClick={onClose}
             style={{
               position:"absolute", top:16, right:16,
-              width:30, height:30, borderRadius:8,
+              width:30, height:30, borderRadius:10,
               background:"rgba(255,255,255,0.15)", border:"none",
               color:"#FDE68A", fontSize:18, cursor:"pointer",
               display:"flex", alignItems:"center", justifyContent:"center",
@@ -9207,25 +9257,25 @@ CONSIGNES :
           <div style={{ padding:"24px" }}>
 
             {/* Bascule Magique / Manuel */}
-            <div style={{ display:"flex", gap:8, marginBottom:20, background:C.creamD, borderRadius:10, padding:4 }}>
+            <div style={{ display:"flex", gap:8, marginBottom:20, background:C.creamD, borderRadius:12, padding:4 }}>
               <button
                 onClick={() => setMode("magic")}
                 style={{
-                  flex:1, padding:"9px", borderRadius:8, border:"none", cursor:"pointer",
+                  flex:1, padding:"9px", borderRadius:10, border:"none", cursor:"pointer",
                   background: mode === "magic" ? "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)" : "transparent",
                   color: mode === "magic" ? "#fff" : C.textM,
                   fontFamily:T.body, fontSize:12.5, fontWeight:700, transition:"all 0.15s",
                 }}
-              >🪄 Magique</button>
+              ><IcoI name="sparkle" />Magique</button>
               <button
                 onClick={() => setMode("manuel")}
                 style={{
-                  flex:1, padding:"9px", borderRadius:8, border:"none", cursor:"pointer",
+                  flex:1, padding:"9px", borderRadius:10, border:"none", cursor:"pointer",
                   background: mode === "manuel" ? C.navy : "transparent",
                   color: mode === "manuel" ? "#fff" : C.textM,
                   fontFamily:T.body, fontSize:12.5, fontWeight:700, transition:"all 0.15s",
                 }}
-              >✍️ Manuel</button>
+              ><IcoI name="pen" />Manuel</button>
             </div>
 
             {mode === "magic" ? (
@@ -9247,7 +9297,7 @@ CONSIGNES :
                     width:"100%", padding:"12px 14px",
                     fontFamily:T.body, fontSize:13, color:C.text, lineHeight:1.65,
                     background:C.cream, border:"1.5px solid #C4B5FD",
-                    borderRadius:10, resize:"vertical", outline:"none",
+                    borderRadius:12, resize:"vertical", outline:"none",
                     transition:"border-color 0.15s",
                     boxSizing:"border-box",
                   }}
@@ -9275,7 +9325,7 @@ CONSIGNES :
                       width:"100%", padding:"12px 14px",
                       fontFamily:T.body, fontSize:13, color:C.text, lineHeight:1.65,
                       background:C.cream, border:`1.5px solid ${C.border}`,
-                      borderRadius:10, resize:"vertical", outline:"none",
+                      borderRadius:12, resize:"vertical", outline:"none",
                       transition:"border-color 0.15s",
                       boxSizing:"border-box",
                     }}
@@ -9302,7 +9352,7 @@ CONSIGNES :
                       width:"100%", padding:"12px 14px",
                       fontFamily:T.body, fontSize:13, color:C.text,
                       background:C.cream, border:`1.5px solid ${C.border}`,
-                      borderRadius:10, outline:"none",
+                      borderRadius:12, outline:"none",
                       transition:"border-color 0.15s",
                       boxSizing:"border-box",
                     }}
@@ -9320,17 +9370,17 @@ CONSIGNES :
             <div style={{
               display:"flex", alignItems:"flex-start", gap:10,
               background:"#FFFBEB", border:"1px solid #FDE68A",
-              borderRadius:10, padding:"12px 14px", marginBottom:20,
+              borderRadius:12, padding:"12px 14px", marginBottom:20,
             }}>
-              <span style={{ fontSize:16, flexShrink:0 }}>⚖️</span>
+              <span style={{ fontSize:16, flexShrink:0 }}></span>
               <div style={{ fontFamily:T.body, fontSize:11, color:"#92400E", lineHeight:1.6 }}>
                 L'avenant est un document contractuel distinct qui modifie le contrat initial. Il doit être <strong>signé par les deux parties</strong> avant de démarrer les travaux supplémentaires.
               </div>
             </div>
 
             {error && (
-              <div style={{ padding:"10px 14px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, fontFamily:T.body, fontSize:12, color:C.error, marginBottom:14 }}>
-                ⚠ {error}
+              <div style={{ padding:"10px 14px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, fontFamily:T.body, fontSize:12, color:C.error, marginBottom:14 }}>
+                <IcoI name="alert" size={14} stroke={1.8} gap={0} /> {error}
               </div>
             )}
 
@@ -9338,7 +9388,7 @@ CONSIGNES :
               <button onClick={onClose} style={{
                 flex:1, padding:"12px",
                 background:C.white, border:`1.5px solid ${C.border}`,
-                borderRadius:10, cursor:"pointer",
+                borderRadius:12, cursor:"pointer",
                 fontFamily:T.body, fontSize:13, fontWeight:500, color:C.textM,
                 transition:"all 0.15s",
               }}
@@ -9353,7 +9403,7 @@ CONSIGNES :
                   background: canGenerate
                     ? (mode === "magic" ? "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)" : "linear-gradient(135deg, #92400E 0%, #B45309 100%)")
                     : C.creamDD,
-                  border:"none", borderRadius:10,
+                  border:"none", borderRadius:12,
                   cursor: canGenerate ? "pointer" : "not-allowed",
                   fontFamily:T.body, fontSize:14, fontWeight:700,
                   color: canGenerate ? C.white : C.textL,
@@ -9381,16 +9431,16 @@ CONSIGNES :
               display:"flex", alignItems:"center", justifyContent:"center",
               fontSize:28, margin:"0 auto 24px",
               animation:"shimmer 1.2s ease-in-out infinite",
-            }}>📝</div>
-            <div style={{ fontFamily:T.display, fontSize:20, color:C.navy, fontWeight:600, marginBottom:8 }}>
+            }}><IcoI name="pen" size={28} stroke={1.8} gap={0} /></div>
+            <div style={{ fontFamily:T.display, fontSize:20, color:C.ink, fontWeight:600, marginBottom:8 }}>
               Rédaction de l'avenant…
             </div>
             <div style={{ fontFamily:T.body, fontSize:13, color:"#B45309", marginBottom:28 }}>
               Rédaction de votre document commercial
             </div>
-            <div style={{ background:C.creamDD, borderRadius:8, height:6, overflow:"hidden", margin:"0 auto", maxWidth:280 }}>
+            <div style={{ background:C.creamDD, borderRadius:10, height:6, overflow:"hidden", margin:"0 auto", maxWidth:280 }}>
               <div style={{
-                height:"100%", borderRadius:8,
+                height:"100%", borderRadius:10,
                 background:"linear-gradient(90deg, #92400E, #F59E0B)",
                 animation:"magicShimmer 1.4s linear infinite",
                 backgroundSize:"200% 100%",
@@ -9407,10 +9457,10 @@ CONSIGNES :
             <div style={{
               display:"flex", alignItems:"center", gap:10,
               background:"#F0FDF4", border:"1.5px solid #86EFAC",
-              borderRadius:10, padding:"10px 14px", marginBottom:16,
+              borderRadius:12, padding:"10px 14px", marginBottom:16,
               animation:"fadeUp 0.3s ease both",
             }}>
-              <span style={{ fontSize:18, flexShrink:0 }}>✅</span>
+              <span style={{ fontSize:18, flexShrink:0 }}><IcoI name="checkCircle" size={18} stroke={1.8} gap={0} /></span>
               <div>
                 <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#15803D", marginBottom:1 }}>Avenant n°{avenantNum} généré avec succès</div>
                 <div style={{ fontFamily:T.body, fontSize:11, color:"#166534" }}>Document prêt à la signature</div>
@@ -9420,7 +9470,7 @@ CONSIGNES :
             {/* Texte de l'avenant */}
             <div style={{
               background:C.cream, border:`1.5px solid ${C.border}`,
-              borderRadius:10, padding:"16px",
+              borderRadius:12, padding:"16px",
               fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.75,
               maxHeight:280, overflowY:"auto",
               marginBottom:16, whiteSpace:"pre-wrap",
@@ -9436,32 +9486,32 @@ CONSIGNES :
                   flex:1, padding:"10px",
                   background: copied ? "#F0FDF4" : C.white,
                   border:`1.5px solid ${copied ? "#86EFAC" : C.border}`,
-                  borderRadius:8, cursor:"pointer",
+                  borderRadius:10, cursor:"pointer",
                   fontFamily:T.body, fontSize:12, fontWeight:600,
                   color: copied ? "#15803D" : C.textM,
                   transition:"all 0.2s",
                   display:"flex", alignItems:"center", justifyContent:"center", gap:6,
                 }}
               >
-                {copied ? <><span>✓</span> Copié !</> : <><span>📋</span> Copier le texte</>}
+                {copied ? <><span>✓</span> Copié !</> : <><span><IcoI name="copy" size={16} stroke={1.8} gap={0} /></span> Copier le texte</>}
               </button>
               <button
                 onClick={handleDownloadAvenantPDF}
                 style={{
                   flex:1, padding:"10px",
                   background:C.white, border:`1.5px solid ${C.border}`,
-                  borderRadius:8, cursor:"pointer",
+                  borderRadius:10, cursor:"pointer",
                   fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:6,
                 }}
-              ><span>⬇</span> PDF</button>
+              ><span><IcoI name="download" size={16} stroke={1.8} gap={0} /></span> PDF</button>
             </div>
 
             {/* Ajustement de prix : le client paie par virement ou par carte (version 232 : présentés à égalité) */}
             {effectiveAjustement > 0 && (
-              <div style={{ background:"#FFFBEB", border:"1.5px solid #FDE68A", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+              <div style={{ background:"#FFFBEB", border:"1.5px solid #FDE68A", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
                 <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:10 }}>
-                  💰 Cet avenant ajoute {effectiveAjustement} € {contractPricing(form, profile).enteredUnit} au budget
+                  <IcoI name="coins" />Cet avenant ajoute {effectiveAjustement} € {contractPricing(form, profile).enteredUnit} au budget
                 </div>
                 <PaymentWaysBox
                   title={null}
@@ -9475,12 +9525,12 @@ CONSIGNES :
                     <button
                       onClick={handleGenerateAvenantPaymentLink}
                       disabled={avenantPaymentLoading}
-                      style={{ width:"100%", padding:"10px", background: avenantPaymentLoading ? C.creamDD : C.gold, color: avenantPaymentLoading ? C.textL : C.navyD, border:"none", borderRadius:8, cursor: avenantPaymentLoading ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700 }}
-                    >{avenantPaymentLoading ? "Génération…" : "💳 Générer le lien de paiement"}</button>
+                      style={{ width:"100%", padding:"10px", background: avenantPaymentLoading ? C.creamDD : C.goldBg, color: avenantPaymentLoading ? C.textL : C.navyD, border:"none", borderRadius:10, cursor: avenantPaymentLoading ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700 }}
+                    >{avenantPaymentLoading ? "Génération…" : <><IcoI name="card" />Générer le lien de paiement</>}</button>
                   ) : (
                     <div style={{ display:"flex", gap:8 }}>
-                      <input readOnly value={avenantPaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, minWidth:0, padding:"8px 10px", border:"1px solid #FDE68A", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#92400E", background:"#fff" }} />
-                      <button onClick={() => { navigator.clipboard.writeText(avenantPaymentLink); setAvenantPaymentCopied(true); setTimeout(()=>setAvenantPaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"8px 14px", background:"#92400E", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{avenantPaymentCopied ? "Copié !" : "Copier"}</button>
+                      <input readOnly value={avenantPaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, minWidth:0, padding:"8px 10px", border:"1px solid #FDE68A", borderRadius:10, fontFamily:T.body, fontSize:11, color:"#92400E", background:"#fff" }} />
+                      <button onClick={() => { navigator.clipboard.writeText(avenantPaymentLink); setAvenantPaymentCopied(true); setTimeout(()=>setAvenantPaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"8px 14px", background:"#92400E", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{avenantPaymentCopied ? "Copié !" : "Copier"}</button>
                     </div>
                   )}
                 />
@@ -9488,19 +9538,19 @@ CONSIGNES :
             )}
 
             {saveError && (
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 12px", marginBottom:12 }}>
-                ⚠️ La signature n'a pas pu être sauvegardée. Réessaie.
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"8px 12px", marginBottom:12 }}>
+                <IcoI name="alert" />La signature n'a pas pu être sauvegardée. Réessaie.
               </div>
             )}
 
             {/* ── Étape 1 : signature du prestataire (toi) ── */}
             {signStep === "sign-freelance" && (
-              <div style={{ background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)", border:"1.5px solid #BFDBFE", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
+              <div style={{ background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)", border:"1.5px solid #BFDBFE", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                  <span style={{ fontSize:18 }}>✍️</span>
+                  <span style={{ fontSize:18 }}><IcoI name="pen" size={18} stroke={1.8} gap={0} /></span>
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#1D4ED8" }}>Signe d'abord ta part</div>
-                    <div style={{ fontFamily:T.body, fontSize:11, color:"#3B7DD8" }}>Avant d'envoyer l'avenant au client</div>
+                    <div style={{ fontFamily:T.body, fontSize:11, color:"#6366F1" }}>Avant d'envoyer l'avenant au client</div>
                   </div>
                 </div>
                 <canvas
@@ -9508,14 +9558,14 @@ CONSIGNES :
                   width={420} height={120}
                   onMouseDown={startFreelanceSigDraw} onMouseMove={drawFreelanceSig} onMouseUp={endFreelanceSigDraw} onMouseLeave={endFreelanceSigDraw}
                   onTouchStart={startFreelanceSigDraw} onTouchMove={drawFreelanceSig} onTouchEnd={endFreelanceSigDraw}
-                  style={{ width:"100%", height:110, border:"2px dashed #93C5FD", borderRadius:8, background:"#FFFFFF", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
+                  style={{ width:"100%", height:110, border:"2px dashed #93C5FD", borderRadius:10, background:"#FFFFFF", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
                 />
                 <div style={{ display:"flex", gap:8 }}>
-                  <button onClick={clearFreelanceSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"#fff", border:"1.5px solid #BFDBFE", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#3B7DD8" }}>Effacer</button>
+                  <button onClick={clearFreelanceSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"#fff", border:"1.5px solid #BFDBFE", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#6366F1" }}>Effacer</button>
                   <button
                     onClick={handleValidateFreelanceSig}
                     disabled={!freelanceSigHasStrokes}
-                    style={{ flex:1, padding:"10px", background: freelanceSigHasStrokes ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : C.creamDD, color: freelanceSigHasStrokes ? "#fff" : C.textL, border:"none", borderRadius:8, cursor: freelanceSigHasStrokes ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700 }}
+                    style={{ flex:1, padding:"10px", background: freelanceSigHasStrokes ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : C.creamDD, color: freelanceSigHasStrokes ? "#fff" : C.textL, border:"none", borderRadius:10, cursor: freelanceSigHasStrokes ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700 }}
                   >✓ Valider ma signature</button>
                 </div>
               </div>
@@ -9523,23 +9573,23 @@ CONSIGNES :
 
             {/* ── Étape 2 : choisir la méthode ── */}
             {signStep === "choose" && (
-              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
+              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
                 <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534", marginBottom:2 }}>✓ Ta signature est prête</div>
                 <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginBottom:12 }}>Comment le client doit-il signer ?</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  <button onClick={() => setSignStep("tactile")} style={{ padding:"11px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534", textAlign:"left" }}>👥 Ensemble maintenant, sur le même appareil</button>
+                  <button onClick={() => setSignStep("tactile")} style={{ padding:"11px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534", textAlign:"left" }}><IcoI name="user" />Ensemble maintenant, sur le même appareil</button>
                   <button
                     onClick={handleGenerateAvenantLink}
                     disabled={avenantSignLoading}
-                    style={{ padding:"11px", background:avenantSignLoading ? C.creamDD : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)", border:"none", borderRadius:8, cursor:avenantSignLoading?"wait":"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:avenantSignLoading?C.textL:"#fff", textAlign:"left" }}
-                  >{avenantSignLoading ? "Génération…" : "📲 Envoyer un lien au client (à distance)"}</button>
+                    style={{ padding:"11px", background:avenantSignLoading ? C.creamDD : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)", border:"none", borderRadius:10, cursor:avenantSignLoading?"wait":"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:avenantSignLoading?C.textL:"#fff", textAlign:"left" }}
+                  >{avenantSignLoading ? "Génération…" : <><IcoI name="send" />Envoyer un lien au client (à distance)</>}</button>
                 </div>
               </div>
             )}
 
             {/* ── Étape 3a : signature tactile du client ── */}
             {signStep === "tactile" && (
-              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
+              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
                 <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534", marginBottom:2 }}>Passe l'appareil à {form.clientName || "ton client"}</div>
                 <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginBottom:10 }}>Pour qu'il/elle signe ci-dessous</div>
                 <canvas
@@ -9547,14 +9597,14 @@ CONSIGNES :
                   width={420} height={120}
                   onMouseDown={startClientSigDraw} onMouseMove={drawClientSig} onMouseUp={endClientSigDraw} onMouseLeave={endClientSigDraw}
                   onTouchStart={startClientSigDraw} onTouchMove={drawClientSig} onTouchEnd={endClientSigDraw}
-                  style={{ width:"100%", height:110, border:"2px dashed #86EFAC", borderRadius:8, background:"#fff", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
+                  style={{ width:"100%", height:110, border:"2px dashed #86EFAC", borderRadius:10, background:"#fff", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
                 />
                 <div style={{ display:"flex", gap:8 }}>
-                  <button onClick={clearClientSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#166534" }}>Effacer</button>
+                  <button onClick={clearClientSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#166534" }}>Effacer</button>
                   <button
                     onClick={handleValidateClientTactile}
                     disabled={!clientSigHasStrokes || avenantSignLoading}
-                    style={{ flex:1, padding:"10px", background: (clientSigHasStrokes && !avenantSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.creamDD, color: (clientSigHasStrokes && !avenantSignLoading) ? "#fff" : C.textL, border:"none", borderRadius:8, cursor: (clientSigHasStrokes && !avenantSignLoading) ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700 }}
+                    style={{ flex:1, padding:"10px", background: (clientSigHasStrokes && !avenantSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.creamDD, color: (clientSigHasStrokes && !avenantSignLoading) ? "#fff" : C.textL, border:"none", borderRadius:10, cursor: (clientSigHasStrokes && !avenantSignLoading) ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700 }}
                   >{avenantSignLoading ? "Enregistrement…" : "✓ Valider la signature du client"}</button>
                 </div>
               </div>
@@ -9562,20 +9612,20 @@ CONSIGNES :
 
             {/* ── Étape 3b : lien à distance prêt ── */}
             {signStep === "remote-ready" && (
-              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
+              <div style={{ background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
                 <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534", marginBottom:8 }}>✓ Lien de signature prêt</div>
                 <div style={{ display:"flex", gap:8, marginBottom:10 }}>
-                  <input readOnly value={avenantSignLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"9px 10px", border:"1px solid #86EFAC", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#166534", background:"#fff" }} />
-                  <button onClick={copyAvenantLink} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{avenantLinkCopied ? "Copié !" : "Copier"}</button>
+                  <input readOnly value={avenantSignLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"9px 10px", border:"1px solid #86EFAC", borderRadius:10, fontFamily:T.body, fontSize:11, color:"#166534", background:"#fff" }} />
+                  <button onClick={copyAvenantLink} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{avenantLinkCopied ? "Copié !" : "Copier"}</button>
                 </div>
-                <button onClick={handleSendAvenantEmail} style={{ width:"100%", padding:"10px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534" }}>✉️ Envoyer le lien par email au client</button>
+                <button onClick={handleSendAvenantEmail} style={{ width:"100%", padding:"10px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534" }}><IcoI name="mail" />Envoyer le lien par email au client</button>
               </div>
             )}
 
             <button onClick={onClose} style={{
               width:"100%", padding:"11px",
               background:C.creamD, border:`1px solid ${C.border}`,
-              borderRadius:8, cursor:"pointer",
+              borderRadius:10, cursor:"pointer",
               fontFamily:T.body, fontSize:13, color:C.textM, fontWeight:500,
             }}>Fermer</button>
           </div>
@@ -9590,7 +9640,7 @@ CONSIGNES :
               position:"relative", overflow:"hidden",
             }}>
               <div style={{ position:"absolute", top:-16, right:-16, width:80, height:80, borderRadius:"50%", background:"rgba(34,197,94,0.12)" }} />
-              <div style={{ fontSize:44, marginBottom:12 }}>🔒</div>
+              <div style={{ fontSize:44, marginBottom:12 }}><IcoI name="lock" size={44} stroke={1.8} gap={0} /></div>
               <div style={{ fontFamily:T.display, fontSize:20, color:"#4ADE80", fontWeight:700, marginBottom:6 }}>
                 Avenant n°{avenantNum} — Scellé !
               </div>
@@ -9602,18 +9652,18 @@ CONSIGNES :
 
             <div style={{
               background:"#F0FDF4", border:"1.5px solid #86EFAC",
-              borderRadius:10, padding:"12px 16px", marginBottom:20,
+              borderRadius:12, padding:"12px 16px", marginBottom:20,
               fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.6, textAlign:"left",
             }}>
-              🚀 <strong>Avenant activé !</strong> Avenant n°{avenantNum} lié au contrat {contractNum}. Ce document complète le contrat principal et engage les deux parties.
+              <IcoI name="send" size={14} stroke={1.8} gap={0} /> <strong>Avenant activé !</strong> Avenant n°{avenantNum} lié au contrat {contractNum}. Ce document complète le contrat principal et engage les deux parties.
             </div>
 
             <button onClick={onClose} style={{
               width:"100%", padding:"13px",
               background:C.navy, color:C.white,
-              border:"none", borderRadius:10, cursor:"pointer",
+              border:"none", borderRadius:12, cursor:"pointer",
               fontFamily:T.body, fontSize:14, fontWeight:700,
-              boxShadow:"0 4px 14px #1B2E4B28",
+              boxShadow:"0 4px 14px #4338CA28",
               transition:"all 0.2s",
             }}
               onMouseOver={e => { e.currentTarget.style.background="#152438"; e.currentTarget.style.transform="translateY(-1px)"; }}
@@ -9661,13 +9711,13 @@ function ContractModifyBox({ dark = false, contractText, form, profile, freelanc
   const set = (k) => (e) => setFig(f => ({ ...f, [k]: e.target.value }));
 
   const P = dark
-    ? { box: { background:"#122238", border:"1.5px solid #2A4167" }, title:"#E8EEF5", text:"#8BA3C0", label:"#8BA3C0",
-        input: { background:"#0D1B2E", color:"#E8EEF5", border:"1.5px solid #2A4167" }, toggle: { color:"#C9A961", border:"1.5px solid #C9A961" },
-        ok:"#6EE7B7", okBg:"#0D2818", okBorder:"#15803D", err:"#FCA5A5", warnBg:"#2A2110", warnBorder:"#B45309", warnText:"#FCD34D", ghost:{ color:"#8BA3C0", border:"1.5px solid #2A4167" } }
+    ? { box: { background:"#122238", border:"1.5px solid #4F46E5" }, title:"#E8EEF5", text:"#C7D2FE", label:"#C7D2FE",
+        input: { background:"#0D1B2E", color:"#E8EEF5", border:"1.5px solid #4F46E5" }, toggle: { color:"#6366F1", border:"1.5px solid #6366F1" },
+        ok:"#6EE7B7", okBg:"#0D2818", okBorder:"#15803D", err:"#FCA5A5", warnBg:"#2A2110", warnBorder:"#B45309", warnText:"#FCD34D", ghost:{ color:"#C7D2FE", border:"1.5px solid #4F46E5" } }
     : { box: { background:C.white, border:`1.5px solid ${C.border}` }, title:C.navy, text:C.textM, label:C.textL,
         input: { background:C.white, color:C.text, border:`1.5px solid ${C.border}` }, toggle: { color:C.navy, border:`1.5px solid ${C.navy}` },
         ok:"#15803D", okBg:"#F0FDF4", okBorder:"#86EFAC", err:C.error, warnBg:"#FFFBEB", warnBorder:"#FCD34D", warnText:"#92400E", ghost:{ color:C.textM, border:`1.5px solid ${C.border}` } };
-  const inputSt = { width:"100%", minWidth:0, padding:"9px 10px", borderRadius:8, fontFamily:T.body, fontSize:13, boxSizing:"border-box", outline:"none", ...P.input };
+  const inputSt = { width:"100%", minWidth:0, padding:"9px 10px", borderRadius:10, fontFamily:T.body, fontSize:13, boxSizing:"border-box", outline:"none", ...P.input };
   const labelSt = { display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.1em", fontWeight:700, color:P.label, marginBottom:5 };
 
   const openBox = () => { setFig(figuresOf(form)); setRequest(""); setError(""); setDone(null); setPendingSave(null); setOpen(true); };
@@ -9707,24 +9757,24 @@ function ContractModifyBox({ dark = false, contractText, form, profile, freelanc
   };
 
   if (!open) return (
-    <div data-testid="contract-modify" style={{ width:"100%", borderRadius:12, padding:"16px 18px", boxSizing:"border-box", marginBottom: dark ? 0 : 16, ...P.box }}>
+    <div data-testid="contract-modify" style={{ width:"100%", borderRadius:14, padding:"16px 18px", boxSizing:"border-box", marginBottom: dark ? 0 : 16, ...P.box }}>
       <button onClick={openBox} style={{
-        width:"100%", padding:"12px 18px", background:"transparent", borderRadius:8,
+        width:"100%", padding:"12px 18px", background:"transparent", borderRadius:10,
         cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600,
         display:"flex", alignItems:"center", justifyContent:"center", gap:8, ...P.toggle,
-      }}>🪄 Le client veut des changements ? Modifier le contrat</button>
+      }}><IcoI name="pen" />Le client veut des changements ? Modifier le contrat</button>
     </div>
   );
 
   return (
-    <div data-testid="contract-modify" style={{ width:"100%", borderRadius:12, padding:"16px 18px", boxSizing:"border-box", marginBottom: dark ? 0 : 16, ...P.box }}>
+    <div data-testid="contract-modify" style={{ width:"100%", borderRadius:14, padding:"16px 18px", boxSizing:"border-box", marginBottom: dark ? 0 : 16, ...P.box }}>
       <div style={{ fontFamily:T.body, fontSize:13.5, fontWeight:700, color:P.title, marginBottom:4 }}>Modifications avant signature</div>
       <div style={{ fontFamily:T.body, fontSize:11.5, color:P.text, lineHeight:1.55, marginBottom:12 }}>
         Pas besoin d'avenant : le contrat n'est pas encore signé. Freeley le réécrit avec tes changements.
       </div>
 
       {done ? (
-        <div style={{ background:P.okBg, border:`1.5px solid ${P.okBorder}`, borderRadius:10, padding:"12px 14px" }}>
+        <div style={{ background:P.okBg, border:`1.5px solid ${P.okBorder}`, borderRadius:12, padding:"12px 14px" }}>
           <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:P.ok, marginBottom:6 }}>✓ Contrat modifié. Relis la nouvelle version ci-dessous.</div>
           {done.changes.length > 0 && (
             <div style={{ fontFamily:T.body, fontSize:12, color:P.text, lineHeight:1.6, marginBottom:6 }}>
@@ -9736,12 +9786,12 @@ function ContractModifyBox({ dark = false, contractText, form, profile, freelanc
               Ta signature a été retirée, puisque le texte a changé. Signe la nouvelle version, puis renvoie le lien à ton client : c'est le même lien.
             </div>
           )}
-          <button onClick={closeBox} style={{ marginTop:4, padding:"9px 16px", background:"transparent", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, ...P.ghost }}>Fermer</button>
+          <button onClick={closeBox} style={{ marginTop:4, padding:"9px 16px", background:"transparent", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, ...P.ghost }}>Fermer</button>
         </div>
       ) : (
         <>
           {freelanceSigned && (
-            <div style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
+            <div style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:10, padding:"10px 12px", marginBottom:12, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
               Tu as déjà signé ce contrat. Après la modification, ta signature sera retirée : tu signeras la nouvelle version, puis tu renverras le lien à ton client. C'est le même lien.
             </div>
           )}
@@ -9799,32 +9849,32 @@ function ContractModifyBox({ dark = false, contractText, form, profile, freelanc
             style={{ ...inputSt, padding:"12px 14px", lineHeight:1.6, resize:"vertical", marginBottom:10 }}
           />
           {figuresHint && (
-            <div style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:8, padding:"9px 12px", marginBottom:10, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
+            <div style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:10, padding:"9px 12px", marginBottom:10, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
               Ta demande parle de prix, de paiement, de dates ou de révisions. Change aussi les chiffres au-dessus : sinon le contrat garde les chiffres actuels.
             </div>
           )}
           {error && <div style={{ fontFamily:T.body, fontSize:12, color:P.err, marginBottom:10, lineHeight:1.5 }}>{error}</div>}
           <div style={{ display:"flex", gap:10 }}>
-            <button onClick={closeBox} disabled={loading} style={{ flex:"0 0 auto", padding:"11px 16px", background:"transparent", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13, ...P.ghost }}>Annuler</button>
+            <button onClick={closeBox} disabled={loading} style={{ flex:"0 0 auto", padding:"11px 16px", background:"transparent", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, ...P.ghost }}>Annuler</button>
             {pendingSave ? (
               <button onClick={() => save(pendingSave)} style={{
-                flex:1, padding:"11px 18px", background:"linear-gradient(135deg, #B8965A 0%, #C9A961 100%)", color:"#0D1B2E",
-                border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700,
+                flex:1, padding:"11px 18px", background:"linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)", color:"#0D1B2E",
+                border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700,
               }}>Réessayer l'enregistrement</button>
             ) : (
               <button onClick={apply} disabled={!canApply} style={{
                 flex:1, padding:"11px 18px",
-                background: canApply ? "linear-gradient(135deg, #B8965A 0%, #C9A961 100%)" : (dark ? "#2A4167" : C.creamDD),
-                color: canApply ? "#0D1B2E" : (dark ? "#8BA3C0" : C.textL), border:"none", borderRadius:8,
+                background: canApply ? "linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)" : (dark ? "#4F46E5" : C.creamDD),
+                color: canApply ? "#0D1B2E" : (dark ? "#C7D2FE" : C.textL), border:"none", borderRadius:10,
                 cursor: loading ? "wait" : canApply ? "pointer" : "not-allowed",
                 fontFamily:T.body, fontSize:13, fontWeight:700,
-              }}>{loading ? "Modification du contrat en cours…" : "✨ Appliquer les modifications"}</button>
+              }}>{loading ? "Modification du contrat en cours…" : <><IcoI name="sparkle" />Appliquer les modifications</>}</button>
             )}
           </div>
           {/* Version 225 : la réécriture arrive aussi en direct ; en veille, elle s'arrête (le contrat ne change pas) */}
           {loading && (
-            <div data-testid="keep-awake-modify" style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:8, padding:"9px 12px", marginTop:10, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
-              📱 Garde ton écran allumé jusqu'à la fin. Si ton téléphone se met en veille, la modification s'arrête et ton contrat reste comme avant.
+            <div data-testid="keep-awake-modify" style={{ background:P.warnBg, border:`1px solid ${P.warnBorder}`, borderRadius:10, padding:"9px 12px", marginTop:10, fontFamily:T.body, fontSize:12, color:P.warnText, lineHeight:1.55 }}>
+              <IcoI name="phone" />Garde ton écran allumé jusqu'à la fin. Si ton téléphone se met en veille, la modification s'arrête et ton contrat reste comme avant.
             </div>
           )}
         </>
@@ -9838,15 +9888,15 @@ function ContractCheckBox({ text, form, profile, onGoToProfile }) {
   if (!String(text || "").trim()) return null;
   const issues = checkContractText(text, form || {}, profile || {});
   if (!issues.length) return (
-    <div data-testid="contract-check" style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"10px 14px", marginBottom:16, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.5 }}>
+    <div data-testid="contract-check" style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"10px 14px", marginBottom:16, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.5 }}>
       <span style={{ fontSize:14 }}>✓</span>
       <span>Contrôle automatique : rien d'anormal dans les points vérifiés (mentions obligatoires, montants, paiement, dates, révisions, clauses interdites avec un particulier).</span>
     </div>
   );
   const needsProfile = issues.some(m => m.includes("profil"));
   return (
-    <div data-testid="contract-check" style={{ padding:"14px 16px", marginBottom:16, background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, fontFamily:T.body, color:"#92400E", lineHeight:1.55 }}>
-      <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>⚠️ Contrôle automatique : {issues.length === 1 ? "1 point à vérifier" : `${issues.length} points à vérifier`} avant de faire signer</div>
+    <div data-testid="contract-check" style={{ padding:"14px 16px", marginBottom:16, background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:14, fontFamily:T.body, color:"#92400E", lineHeight:1.55 }}>
+      <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}><IcoI name="alert" />Contrôle automatique : {issues.length === 1 ? "1 point à vérifier" : `${issues.length} points à vérifier`} avant de faire signer</div>
       {issues.map((m, i) => <div key={i} style={{ fontSize:12.5, marginBottom:6 }}>• {m}</div>)}
       <div style={{ fontSize:11.5, color:"#A16207", marginTop:4 }}>Pour corriger, utilise « Modifier le contrat » en décrivant le problème, ou refais le contrat. Freeley ne bloque pas la signature.</div>
       {needsProfile && onGoToProfile && <span onClick={onGoToProfile} style={{ display:"inline-block", marginTop:8, fontSize:12.5, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Compléter mon profil →</span>}
@@ -10191,12 +10241,12 @@ function LegalTooltip({ text }) {
           background:"#DBEAFE", border:"1px solid #93C5FD",
           display:"inline-flex", alignItems:"center", justifyContent:"center",
           fontSize:9, color:"#1D4ED8", cursor:"help", fontFamily:T.body, fontWeight:700,
-        }}>⚖</span>
+        }}></span>
       {show && (
         <div style={{
           position:"absolute", bottom:"calc(100% + 6px)", left:"50%", transform:"translateX(-50%)",
           background:C.navy, color:C.white, fontSize:11, fontFamily:T.body, lineHeight:1.6,
-          padding:"10px 14px", borderRadius:8, width:260, zIndex:50,
+          padding:"10px 14px", borderRadius:10, width:260, zIndex:50,
           boxShadow:"0 8px 24px #00000040",
         }}>
           {text}
@@ -10238,9 +10288,9 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
   const visibleArticles = Math.max(1, Math.min(articlesWritten, articles.length));
 
   const phases = [
-    { label: "Analyse de ta mission…", icon: "🔍" },
-    { label: `Rédaction de l'article ${Math.min(Math.max(articlesWritten, 1), articles.length)} sur ${articles.length}…`, icon: "✍️" },
-    { label: "Finalisation et vérification…", icon: "✅" },
+    { label: "Analyse de ta mission…", icon: "" },
+    { label: `Rédaction de l'article ${Math.min(Math.max(articlesWritten, 1), articles.length)} sur ${articles.length}…`, icon: "" },
+    { label: "Finalisation et vérification…", icon: "" },
   ];
   // Version 229 : l'étape affichée suit la vraie progression du texte reçu. Avant, deux minuteries (0,6 s et 1,3 s)
   // affichaient « Finalisation et vérification… » au bout d'une seconde, pendant toute la rédaction (1 à 2 minutes).
@@ -10273,15 +10323,15 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
 
       {/* Status bar */}
       <div className="fade-up" style={{
-        background:C.navy, borderRadius:12, padding:"20px 28px",
+        background:C.navy, borderRadius:14, padding:"20px 28px",
         display:"flex", alignItems:"center", justifyContent:"space-between",
         marginBottom:24, flexWrap:"wrap", gap:12,
-        boxShadow:"0 8px 32px #1B2E4B30",
+        boxShadow:"0 8px 32px #4338CA30",
       }}>
         <div style={{ display:"flex", alignItems:"center", gap:14 }}>
           <div style={{
-            width:40, height:40, borderRadius:10,
-            background:"#253D5E",
+            width:40, height:40, borderRadius:12,
+            background:"#3730A3",
             display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
             animation:"shimmer 1.4s ease-in-out infinite",
           }}>{currentPhase.icon}</div>
@@ -10289,7 +10339,7 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
             <div style={{ fontFamily:T.display, fontSize:18, color:C.white, marginBottom:3 }}>
               {currentPhase.label.replace("…", dots)}
             </div>
-            <div style={{ fontFamily:T.body, fontSize:12, color:"#8BA3C0" }}>
+            <div style={{ fontFamily:T.body, fontSize:12, color:"#C7D2FE" }}>
               {form.missionTitle} · <span style={{color:C.goldL}}>{form.clientName || "—"}</span>
             </div>
           </div>
@@ -10299,7 +10349,7 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
           {phases.map((p, i) => (
             <div key={i} style={{
               width:28, height:6, borderRadius:3,
-              background: i < realPhase ? C.gold : i === realPhase - 1 ? C.goldL : "#354F6E",
+              background: i < realPhase ? C.goldL : i === realPhase - 1 ? C.white : "rgba(255,255,255,0.25)",
               transition:"background 0.4s",
               animation: i === realPhase - 1 ? "shimmer 1s ease-in-out infinite" : "none",
             }}/>
@@ -10311,11 +10361,11 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
           Le contrat arrive en direct sur l'appareil : en veille, la connexion est coupée et la rédaction est perdue. */}
       <div data-testid="keep-awake-notice" className="fade-up" style={{
         display:"flex", alignItems:"flex-start", gap:12,
-        background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:10,
+        background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12,
         padding:"14px 16px", marginBottom:24,
         fontFamily:T.body, fontSize:13, color:"#92400E", lineHeight:1.55,
       }}>
-        <span style={{ fontSize:20, lineHeight:1.1 }}>📱</span>
+        <span style={{ fontSize:20, lineHeight:1.1 }}><IcoI name="phone" size={20} stroke={1.8} gap={0} /></span>
         <div>
           <div style={{ fontWeight:700, marginBottom:2 }}>Garde ton écran allumé jusqu'à la fin de la rédaction.</div>
           <div>Ne mets pas ton téléphone en veille : sinon, la rédaction s'arrête et tu devras la relancer.</div>
@@ -10324,30 +10374,30 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
 
       {/* Preview document */}
       <div className="fade-up fade-up-2" style={{
-        background:C.white, border:`1px solid ${C.border}`, borderRadius:12,
-        overflow:"hidden", boxShadow:"0 4px 24px #1B2E4B08",
+        background:C.white, border:`1px solid ${C.border}`, borderRadius:14,
+        overflow:"hidden", boxShadow:"0 4px 24px #4338CA08",
       }}>
         {/* Doc header */}
         <div style={{
           background:C.navy, padding:"28px 40px 24px",
           borderBottom:`3px solid ${C.gold}`,
         }}>
-          <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.2em", color:"#5A7A9A", marginBottom:10 }}>CONTRAT DE PRESTATION DE SERVICES</div>
+          <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.2em", color:C.goldL, marginBottom:10 }}>CONTRAT DE PRESTATION DE SERVICES</div>
           <div style={{ fontFamily:T.display, fontSize:22, color:C.white, fontWeight:600, marginBottom:16 }}>
             {form.missionTitle || "Mission freelance"}
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))", gap:16 }}>
             {/* Prestataire */}
-            <div style={{ background:"#253D5E", borderRadius:8, padding:"12px 14px" }}>
-              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:"#5A7A9A", marginBottom:6 }}>PRESTATAIRE</div>
+            <div style={{ background:"#3730A3", borderRadius:10, padding:"12px 14px" }}>
+              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.goldL, marginBottom:6 }}>PRESTATAIRE</div>
               <div style={{ fontFamily:T.body, fontSize:13, color:C.white, fontWeight:600 }}>{contractFreelanceName(form) || "—"}</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:2 }}>{form.freelanceActivity || "—"}</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#C7D2FE", marginTop:2 }}>{form.freelanceActivity || "—"}</div>
             </div>
             {/* Client */}
-            <div style={{ background:"#253D5E", borderRadius:8, padding:"12px 14px" }}>
-              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:"#5A7A9A", marginBottom:6 }}>CLIENT</div>
+            <div style={{ background:"#3730A3", borderRadius:10, padding:"12px 14px" }}>
+              <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.goldL, marginBottom:6 }}>CLIENT</div>
               <div style={{ fontFamily:T.body, fontSize:13, color:C.white, fontWeight:600 }}>{form.clientName || "—"}</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:2 }}>{form.typeClient === "particulier" ? "Particulier" : (form.clientCompany || "—")}</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#C7D2FE", marginTop:2 }}>{form.typeClient === "particulier" ? "Particulier" : (form.clientCompany || "—")}</div>
             </div>
           </div>
         </div>
@@ -10367,7 +10417,7 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
           ].map(([k, v]) => (
             <div key={k}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.1em", color:C.textL, fontWeight:600 }}>{k.toUpperCase()}</div>
-              <div style={{ fontFamily:T.body, fontSize:12, color:C.navy, fontWeight:600, marginTop:2 }}>{v}</div>
+              <div style={{ fontFamily:T.body, fontSize:12, color:C.ink, fontWeight:600, marginTop:2 }}>{v}</div>
             </div>
           ))}
         </div>
@@ -10386,7 +10436,7 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
                   padding:"10px 14px",
                   background: active ? "#F0FDF4" : C.creamD,
                   border:`1px solid ${active ? "#86EFAC" : C.borderL}`,
-                  borderRadius:7,
+                  borderRadius:9,
                   opacity: visible ? 1 : 0.25,
                   transform: visible ? "translateX(0)" : "translateX(-8px)",
                   transition:"all 0.35s cubic-bezier(.22,.68,0,1.2)",
@@ -10420,7 +10470,7 @@ function ContractLivePreview({ form, profile, phase, onAnimationDone, apiReady, 
       </div>
 
       <p style={{ color:C.textL, fontSize:11, marginTop:14, textAlign:"center", fontFamily:T.body }}>
-        ⚡ Génération de ton contrat en cours…
+        <IcoI name="bolt" />Génération de ton contrat en cours…
       </p>
     </div>
   );
@@ -10432,7 +10482,7 @@ function PricingPage({ onSelect, onBack }) {
     <div style={{ maxWidth:920, margin:"0 auto", padding:"56px 24px 96px" }}>
       <div className="fade-up" style={{ textAlign:"center", marginBottom:56 }}>
         <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:12 }}>TARIFS</div>
-        <h1 style={{ fontFamily:T.display, fontSize:38, color:C.navy, fontWeight:600, marginBottom:12, lineHeight:1.2 }}>
+        <h1 style={{ fontFamily:T.display, fontSize:38, color:C.ink, fontWeight:600, marginBottom:12, lineHeight:1.2 }}>
           Choisissez votre formule
         </h1>
         <p style={{ fontFamily:T.body, color:C.textM, fontSize:15 }}>
@@ -10446,21 +10496,21 @@ function PricingPage({ onSelect, onBack }) {
           features={["2 contrats d'essai","PDF inclus","Toutes les clauses"]}
           color={C.textL} cta={null} />
         {/* Unité */}
-        <PricingCard icon="📦" title="À l'unité" price="4€" sub="par contrat"
+        <PricingCard icon="" title="À l'unité" price="4€" sub="par contrat"
           features={["1 contrat complet","Scan + Extraction automatique","Téléchargement PDF","Idéal 1-2 missions/an"]}
-          color="#3B7DD8" cta="Choisir" onSelect={() => onSelect("unite")} />
+          color="#6366F1" cta="Choisir" onSelect={() => onSelect("unite")} />
         {/* Mensuel — highlighted */}
-        <PricingCard icon="🌙" title="Mensuel" price="17€" sub="/ mois · sans engagement"
+        <PricingCard icon="" title="Mensuel" price="17€" sub="/ mois · sans engagement"
           features={["Scans & contrats illimités","Négociations illimitées","Factures illimitées","Support prioritaire"]}
           color={C.gold} cta="S'abonner" recommended onSelect={() => onSelect("mensuel")} />
         {/* Annuel */}
-        <PricingCard icon="☀️" title="Annuel" price="149€" sub="/ an · ~12,40€/mois"
+        <PricingCard icon="" title="Annuel" price="149€" sub="/ an · ~12,40€/mois"
           features={["Tout illimité","Économisez 4 mois de forfait","PDF illimités","Historique illimité"]}
           color="#7C4DFF" cta="Choisir" badge="MEILLEURE VALEUR" onSelect={() => onSelect("annuel")} />
       </div>
 
       {/* Comparison */}
-      <div className="fade-up fade-up-3" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:28, marginBottom:32, boxShadow:"0 2px 12px #1B2E4B06" }}>
+      <div className="fade-up fade-up-3" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:28, marginBottom:32, boxShadow:"0 2px 12px #4338CA06" }}>
         <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.15em", color:C.textL, fontWeight:600, marginBottom:20 }}>COMPARAISON DES FORMULES</div>
         <div style={{ overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
         <table style={{ width:"100%", minWidth:400, borderCollapse:"collapse", fontFamily:T.body, fontSize:13 }}>
@@ -10510,13 +10560,88 @@ function PricingPage({ onSelect, onBack }) {
 /* ══════════════════════════════════════════ COMPONENTS ══ */
 
 /* ── InstantToolsBar : barre d'outils IA en haut de page ── */
+/* ─── Icônes (version 259) ─── */
+// Traits fins, de la couleur du texte autour (currentColor). Elles remplacent les emojis de l'écran d'accueil.
+const ICON_PATHS = {
+  lock: <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
+  clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
+  invoice: <><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /><path d="M8 13h8" /><path d="M8 17h5" /></>,
+  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6" /></>,
+  shield: <><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /><path d="M9 12l2 2 4-4" /></>,
+  grid: <><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></>,
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>,
+  message: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />,
+  help: <><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2.2-2.4 3.7" /><path d="M12 17h.01" /></>,
+  camera: <><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /><circle cx="12" cy="12.5" r="3.5" /></>,
+  sparkle: <path d="M12 5.5l1.8 4.7 4.7 1.8-4.7 1.8L12 18.5l-1.8-4.7-4.7-1.8 4.7-1.8z" />,
+  chevronDown: <path d="M6 9l6 6 6-6" />,
+  plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
+  download: <><path d="M12 4v11" /><path d="M7 10l5 5 5-5" /><path d="M5 20h14" /></>,
+  mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></>,
+  trash: <><path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M6 7l1 13h10l1-13" /><path d="M9 7V4h6v3" /></>,
+  copy: <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
+  link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
+  checkCircle: <><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-6" /></>,
+  pen: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>,
+  send: <><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4z" /></>,
+  package: <><path d="M21 8l-9-5-9 5v8l9 5 9-5z" /><path d="M3 8l9 5 9-5" /><path d="M12 13v8" /></>,
+  alert: <><path d="M12 3l10 18H2z" /><path d="M12 10v5" /><path d="M12 18h.01" /></>,
+  bolt: <path d="M13 2L4 14h7l-1 8 9-12h-7z" />,
+  receipt: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6" /><path d="M9 12h6" /></>,
+  card: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /><path d="M7 15h3" /></>,
+  archive: <><rect x="3" y="4" width="18" height="5" rx="1.5" /><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9" /><path d="M10 13h4" /></>,
+  book: <><path d="M4 19V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" /><path d="M4 19a2 2 0 0 0 2 2h13" /></>,
+  tag: <><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z" /><circle cx="8" cy="8" r="1.5" /></>,
+  coins: <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></>,
+  hourglass: <><path d="M6 3h12M6 21h12" /><path d="M7 3v3l5 6-5 6v3" /><path d="M17 3v3l-5 6 5 6v3" /></>,
+  chart: <><path d="M4 20V10" /><path d="M10 20V4" /><path d="M16 20v-7" /><path d="M3 20h18" /></>,
+  award: <><circle cx="12" cy="9" r="6" /><path d="M8.5 14L7 22l5-3 5 3-1.5-8" /></>,
+  briefcase: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /><path d="M3 13h18" /></>,
+  paperclip: <path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7L14 4.5a3.5 3.5 0 0 1 5 5L10.5 18a2 2 0 0 1-3-3L15 7.5" />,
+  bank: <><path d="M3 10l9-6 9 6" /><path d="M5 10v8" /><path d="M10 10v8" /><path d="M14 10v8" /><path d="M19 10v8" /><path d="M3 20h18" /></>,
+  calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18" /><path d="M8 3v4" /><path d="M16 3v4" /></>,
+  pause: <><circle cx="12" cy="12" r="9" /><path d="M10 9v6" /><path d="M14 9v6" /></>,
+  phone: <><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" /></>,
+  key: <><circle cx="8" cy="15" r="4" /><path d="M10.8 12.2L20 3" /><path d="M16 7l3 3" /></>,
+  save: <><path d="M5 3h11l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /><path d="M8 3v5h7V3" /><rect x="8" y="13" width="8" height="6" rx="1" /></>,
+};
+function Ico({ name, size = 18, stroke = 1.8, style }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"
+      style={{ display:"block", flexShrink:0, ...style }}>
+      {ICON_PATHS[name]}
+    </svg>
+  );
+}
+
+// Version 261 : icône posée dans une ligne de texte (bouton, phrase), avant les mots
+function IcoI({ name, size = 15, stroke = 2, gap = 6, style }) {
+  return <Ico name={name} size={size} stroke={stroke} style={{ display:"inline-block", verticalAlign:"-0.18em", marginRight:gap, ...style }} />;
+}
+
+// Version 260 : une ligne du menu sur le côté
+function SideItem({ icon, label, active, onClick, badge, title }) {
+  return (
+    <button type="button" onClick={onClick} title={title} aria-current={active ? "page" : undefined}
+      className={active ? "ft-side-item ft-side-item-active" : "ft-side-item"}>
+      <Ico name={icon} size={18} />
+      <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{label}</span>
+      {badge > 0 && <span className="ft-side-badge">{badge}</span>}
+    </button>
+  );
+}
+
 function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfile, onRadar }) {
   const [openTip, setOpenTip] = useState(null);
 
   const TOOLS = [
     {
       id: "nda",
-      icon: "🔒",
+      icon: "lock",
       label: "Générer un NDA",
       accent: C.navy,
       accentLight: "#EFF6FF",
@@ -10529,7 +10654,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
     },
     {
       id: "recouvrement",
-      icon: "🚨",
+      icon: "clock",
       label: "Recouvrement Ferme",
       accent: "#DC2626",
       accentLight: "#FEF2F2",
@@ -10545,7 +10670,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
     },
     {
       id: "scanner",
-      icon: "🔍",
+      icon: "search",
       label: "Scanner un contrat",
       accent: "#0369A1",
       accentLight: "#F0F9FF",
@@ -10558,7 +10683,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
     },
     {
       id: "invoice",
-      icon: "📄",
+      icon: "invoice",
       label: "Facture",
       accent: C.gold,
       accentLight: "#FFFBEB",
@@ -10571,7 +10696,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
     },
     {
       id: "profile",
-      icon: "👤",
+      icon: "user",
       label: "Mon Profil",
       accent: "#059669",
       accentLight: "#ECFDF5",
@@ -10584,7 +10709,7 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
     },
     {
       id: "radar",
-      icon: "🛡️",
+      icon: "shield",
       label: "Radar Client",
       accent: "#7C3AED",
       accentLight: "#F5F3FF",
@@ -10599,143 +10724,52 @@ function InstantToolsBar({ onNda, onRecouvrement, onScanner, onInvoice, onProfil
 
   const activeTool = TOOLS.find(t => t.id === openTip);
 
+  // Version 259 : les outils deviennent des cartes (icône, nom, phrase courte), comme sur la maquette « Indigo ».
+  // Un clic ouvre toujours le détail et le bouton « Lancer … ».
   return (
-    <div style={{
-      background: C.white,
-      borderBottom: `1px solid ${C.borderL}`,
-      padding: "0 16px",
-    }}>
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "10px 0 0" }}>
-
-        {/* Titre */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <span style={{ fontSize: 13 }}>⚡</span>
-          <span style={{
-            fontFamily: T.body, fontSize: 10, letterSpacing: "0.16em",
-            color: C.textL, fontWeight: 700,
-          }}>VOS OUTILS INSTANTANÉS</span>
+    <div style={{ padding: "0 16px" }}>
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "24px 0 4px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+          <h2 style={{ margin: 0, fontFamily: T.display, fontSize: 18, fontWeight: 700, color: C.ink, letterSpacing: "-0.01em" }}>Tes outils</h2>
+          <span className="ft-tools-sub" style={{ fontFamily: T.body, fontSize: 13, color: C.textL }}>Tout ce qu'il te faut autour de tes contrats</span>
+        </div>
+        <div className="ft-tools-grid">
+          {TOOLS.map(tool => {
+            const open = openTip === tool.id;
+            return (
+              <button key={tool.id} type="button" className={open ? "ft-tool ft-tool-open" : "ft-tool"} aria-expanded={open}
+                onClick={() => setOpenTip(open ? null : tool.id)}>
+                <span className="ft-tool-ico"><Ico name={tool.icon} size={20} /></span>
+                <span className="ft-tool-txt">
+                  <span className="ft-tool-label">{tool.label}</span>
+                  <span className="ft-tool-desc">{tool.description}</span>
+                </span>
+                <span className="ft-tool-chev"><Ico name="chevronDown" size={16} stroke={2} /></span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Grille 2 colonnes — boutons uniquement */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, 1fr)",
-          gap: 8,
-          marginBottom: openTip ? 0 : 10,
-        }}>
-          {TOOLS.map(tool => (
-            <button
-              key={tool.id}
-              className="instant-action-btn"
-              onClick={() => setOpenTip(openTip === tool.id ? null : tool.id)}
-              style={{
-                display: "flex", alignItems: "center", gap: 7,
-                padding: "9px 12px",
-                width: "100%",
-                background: openTip === tool.id ? tool.accentLight : "transparent",
-                border: `1px solid ${openTip === tool.id ? tool.accentBorder : C.border}`,
-                borderRadius: openTip === tool.id ? "8px 8px 0 0" : 8,
-                cursor: "pointer",
-                fontFamily: T.body, fontSize: 12, fontWeight: 600,
-                color: openTip === tool.id ? tool.accentText : C.textM,
-                transition: "all .18s",
-                justifyContent: "space-between",
-              }}
-              onMouseOver={e => {
-                if (openTip !== tool.id) {
-                  e.currentTarget.style.background = tool.accentLight;
-                  e.currentTarget.style.borderColor = tool.accentBorder;
-                  e.currentTarget.style.color = tool.accentText;
-                }
-              }}
-              onMouseOut={e => {
-                if (openTip !== tool.id) {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.borderColor = C.border;
-                  e.currentTarget.style.color = C.textM;
-                }
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: 7, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 14, flexShrink: 0 }}>{tool.icon}</span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tool.label}</span>
-              </span>
-              <span style={{
-                fontSize: 9, opacity: 0.55, flexShrink: 0,
-                transform: openTip === tool.id ? "rotate(180deg)" : "rotate(0deg)",
-                transition: "transform 0.2s",
-                display: "inline-block",
-              }}>▾</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Panneau de détail — inline, pleine largeur, sous la grille */}
+        {/* Détail de l'outil choisi, sous les cartes */}
         {activeTool && (
-          <div
-            className="fade-up"
-            style={{
-              width: "100%",
-              background: activeTool.accentLight,
-              border: `1.5px solid ${activeTool.accentBorder}`,
-              borderTop: "none",
-              borderRadius: "0 0 10px 10px",
-              padding: "16px",
-              marginBottom: 10,
-              animation: "fadeUp 0.18s ease both",
-            }}
-          >
-            {/* Header outil */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                background: C.white,
-                border: `1.5px solid ${activeTool.accentBorder}`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 15,
-              }}>{activeTool.icon}</div>
-              <div style={{
-                fontFamily: T.body, fontSize: 13, fontWeight: 700,
-                color: activeTool.accentText, lineHeight: 1.3,
-              }}>{activeTool.title}</div>
+          <div className="fade-up" style={{ marginTop: 12, background: C.white, border: `1px solid ${C.border}`, borderRadius: 16, padding: 18, boxShadow: "0 8px 24px rgba(19,17,28,0.06)", animation: "fadeUp 0.18s ease both" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+              <span style={{ width: 36, height: 36, borderRadius: 10, background: "#EEF0FF", color: "#4338CA", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ico name={activeTool.icon} size={18} /></span>
+              <div style={{ fontFamily: T.body, fontSize: 15, fontWeight: 700, color: C.ink, lineHeight: 1.3 }}>{activeTool.title}</div>
             </div>
-
-            {/* Description */}
-            <div style={{
-              fontFamily: T.body, fontSize: 12, color: C.textM,
-              lineHeight: 1.6, marginBottom: 10,
-            }}>{activeTool.description}</div>
-
-            {/* Exemple */}
-            <div style={{
-              background: C.white,
-              border: `1px solid ${activeTool.accentBorder}`,
-              borderRadius: 8, padding: "9px 12px",
-              fontFamily: T.body, fontSize: 11, color: activeTool.accentText,
-              lineHeight: 1.6, marginBottom: 12,
-            }}>
-              <span style={{ fontWeight: 700, fontSize: 10, letterSpacing: "0.06em", opacity: 0.7, display: "block", marginBottom: 3 }}>EXEMPLE</span>
+            <div style={{ background: "#F7F7FB", border: `1px solid ${C.borderL}`, borderRadius: 12, padding: "10px 14px", fontFamily: T.body, fontSize: 13, color: C.textM, lineHeight: 1.6, marginBottom: 14 }}>
+              <span style={{ fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", color: "#4338CA", display: "block", marginBottom: 3 }}>EXEMPLE</span>
               {activeTool.example}
             </div>
-
-            {/* CTA */}
-            <button
-              onClick={() => { setOpenTip(null); activeTool.onClick(); }}
-              style={{
-                width: "100%", padding: "11px",
-                background: `linear-gradient(135deg, ${activeTool.accent} 0%, ${activeTool.accent}CC 100%)`,
-                color: "#fff", border: "none", borderRadius: 8,
-                fontFamily: T.body, fontSize: 13, fontWeight: 700,
-                cursor: "pointer", display: "flex", alignItems: "center",
-                justifyContent: "center", gap: 7,
-                boxShadow: `0 4px 14px ${activeTool.accent}30`,
-              }}
-            >
-              {activeTool.icon} Lancer {activeTool.label}
+            <button type="button" onClick={() => { setOpenTip(null); activeTool.onClick(); }} style={{
+              width: "100%", minHeight: 46, padding: "11px 16px", background: C.navy, color: "#fff", border: "none", borderRadius: 12,
+              fontFamily: T.body, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center",
+              justifyContent: "center", gap: 8, boxShadow: "0 6px 16px rgba(67,56,202,0.22)",
+            }}>
+              <Ico name={activeTool.icon} size={17} /> Lancer {activeTool.label}
             </button>
           </div>
         )}
-
       </div>
     </div>
   );
@@ -10799,7 +10833,7 @@ function AdminFeedbackPage() {
   if (status === "denied") {
     return (
       <div style={{ padding:40, fontFamily:T.body, textAlign:"center" }}>
-        <div style={{ fontSize:32, marginBottom:10 }}>🔒</div>
+        <div style={{ fontSize:32, marginBottom:10 }}><IcoI name="lock" size={32} stroke={1.8} gap={0} /></div>
         <div style={{ fontWeight:700 }}>Accès réservé</div>
         <div style={{ color:"#888", fontSize:13, marginTop:6 }}>Connecte-toi avec le compte admin pour voir cette page.</div>
       </div>
@@ -10816,10 +10850,10 @@ function AdminFeedbackPage() {
       <div style={{ display:"flex", gap:8, marginBottom:20 }}>
         {["tous", "bug", "idee"].map(f => (
           <button key={f} onClick={() => setFilter(f)} style={{
-            padding:"7px 14px", borderRadius:8, fontSize:12.5, fontWeight:600, cursor:"pointer",
+            padding:"7px 14px", borderRadius:10, fontSize:12.5, fontWeight:600, cursor:"pointer",
             border: filter === f ? "2px solid #1E1B4B" : "1px solid #ddd",
             background: filter === f ? "#EEF2FF" : "#fff", color: filter === f ? "#1E1B4B" : "#666",
-          }}>{f === "tous" ? "Tous" : f === "bug" ? "🐛 Bugs" : "💡 Idées"}</button>
+          }}>{f === "tous" ? "Tous" : f === "bug" ? "Bugs" : <><IcoI name="info" />Idées</>}</button>
         ))}
       </div>
 
@@ -10831,22 +10865,22 @@ function AdminFeedbackPage() {
 
       {filtered.map(m => (
         <div key={m.id} style={{
-          background:"#fff", borderRadius:12, padding:16, marginBottom:12,
+          background:"#fff", borderRadius:14, padding:16, marginBottom:12,
           border:"1px solid #eee", boxShadow:"0 2px 8px rgba(0,0,0,0.04)",
         }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
             <span style={{
-              fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:6,
+              fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:8,
               background: m.type === "bug" ? "#FEF2F2" : "#ECFDF5",
               color: m.type === "bug" ? "#DC2626" : "#059669",
-            }}>{m.type === "bug" ? "🐛 BUG" : "💡 IDÉE"}</span>
+            }}>{m.type === "bug" ? "BUG" : <><IcoI name="info" />IDÉE</>}</span>
             <span style={{ fontSize:11.5, color:"#999" }}>
               {new Date(m.created_at).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })}
             </span>
           </div>
           <div style={{ fontSize:14, lineHeight:1.5, marginBottom:8, whiteSpace:"pre-wrap" }}>{m.message}</div>
           <div style={{ fontSize:11.5, color:"#999" }}>
-            {m.email && <>✉️ {m.email} · </>}
+            {m.email && <><IcoI name="mail" size={14} stroke={1.8} gap={0} /> {m.email} · </>}
             {safeFeedbackUrl(m.page_url)
               ? <a href={safeFeedbackUrl(m.page_url)} target="_blank" rel="noopener noreferrer" style={{ color:"#999" }}>page concernée</a>
               : (m.page_url ? <span title={String(m.page_url).slice(0, 300)}>page inconnue</span> : null)}
@@ -10927,7 +10961,7 @@ function FeedbackBubble() {
           display:"flex", alignItems:"center", justifyContent:"center",
           fontSize:20,
         }}
-      >💬</button>
+      ><Ico name="message" size={21} stroke={2} /></button>
 
       {open && (
         <div className="freeley-floating freeley-feedback-panel" style={{
@@ -10938,7 +10972,7 @@ function FeedbackBubble() {
         }}>
           {sent ? (
             <div style={{ textAlign:"center", padding:"12px 0", fontFamily:T.body }}>
-              <div style={{ fontSize:28, marginBottom:6 }}>✅</div>
+              <div style={{ fontSize:28, marginBottom:6 }}><IcoI name="checkCircle" size={28} stroke={1.8} gap={0} /></div>
               <div style={{ fontWeight:700 }}>Message envoyé, merci !</div>
               <div style={{ fontSize:12.5, color:"#888", marginTop:4 }}>On revient vers toi si besoin.</div>
             </div>
@@ -10949,15 +10983,15 @@ function FeedbackBubble() {
               </div>
               <div style={{ display:"flex", gap:8, marginBottom:10 }}>
                 <button onClick={() => setType("bug")} style={{
-                  flex:1, padding:"7px 0", borderRadius:8, fontSize:12.5, fontWeight:600, cursor:"pointer",
+                  flex:1, padding:"7px 0", borderRadius:10, fontSize:12.5, fontWeight:600, cursor:"pointer",
                   border: type === "bug" ? "2px solid #DC2626" : "1px solid #ddd",
                   background: type === "bug" ? "#FEF2F2" : "#fff", color: type === "bug" ? "#DC2626" : "#666",
-                }}>🐛 Bug</button>
+                }}>Bug</button>
                 <button onClick={() => setType("idee")} style={{
-                  flex:1, padding:"7px 0", borderRadius:8, fontSize:12.5, fontWeight:600, cursor:"pointer",
+                  flex:1, padding:"7px 0", borderRadius:10, fontSize:12.5, fontWeight:600, cursor:"pointer",
                   border: type === "idee" ? "2px solid #059669" : "1px solid #ddd",
                   background: type === "idee" ? "#ECFDF5" : "#fff", color: type === "idee" ? "#059669" : "#666",
-                }}>💡 Idée</button>
+                }}><IcoI name="info" />Idée</button>
               </div>
               <textarea
                 value={message}
@@ -10966,7 +11000,7 @@ function FeedbackBubble() {
                 rows={4}
                 maxLength={FEEDBACK_MAX}
                 style={{
-                  width:"100%", boxSizing:"border-box", padding:10, borderRadius:8,
+                  width:"100%", boxSizing:"border-box", padding:10, borderRadius:10,
                   border:"1px solid #ddd", fontFamily:T.body, fontSize:13, resize:"none", marginBottom:8,
                 }}
               />
@@ -10982,7 +11016,7 @@ function FeedbackBubble() {
                 placeholder="Ton email (pour te répondre)"
                 maxLength={320}
                 style={{
-                  width:"100%", boxSizing:"border-box", padding:9, borderRadius:8,
+                  width:"100%", boxSizing:"border-box", padding:9, borderRadius:10,
                   border:"1px solid #ddd", fontFamily:T.body, fontSize:12.5, marginBottom:10,
                 }}
               />
@@ -10991,7 +11025,7 @@ function FeedbackBubble() {
                 onClick={handleSend}
                 disabled={!message.trim() || sending}
                 style={{
-                  width:"100%", padding:"10px 0", borderRadius:8, border:"none",
+                  width:"100%", padding:"10px 0", borderRadius:10, border:"none",
                   background: !message.trim() || sending ? "#ccc" : (C.navy || "#1E1B4B"),
                   color:"#fff", fontWeight:700, fontSize:13,
                   cursor: !message.trim() || sending ? "default" : "pointer",
@@ -11027,7 +11061,7 @@ const radarAge = (iso) => {
   return diff >= 0 ? diff / (1000 * 60 * 60 * 24 * 365.25) : null;
 };
 const radarAgeLabel = (age) => `${age.toFixed(1).replace(".", ",")} an${age >= 2 ? "s" : ""}`;
-function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser cette entreprise pour la facture", unavailableNote = "" }) {
+function RadarClientModal({ onClose, onSelectCompany, useLabel = "Utiliser cette entreprise pour la facture", unavailableNote = "" }) {
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [query, setQuery] = useState("");
   const [searchedSiret, setSearchedSiret] = useState(""); // SIRET tapé (14 chiffres) : on garde cet établissement
@@ -11096,12 +11130,12 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
   const renderVerdict = (c) => {
     const age = radarAge(c.date_creation);
     if (c.etat_administratif !== "A") {
-      return { color: "#DC2626", bg: "#FEF2F2", icon: "🔴", text: "Entreprise fermée / cessée d'activité" };
+      return { color: "#DC2626", bg: "#FEF2F2", icon: <span style={{ display:"inline-block", width:8, height:8, borderRadius:4, background:"#DC2626", marginRight:6, verticalAlign:"middle" }} />, text: "Entreprise fermée / cessée d'activité" };
     }
     if (age !== null && age < 1) {
-      return { color: "#D97706", bg: "#FFFBEB", icon: "🟠", text: "Entreprise active, mais créée il y a moins d'un an" };
+      return { color: "#D97706", bg: "#FFFBEB", icon: <span style={{ display:"inline-block", width:8, height:8, borderRadius:4, background:"#D97706", marginRight:6, verticalAlign:"middle" }} />, text: "Entreprise active, mais créée il y a moins d'un an" };
     }
-    return { color: "#059669", bg: "#ECFDF5", icon: "🟢", text: "Entreprise active" };
+    return { color: "#059669", bg: "#ECFDF5", icon: <span style={{ display:"inline-block", width:8, height:8, borderRadius:4, background:"#059669", marginRight:6, verticalAlign:"middle" }} />, text: "Entreprise active" };
   };
 
   return (
@@ -11118,7 +11152,7 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
         }}
       >
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-          <div style={{ fontWeight:800, fontSize:18 }}>🛡️ Radar Client</div>
+          <div style={{ fontWeight:800, fontSize:18 }}><IcoI name="shield" size={18} />Radar Client</div>
           <button onClick={onClose} aria-label="Fermer" style={{ background:"none", border:"none", fontSize:22, cursor:"pointer", color:"#999" }}>×</button>
         </div>
         <div style={{ fontSize:13, color:"#888", marginBottom:16 }}>
@@ -11133,7 +11167,7 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
             placeholder="Nom de l'entreprise ou SIRET"
             enterKeyHint="search"
             style={{
-              flex:1, minWidth:0, padding:"12px 14px", borderRadius:10, border:"1px solid #ddd",
+              flex:1, minWidth:0, padding:"12px 14px", borderRadius:12, border:"1px solid #ddd",
               fontFamily:T.body, fontSize:14, boxSizing:"border-box",
             }}
           />
@@ -11141,7 +11175,7 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
             onClick={handleSearch}
             disabled={!query.trim() || loading}
             style={{
-              flexShrink:0, padding:"0 16px", borderRadius:10, border:"none",
+              flexShrink:0, padding:"0 16px", borderRadius:12, border:"none",
               background: !query.trim() || loading ? "#ccc" : "#7C3AED",
               color:"#fff", fontWeight:700, cursor: !query.trim() || loading ? "default" : "pointer",
             }}
@@ -11162,13 +11196,13 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
               onClick={() => setSelected(c)}
               style={{
                 display:"block", width:"100%", textAlign:"left",
-                background:"#fafafa", border:"1px solid #eee", borderRadius:10,
+                background:"#fafafa", border:"1px solid #eee", borderRadius:12,
                 padding:12, marginBottom:8, cursor:"pointer", boxSizing:"border-box",
               }}
             >
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                 <div style={{ fontWeight:700, fontSize:14, minWidth:0, wordBreak:"break-word" }}>{i.name || "Nom non diffusé"}</div>
-                <span style={{ flexShrink:0, fontSize:11, fontWeight:700, color: i.active ? "#059669" : "#DC2626" }}>{i.active ? "🟢 Active" : "🔴 Fermée"}</span>
+                <span style={{ flexShrink:0, fontSize:11, fontWeight:700, color: i.active ? "#059669" : "#DC2626" }}>{i.active ? "Active" : "Fermée"}</span>
               </div>
               <div style={{ fontSize:12, color:"#888", marginTop:2 }}>{i.address || (i.hidden ? "Adresse non diffusée" : "Adresse non renseignée")}</div>
               <div style={{ fontSize:11, color:"#aaa", marginTop:2 }}>SIREN {c.siren}</div>
@@ -11195,7 +11229,7 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
                 marginBottom:12, padding:0, fontWeight:600,
               }}>← Retour aux résultats</button>
 
-              <div style={{ background:v.bg, border:`1px solid ${v.color}33`, borderRadius:12, padding:14, marginBottom:14 }}>
+              <div style={{ background:v.bg, border:`1px solid ${v.color}33`, borderRadius:14, padding:14, marginBottom:14 }}>
                 <div style={{ color:v.color, fontWeight:700, fontSize:14 }}>{v.icon} {v.text}</div>
               </div>
 
@@ -11207,28 +11241,28 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
                 <div style={{ fontSize:12, color:"#888", marginBottom: i.hidden ? 6 : 14 }}>Siège : {headOffice}</div>
               )}
               {i.hidden && (
-                <div style={{ fontSize:12, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:8, padding:"8px 10px", marginBottom:14, lineHeight:1.5 }}>
+                <div style={{ fontSize:12, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"8px 10px", marginBottom:14, lineHeight:1.5 }}>
                   Cette entreprise a demandé que certaines de ses informations ne soient pas publiques. Demande-les directement à ton client.
                 </div>
               )}
 
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, fontSize:13 }}>
-                <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
+                <div style={{ background:"#f7f7f7", borderRadius:10, padding:10 }}>
                   <div style={{ color:"#999", fontSize:11 }}>{i.place ? "SIRET" : "SIREN"}</div>
                   <div style={{ fontWeight:700, wordBreak:"break-all" }}>{i.place ? i.siret : selected.siren}</div>
                 </div>
-                <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
+                <div style={{ background:"#f7f7f7", borderRadius:10, padding:10 }}>
                   <div style={{ color:"#999", fontSize:11 }}>Créée le</div>
                   <div style={{ fontWeight:700 }}>
                     {isIsoDay(selected.date_creation) ? isoDayFr(selected.date_creation) : "—"}
                     {age !== null && <span style={{ color:"#999", fontWeight:400 }}> ({radarAgeLabel(age)})</span>}
                   </div>
                 </div>
-                <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
+                <div style={{ background:"#f7f7f7", borderRadius:10, padding:10 }}>
                   <div style={{ color:"#999", fontSize:11 }}>Statut</div>
                   <div style={{ fontWeight:700 }}>{i.active ? "Active" : "Fermée"}</div>
                 </div>
-                <div style={{ background:"#f7f7f7", borderRadius:8, padding:10 }}>
+                <div style={{ background:"#f7f7f7", borderRadius:10, padding:10 }}>
                   <div style={{ color:"#999", fontSize:11 }}>N° TVA</div>
                   <div style={{ fontWeight:700, wordBreak:"break-all" }}>{i.tva || "Aucun numéro actif"}</div>
                 </div>
@@ -11259,20 +11293,20 @@ function RadarClientModal({ onClose, onSelectCompany, useLabel = "✅ Utiliser c
                   }).catch(() => {});
                 }}
                 style={{
-                  width:"100%", padding:"12px 0", borderRadius:10, border:"none",
+                  width:"100%", padding:"12px 0", borderRadius:12, border:"none",
                   background: copied ? "#059669" : "#7C3AED",
                   color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer",
                 }}
-              >{copied ? "✅ Copié !" : "📋 Copier les infos"}</button>
+              >{copied ? "✓ Copié !" : <><IcoI name="copy" />Copier les infos</>}</button>
               {onSelectCompany ? (
                 <button
                   onClick={() => { onSelectCompany(toUse); onClose(); }}
                   style={{
-                    width:"100%", padding:"12px 0", borderRadius:10, border:"none",
+                    width:"100%", padding:"12px 0", borderRadius:12, border:"none",
                     background: i.active ? "#059669" : "#B45309", marginTop:8,
                     color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer",
                   }}
-                >{i.active ? useLabel : "⚠️ Utiliser quand même (entreprise fermée)"}</button>
+                >{i.active ? useLabel : "Utiliser quand même (entreprise fermée)"}</button>
               ) : unavailableNote ? (
                 <div style={{ fontSize:12, color:"#888", marginTop:10, textAlign:"center", lineHeight:1.5 }}>{unavailableNote}</div>
               ) : null}
@@ -11518,7 +11552,7 @@ function buildAlertsFromHistory(history, profile = null) {
         id: "soon_" + rc.id,
         at: rc.since,
         read: false,
-        icon: "⏰",
+        icon: "",
         accentBg: "#FFFBEB",
         accentIcon: "#FEF3C7",
         accentBorder: "#FCD34D",
@@ -11535,7 +11569,7 @@ function buildAlertsFromHistory(history, profile = null) {
         id: "recouvre_" + rc.id,
         at: rc.since,
         read: false,
-        icon: "⚠️",
+        icon: "",
         accentBg: "#FEF5F5",
         accentIcon: "#FEE2E2",
         accentBorder: "#FCA5A5",
@@ -11558,7 +11592,7 @@ function buildAlertsFromHistory(history, profile = null) {
         id: "invoice_" + c.id,
         at: isoDayPlus(c.endDate, 1),
         read: false,
-        icon: "🧾",
+        icon: "",
         accentBg: "#F8FAFC",
         accentIcon: "#E2E8F0",
         accentBorder: "#CBD5E1",
@@ -11577,7 +11611,7 @@ function buildAlertsFromHistory(history, profile = null) {
         id: "sign_" + c.id,
         at: c.createdAt || frDayToIso(c.date),
         read: false,
-        icon: "✍️",
+        icon: "",
         accentBg: "#FFFBEB",
         accentIcon: "#FEF3C7",
         accentBorder: "#FCD34D",
@@ -11601,7 +11635,7 @@ function buildAlertsFromHistory(history, profile = null) {
         id: "retractconf_" + c.id,
         at: c.retractationWaivedAt || c.signedByClientAt,
         read: false,
-        icon: late ? "🚨" : "⏳",
+        icon: late ? "" : "",
         accentBg: late ? "#FEF5F5" : "#FFFBEB",
         accentIcon: late ? "#FEE2E2" : "#FEF3C7",
         accentBorder: late ? "#FCA5A5" : "#FCD34D",
@@ -11622,7 +11656,7 @@ function buildAlertsFromHistory(history, profile = null) {
         id: "retract_" + c.id,
         at: c.retractationExercisedAt,
         read: false,
-        icon: "⛔",
+        icon: "",
         accentBg: "#FEF5F5",
         accentIcon: "#FEE2E2",
         accentBorder: "#FCA5A5",
@@ -11642,7 +11676,7 @@ function buildAlertsFromHistory(history, profile = null) {
         id: "retract_req_" + c.id,
         at: c.retractationLateRequestAt,
         read: false,
-        icon: "📨",
+        icon: "",
         accentBg: "#FFF7ED",
         accentIcon: "#FFEDD5",
         accentBorder: "#FDBA74",
@@ -11665,7 +11699,7 @@ function buildNdaAlerts(myNdas) {
     id: "nda_signed_" + n.id,
     at: n.signed_at || n.created_at, // version 238 : pour ranger la cloche par date
     read: false,
-    icon: "✅",
+    icon: "",
     accentBg: "#F0FDF4",
     accentIcon: "#DCFCE7",
     accentBorder: "#BBF7D0",
@@ -11689,7 +11723,7 @@ function buildAvenantAlerts(history) {
           id: `avenant_signed_${entry.id}_${av.num}`,
           at: av.signedByClientAtServer || av.signedByClientAt || av.createdAt, // version 238
           read: false,
-          icon: "✅",
+          icon: "",
           accentBg: "#F0FDF4",
           accentIcon: "#DCFCE7",
           accentBorder: "#BBF7D0",
@@ -11777,7 +11811,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
         background:C.white,
         border:`1px solid ${C.border}`,
         borderRadius:16,
-        boxShadow:"0 20px 60px rgba(27,46,75,0.16), 0 4px 16px rgba(27,46,75,0.08)",
+        boxShadow:"0 20px 60px rgba(30,27,75,0.16), 0 4px 16px rgba(30,27,75,0.08)",
         zIndex:200,
         animation:"alertSlideDown 0.22s cubic-bezier(.22,.68,0,1.2) both",
         overflow:"hidden",
@@ -11790,18 +11824,18 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
         padding: isMobile ? "18px 18px 14px" : "16px 18px 14px",
         borderBottom:`1px solid ${C.borderL}`,
         display:"flex", alignItems:"center", justifyContent:"space-between",
-        background:"linear-gradient(135deg, #F7F5F0 0%, #FFFFFF 100%)",
+        background:"linear-gradient(135deg, #F7F7FB 0%, #FFFFFF 100%)",
         flexShrink:0,
       }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <div style={{
-            width:32, height:32, borderRadius:9,
+            width:32, height:32, borderRadius:11,
             background:`linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`,
             display:"flex", alignItems:"center", justifyContent:"center",
             fontSize:15, boxShadow:`0 3px 10px ${C.navy}30`,
-          }}>🔔</div>
+          }}><IcoI name="bell" size={15} stroke={1.8} gap={0} /></div>
           <div>
-            <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, lineHeight:1.2 }}>
+            <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.ink, lineHeight:1.2 }}>
               Centre d'Alertes
             </div>
             <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:1 }}>
@@ -11814,7 +11848,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
         <button
           onClick={onClose}
           style={{
-            width: isMobile ? 34 : 26, height: isMobile ? 34 : 26, borderRadius:7,
+            width: isMobile ? 34 : 26, height: isMobile ? 34 : 26, borderRadius:9,
             background:C.creamD, border:`1px solid ${C.border}`,
             cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
             fontSize: isMobile ? 17 : 14, color:C.textL, lineHeight:1,
@@ -11829,7 +11863,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
       <div style={{ padding:"8px 0 6px", flex: isMobile ? 1 : "0 1 auto", overflowY: isMobile ? "auto" : "visible" }}>
         {alerts.length === 0 && (
           <div style={{ padding:"40px 20px", textAlign:"center" }}>
-            <div style={{ fontSize:32, marginBottom:10 }}>🔔</div>
+            <div style={{ fontSize:32, marginBottom:10 }}><IcoI name="bell" size={32} stroke={1.8} gap={0} /></div>
             <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, fontWeight:600, marginBottom:4 }}>Aucune alerte</div>
             <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>Tu seras notifié ici des paiements à relancer et signatures en attente.</div>
           </div>
@@ -11872,7 +11906,7 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
 
               {/* Icône */}
               <div style={{
-                width:38, height:38, borderRadius:11, flexShrink:0,
+                width:38, height:38, borderRadius:13, flexShrink:0,
                 background: isUnread ? alert.accentIcon : C.creamD,
                 border:`1.5px solid ${isUnread ? alert.accentBorder : C.border}`,
                 display:"flex", alignItems:"center", justifyContent:"center",
@@ -11953,8 +11987,8 @@ function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNda
 }
 
 /* ══════════════════════════════════════════════════════════ HEADER ══ */
-function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onDrafts, onMyNdas, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
-  const planLabel = premiumPlan==="unite" ? "📄 Unité" : premiumPlan==="mensuel" ? "⭐ Mensuel" : premiumPlan==="annuel" ? "👑 Annuel" : null;
+function Header({ activeScreen, onNda, onRecouvrement, onScanner, onInvoice, onRadar, isPremium, premiumPlan, left, onPricing, onHome, onHistory, onDashboard, onCGU, onDrafts, onMyNdas, historyCount, authUser, onAuthClick, onSignOut, onProfile, profile, onOpenRecouvrement, onOpenNda, onOpenMission, onAlertsChanged, alerts = [] }) {
+  const planLabel = premiumPlan==="unite" ? "Unité" : premiumPlan==="mensuel" ? "Mensuel" : premiumPlan==="annuel" ? "Annuel" : null;
   const [userMenu, setUserMenu] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
   const profileName = [profile?.firstName, profile?.lastName].filter(Boolean).join(" ");
@@ -11964,19 +11998,55 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
 
   /* ── Responsive breakpoint (JS-driven) ── */
   const [isMobile, setIsMobile] = React.useState(window.innerWidth < 600);
+  // Version 260 : sur un grand écran, la navigation passe dans un menu sur le côté
+  const [isWide, setIsWide] = React.useState(window.innerWidth >= 1100);
   React.useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 600);
+    const handler = () => { setIsMobile(window.innerWidth < 600); setIsWide(window.innerWidth >= 1100); };
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }, []);
 
+  // La page se décale pour laisser la place au menu (avant l'affichage, pour éviter un saut entre deux écrans)
+  React.useLayoutEffect(() => {
+    if (!isWide) return;
+    document.body.classList.add("ft-has-sidebar");
+    return () => document.body.classList.remove("ft-has-sidebar");
+  }, [isWide]);
+
+  const sidebar = isWide ? createPortal(
+    <aside className="ft-sidebar" aria-label="Menu principal">
+      <button type="button" className="ft-side-logo" onClick={onHome} aria-label="Freeley, accueil">
+        <img src={FREELEY_LOGO} alt="" style={{ height:30, width:30, objectFit:"contain" }} />
+        <span style={{ fontFamily:LOGO_FONT, fontSize:17, color:LOGO_NAVY, fontWeight:600, letterSpacing:"0.01em", whiteSpace:"nowrap" }}>Freeley</span>
+      </button>
+      <button type="button" className="ft-side-new" onClick={onHome}><Ico name="plus" size={18} stroke={2} />Nouveau contrat</button>
+      <nav className="ft-side-nav" aria-label="Navigation">
+        <div className="ft-side-group">Mon activité</div>
+        <SideItem icon="grid" label="Tableau de bord" title="Tableau de bord" active={activeScreen === "dashboard"} onClick={onDashboard} />
+        <SideItem icon="folder" label="Mes contrats" title="Mes contrats" active={activeScreen === "history"} onClick={onHistory} badge={historyCount} />
+        <div className="ft-side-group">Outils</div>
+        <SideItem icon="lock" label="Accord de confidentialité" onClick={onNda} title="Un NDA prêt à signer en ligne" />
+        <SideItem icon="clock" label="Factures en retard" onClick={onRecouvrement} title={FORMAL_LETTER_ENABLED ? "Relances amiables et mise en demeure" : "Relances de paiement"} />
+        <SideItem icon="search" label="Analyser un contrat" onClick={onScanner} title="Repère les clauses à risque d'un contrat reçu" />
+        <SideItem icon="invoice" label="Facture libre" onClick={onInvoice} title="Une facture PDF en quelques clics" />
+        <SideItem icon="shield" label="Radar client" onClick={onRadar} title="Vérifie qu'une entreprise existe vraiment" />
+        <SideItem icon="user" label="Mon profil" active={activeScreen === "profile"} onClick={onProfile} />
+      </nav>
+    </aside>,
+    document.body
+  ) : null;
+
   return (
-    <div style={{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:"0 12px", height:56, display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, position:"sticky", top:0, zIndex:20, boxShadow:"0 1px 0 #D8D4CB" }}>
-      {/* ── Logo ── */}
+    <>
+    {sidebar}
+    <div style={{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:"0 12px", height:56, display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, position:"sticky", top:0, zIndex:20, boxShadow:"0 1px 0 #DCDCE6" }}>
+      {/* ── Logo (dans le menu sur le côté, sur un grand écran) ── */}
+      {isWide ? <div /> : (
       <div onClick={onHome} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", flexShrink:0 }}>
         <img src={FREELEY_LOGO} alt="Freeley" style={{ height:30, width:30, objectFit:"contain" }} />
-        <span style={{ fontFamily:T.display, fontSize:17, color:C.navy, fontWeight:600, letterSpacing:"0.01em", whiteSpace:"nowrap" }}>Freeley</span>
+        <span style={{ fontFamily:LOGO_FONT, fontSize:17, color:LOGO_NAVY, fontWeight:600, letterSpacing:"0.01em", whiteSpace:"nowrap" }}>Freeley</span>
       </div>
+      )}
 
       {/* ── Actions droite ── */}
       <div style={{ display:"flex", alignItems:"center", gap:isMobile ? 4 : 8, flexShrink:0 }}>
@@ -11984,40 +12054,44 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
         {/* Ancien badge d'abonnement retiré (en attente de refonte) */}
 
         {/* Tableau de bord */}
+        {!isWide && (
         <button onClick={onDashboard} title="Tableau de bord" style={{
-          display:"flex", alignItems:"center", gap:5,
-          padding: isMobile ? "7px 8px" : "7px 12px",
-          background:"transparent", border:`1.5px solid ${C.border}`,
-          color:C.textM, borderRadius:7, cursor:"pointer", fontSize:12, fontFamily:T.body, fontWeight:500,
+          display:"flex", alignItems:"center", gap:7, height:40,
+          padding: isMobile ? "0 11px" : "0 14px",
+          background:C.white, border:`1px solid ${C.border}`,
+          color:C.textM, borderRadius:12, cursor:"pointer", fontSize:13.5, fontFamily:T.body, fontWeight:600,
           transition:"all .18s", position:"relative", whiteSpace:"nowrap",
         }}
           onMouseOver={e=>{ e.currentTarget.style.borderColor=C.navy; e.currentTarget.style.color=C.navy; }}
           onMouseOut={e=>{ e.currentTarget.style.borderColor=C.border; e.currentTarget.style.color=C.textM; }}
         >
-          <span style={{ fontSize:14 }}>📊</span>
+          <Ico name="grid" size={17} />
           {!isMobile && "Tableau de bord"}
         </button>
+        )}
 
         {/* Mes contrats — icône + badge */}
+        {!isWide && (
         <button onClick={onHistory} title="Mes contrats" style={{
-          display:"flex", alignItems:"center", gap:5,
-          padding: isMobile ? "7px 8px" : "7px 12px",
-          background:"transparent", border:`1.5px solid ${C.border}`,
-          color:C.textM, borderRadius:7, cursor:"pointer", fontSize:12, fontFamily:T.body, fontWeight:500,
+          display:"flex", alignItems:"center", gap:7, height:40,
+          padding: isMobile ? "0 11px" : "0 14px",
+          background:C.white, border:`1px solid ${C.border}`,
+          color:C.textM, borderRadius:12, cursor:"pointer", fontSize:13.5, fontFamily:T.body, fontWeight:600,
           transition:"all .18s", position:"relative", whiteSpace:"nowrap",
         }}
           onMouseOver={e=>{ e.currentTarget.style.borderColor=C.navy; e.currentTarget.style.color=C.navy; }}
           onMouseOut={e=>{ e.currentTarget.style.borderColor=C.border; e.currentTarget.style.color=C.textM; }}
         >
-          <span style={{ fontSize:14 }}>📁</span>
+          <Ico name="folder" size={17} />
           {!isMobile && "Mes contrats"}
           {historyCount > 0 && (
             <span style={{
               background:C.navy, color:C.white, fontSize:9, fontWeight:700,
-              borderRadius:10, padding:"1px 5px", minWidth:14, textAlign:"center",
+              borderRadius:12, padding:"1px 5px", minWidth:14, textAlign:"center",
             }}>{historyCount}</span>
           )}
         </button>
+        )}
 
         {/* Ancien bouton Tarifs retiré (en attente de refonte) */}
 
@@ -12026,7 +12100,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
           <button
             onClick={() => setAlertOpen(o => !o)}
             style={{
-              width:38, height:38, borderRadius:10,
+              width:40, height:40, borderRadius:12,
               background: alertOpen
                 ? `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`
                 : C.white,
@@ -12045,11 +12119,10 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
             <span
               className="bell-icon"
               style={{
-                fontSize:17,
-                filter: alertOpen ? "brightness(10)" : "none",
-                display:"inline-block",
+                color: alertOpen ? "#fff" : C.textM,
+                display:"flex",
               }}
-            >🔔</span>
+            ><Ico name="bell" size={18} /></span>
             {/* Pastille rouge — uniquement si des alertes */}
             {ALERT_COUNT > 0 && (
             <span style={{
@@ -12102,22 +12175,22 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
               <div style={{
                 position:"absolute", top:"calc(100% + 8px)", right:0,
                 background:C.white, border:`1px solid ${C.border}`,
-                borderRadius:10, padding:"8px 0",
-                boxShadow:"0 8px 24px #1B2E4B18", minWidth:200, zIndex:50,
+                borderRadius:12, padding:"8px 0",
+                boxShadow:"0 8px 24px #4338CA18", minWidth:200, zIndex:50,
               }}>
                 <div style={{ padding:"8px 16px 12px", borderBottom:`1px solid ${C.borderL}` }}>
-                  <div style={{ fontFamily:T.body, fontSize:12, fontWeight:600, color:C.navy, marginBottom:2 }}>{profileName || "Mon compte"}</div>
+                  <div style={{ fontFamily:T.body, fontSize:12, fontWeight:600, color:C.ink, marginBottom:2 }}>{profileName || "Mon compte"}</div>
                   <div style={{ fontFamily:T.body, fontSize:11, color:C.textL, wordBreak:"break-all" }}>{authUser.email}</div>
                 </div>
                 <button onClick={() => { setUserMenu(false); onProfile(); }} style={{
                   width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
-                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.navy,
+                  cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.ink,
                   display:"flex", alignItems:"center", gap:8,
                 }}
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
-                >👤 Mon Profil</button>
+                ><IcoI name="user" />Mon Profil</button>
                 <button onClick={() => { setUserMenu(false); if(onDrafts) onDrafts(); }} style={{
                   width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
@@ -12126,7 +12199,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
                 }}
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
-                >📝 Mes brouillons</button>
+                ><IcoI name="pen" />Mes brouillons</button>
                 <button onClick={() => { setUserMenu(false); if(onMyNdas) onMyNdas(); }} style={{
                   width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
@@ -12135,7 +12208,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
                 }}
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
-                >🔒 Mes NDA</button>
+                ><IcoI name="lock" />Mes NDA</button>
                 <button onClick={() => { setUserMenu(false); if(onCGU) onCGU(); }} style={{
                   width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
@@ -12144,7 +12217,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
                 }}
                   onMouseOver={e=>e.currentTarget.style.background=C.creamD}
                   onMouseOut={e=>e.currentTarget.style.background="none"}
-                >📄 Conditions d'utilisation</button>
+                ><IcoI name="invoice" />Conditions d'utilisation</button>
                 <button onClick={() => { setUserMenu(false); onSignOut(); }} style={{
                   display:"block", width:"100%", textAlign:"left",
                   padding:"10px 16px", background:"none", border:"none",
@@ -12160,7 +12233,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
           <button onClick={onAuthClick} style={{
             padding: isMobile ? "7px 10px" : "7px 16px",
             background:C.navy, border:"none",
-            color:C.white, borderRadius:7, cursor:"pointer",
+            color:C.white, borderRadius:9, cursor:"pointer",
             fontSize: isMobile ? 11 : 12,
             fontFamily:T.body, fontWeight:600,
             transition:"all .18s", whiteSpace:"nowrap",
@@ -12171,6 +12244,7 @@ function Header({ isPremium, premiumPlan, left, onPricing, onHome, onHistory, on
         )}
       </div>
     </div>
+    </>
   );
 }
 
@@ -12413,13 +12487,13 @@ function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientS
   const whenB = fmtSignedAtFr(signedAt);
   if (!freelanceSignature && !clientSignature) return null;
   return (
-    <div style={{ background:"#FFFDF9", border:"1.5px solid #E8D9B5", borderRadius:12, padding:"16px 18px", marginBottom:16 }}>
-      <div style={{ fontFamily:T.body, fontSize:11, fontWeight:800, letterSpacing:"0.08em", color:"#8A6D3B", marginBottom:12 }}>✍️ CERTIFICAT DE SIGNATURE</div>
+    <div style={{ background:"#FFFFFF", border:"1.5px solid #E8D9B5", borderRadius:14, padding:"16px 18px", marginBottom:16 }}>
+      <div style={{ fontFamily:T.body, fontSize:11, fontWeight:800, letterSpacing:"0.08em", color:"#8A6D3B", marginBottom:12 }}><IcoI name="pen" />CERTIFICAT DE SIGNATURE</div>
       <div style={{ display:"flex", gap:16, flexWrap:"wrap" }}>
         {freelanceSignature && (
           <div style={{ flex:"1 1 160px" }}>
             <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:600, marginBottom:6 }}>{partieA || "Partie A"}</div>
-            <img src={freelanceSignature} alt="Signature Partie A" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
+            <img src={freelanceSignature} alt="Signature Partie A" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10 }} />
             <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>{whenA ? `Signée le ${whenA}` : "Signée à la création du document"}</div>
           </div>
         )}
@@ -12427,12 +12501,12 @@ function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientS
           <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, fontWeight:600, marginBottom:6 }}>{partieB || "Partie B"}</div>
           {clientSignature ? (
             <>
-              <img src={clientSignature} alt="Signature Partie B" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
+              <img src={clientSignature} alt="Signature Partie B" style={{ width:"100%", maxWidth:180, height:60, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10 }} />
               <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>Signée à distance{whenB ? ` le ${whenB}` : ""}</div>
             </>
           ) : (
             <>
-              <div style={{ width:"100%", maxWidth:180, height:60, background:"#fff", border:`1px dashed ${C.border}`, borderRadius:8 }} />
+              <div style={{ width:"100%", maxWidth:180, height:60, background:"#fff", border:`1px dashed ${C.border}`, borderRadius:10 }} />
               <div style={{ fontFamily:T.body, fontSize:10, color:"#B45309", fontWeight:700, marginTop:4 }}>En attente de signature</div>
             </>
           )}
@@ -12543,7 +12617,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
     e.preventDefault();
     const ctx = canvasRefA.current.getContext("2d");
     const p = getPosA(e);
-    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#4338CA"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
     setHasStrokesA(true);
   };
   const endDrawA = () => { drawingRefA.current = false; };
@@ -12632,7 +12706,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 
   const inputStyle = {
     width:"100%", padding:"13px 16px",
-    border:`1.5px solid ${C.border}`, borderRadius:10,
+    border:`1.5px solid ${C.border}`, borderRadius:12,
     fontSize:13, fontFamily:T.body, color:C.text, outline:"none",
     background:C.white, transition:"border-color 0.16s",
     boxSizing:"border-box",
@@ -12641,15 +12715,15 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 
   return (
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{ position:"fixed",inset:0,background:"rgba(10,18,32,0.74)",zIndex:10100,display:"flex",alignItems:"center",justifyContent:"center",padding:20,backdropFilter:"blur(10px)" }}>
-      <div className="fade-up" style={{ background:C.white,borderRadius:22,width:"100%",maxWidth:520,maxHeight:"90vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 48px 120px rgba(27,46,75,0.28), 0 0 0 1px rgba(27,46,75,0.06)" }}>
+      <div className="fade-up" style={{ background:C.white,borderRadius:22,width:"100%",maxWidth:520,maxHeight:"90vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 48px 120px rgba(30,27,75,0.28), 0 0 0 1px rgba(30,27,75,0.06)" }}>
 
         {/* Header */}
-        <div style={{ background:`linear-gradient(135deg, ${C.navyD} 0%, ${C.navy} 60%, #2A3F60 100%)`, padding:"24px 28px 22px", flexShrink:0, position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", top:-20, right:-20, width:100, height:100, borderRadius:"50%", background:"rgba(184,150,90,0.12)" }} />
+        <div style={{ background:`linear-gradient(135deg, ${C.navyD} 0%, ${C.navy} 60%, #4F46E5 100%)`, padding:"24px 28px 22px", flexShrink:0, position:"relative", overflow:"hidden" }}>
+          <div style={{ position:"absolute", top:-20, right:-20, width:100, height:100, borderRadius:"50%", background:"rgba(79,70,229,0.12)" }} />
           <div style={{ position:"absolute", bottom:-30, left:40, width:80, height:80, borderRadius:"50%", background:"rgba(255,255,255,0.04)" }} />
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", position:"relative" }}>
             <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-              <div style={{ width:44, height:44, background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.18)", borderRadius:13, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>🔒</div>
+              <div style={{ width:44, height:44, background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.18)", borderRadius:13, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:"#fff" }}><Ico name="lock" size={22} /></div>
               <div>
                 <div style={{ fontFamily:T.display, fontSize:18, fontWeight:700, color:C.white, lineHeight:1.2 }}>NDA Express</div>
                 <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>Accord de Confidentialité · Droit français</div>
@@ -12663,8 +12737,8 @@ function NdaExpressModal({ onClose, profile, authUser }) {
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px 28px" }}>
           {step === "form" && (
             <div className="fade-up">
-              <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.65, marginBottom:22, background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px" }}>
-                🛡️ <strong style={{color:"#1E40AF"}}>Protégez vos idées avant d'envoyer votre brief.</strong> Ce NDA à texte fixe, en droit français, est prêt en quelques secondes.
+              <div style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.65, marginBottom:22, background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:12, padding:"12px 16px" }}>
+                <IcoI name="shield" style={{ color:"#1E40AF" }} /><strong style={{color:"#1E40AF"}}>Protégez vos idées avant d'envoyer votre brief.</strong> Ce NDA à texte fixe, en droit français, est prêt en quelques secondes.
               </div>
 
               {/* Type d'accord */}
@@ -12677,7 +12751,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
                     { key:"mutuel", label:"A ⇄ B" },
                   ].map(o => (
                     <button key={o.key} type="button" onClick={() => setNdaType(o.key)} style={{
-                      flex:1, padding:"9px 0", borderRadius:8, cursor:"pointer",
+                      flex:1, padding:"9px 0", borderRadius:10, cursor:"pointer",
                       fontFamily:T.body, fontSize:12.5, fontWeight:700,
                       background: ndaType === o.key ? C.navy : C.white,
                       color: ndaType === o.key ? "#fff" : C.textM,
@@ -12710,7 +12784,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
                     { key:"particulier", label:"Un particulier" },
                   ].map(o => (
                     <button key={o.key} type="button" data-testid={`nda-b-${o.key}`} onClick={() => setPartieBType(o.key)} style={{
-                      flex:1, padding:"8px 0", borderRadius:8, cursor:"pointer",
+                      flex:1, padding:"8px 0", borderRadius:10, cursor:"pointer",
                       fontFamily:T.body, fontSize:12, fontWeight:700,
                       background: partieBType === o.key ? C.navy : C.white,
                       color: partieBType === o.key ? "#fff" : C.textM,
@@ -12750,7 +12824,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
                     { key:"10", label:"10 ans" },
                   ].map(o => (
                     <button key={o.key} type="button" onClick={() => setDuration(o.key)} style={{
-                      flex:"1 1 auto", minWidth:80, padding:"9px 8px", borderRadius:8, cursor:"pointer",
+                      flex:"1 1 auto", minWidth:80, padding:"9px 8px", borderRadius:10, cursor:"pointer",
                       fontFamily:T.body, fontSize:12, fontWeight:700,
                       background: duration === o.key ? C.navy : C.white,
                       color: duration === o.key ? "#fff" : C.textM,
@@ -12768,29 +12842,29 @@ function NdaExpressModal({ onClose, profile, authUser }) {
                   width={460} height={130}
                   onMouseDown={startDrawA} onMouseMove={drawA} onMouseUp={endDrawA} onMouseLeave={endDrawA}
                   onTouchStart={startDrawA} onTouchMove={drawA} onTouchEnd={endDrawA}
-                  style={{ width:"100%", height:130, border:`2px dashed ${C.gold}`, borderRadius:10, background:"#FFFDF9", touchAction:"none", cursor:"crosshair" }}
+                  style={{ width:"100%", height:130, border:`2px dashed ${C.gold}`, borderRadius:12, background:"#FFFFFF", touchAction:"none", cursor:"crosshair" }}
                 />
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:6 }}>
                   <span style={{ fontFamily:T.body, fontSize:10, color:C.textL }}>Signe avec ton doigt ou ta souris — obligatoire pour générer le NDA.</span>
-                  <button type="button" onClick={clearSignatureA} style={{ padding:"4px 10px", background:"none", border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, color:C.textM }}>Effacer</button>
+                  <button type="button" onClick={clearSignatureA} style={{ padding:"4px 10px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11, color:C.textM }}>Effacer</button>
                 </div>
               </div>
 
               <button
                 onClick={generate}
                 disabled={!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA}
-                style={{ width:"100%", padding:"15px", background:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? C.creamDD : `linear-gradient(135deg, ${C.navyD} 0%, ${C.navy} 100%)`, color:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? C.textL : C.white, border:"none", borderRadius:12, cursor:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:14, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? "none" : "0 8px 28px #1B2E4B35", transition:"all 0.2s" }}
-                onMouseOver={e=>{if(partieA.trim()&&partieB.trim()&&partieBAddress.trim()&&objet.trim()&&hasStrokesA){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 12px 36px #1B2E4B45";}}}
-                onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA)?"none":"0 8px 28px #1B2E4B35";}}
+                style={{ width:"100%", padding:"15px", background:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? C.creamDD : `linear-gradient(135deg, ${C.navyD} 0%, ${C.navy} 100%)`, color:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? C.textL : C.white, border:"none", borderRadius:14, cursor:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:14, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA) ? "none" : "0 8px 28px #4338CA35", transition:"all 0.2s" }}
+                onMouseOver={e=>{if(partieA.trim()&&partieB.trim()&&partieBAddress.trim()&&objet.trim()&&hasStrokesA){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 12px 36px #4338CA45";}}}
+                onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=(!partieA.trim()||!partieB.trim()||!partieBAddress.trim()||!objet.trim()||!hasStrokesA)?"none":"0 8px 28px #4338CA35";}}
               >
-                <span style={{ fontSize:16 }}>🔒</span> Signer et générer le NDA
+                <IcoI name="lock" size={16} />Signer et générer le NDA
               </button>
 
               {/* Historique local */}
               {ndaHistory.length > 0 && (
                 <div style={{ marginTop:20 }}>
                   <span onClick={() => setHistoryOpen(v => !v)} style={{ fontFamily:T.body, fontSize:12, color:C.navy, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}>
-                    📜 Mes NDA précédents ({ndaHistory.length}) {historyOpen ? "▲" : "▼"}
+                    <IcoI name="invoice" />Mes NDA précédents ({ndaHistory.length}) {historyOpen ? "▲" : "▼"}
                   </span>
                   {historyOpen && (
                     <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:8 }}>
@@ -12802,8 +12876,8 @@ function NdaExpressModal({ onClose, profile, authUser }) {
                           setSignLink(h.id && (h.status === "pending_signature" || h.status === "signed") ? `${CLIENT_LINK_BASE}?sign-nda=${h.id}` : "");
                           setStep("result");
                         }}
-                          style={{ padding:"10px 12px", background:C.creamD, border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, color:C.textM }}>
-                          <strong style={{ color:C.navy }}>{h.partieA} ↔ {h.partieB}</strong> · {h.date} {h.status === "signed" ? "· ✓ Signé" : h.status === "pending_signature" ? "· ⏳ En attente de signature" : ""}
+                          style={{ padding:"10px 12px", background:C.creamD, border:`1px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:11.5, color:C.textM }}>
+                          <strong style={{ color:C.ink }}>{h.partieA} ↔ {h.partieB}</strong> · {h.date} {h.status === "signed" ? "· ✓ Signé" : h.status === "pending_signature" ? "· En attente de signature" : ""}
                         </div>
                       ))}
                     </div>
@@ -12816,7 +12890,7 @@ function NdaExpressModal({ onClose, profile, authUser }) {
           {step === "loading" && (
             <div style={{ textAlign:"center", padding:"32px 0" }}>
               <div style={{ width:56, height:56, border:`3px solid ${C.creamDD}`, borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 20px" }} />
-              <div style={{ fontFamily:T.display, fontSize:18, color:C.navy, fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
+              <div style={{ fontFamily:T.display, fontSize:18, color:C.ink, fontWeight:700, marginBottom:8 }}>Rédaction en cours{".".repeat(dots)}</div>
               <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, lineHeight:1.7 }}>
                 Rédaction de votre NDA conforme au droit français…<br/>
                 <span style={{ color:C.gold, fontWeight:600 }}>Art. 1231-1 Code civil · {durationLabel}</span>
@@ -12826,23 +12900,23 @@ function NdaExpressModal({ onClose, profile, authUser }) {
 
           {step === "result" && (
             <div className="fade-up">
-              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"11px 16px" }}>
-                <span style={{ fontSize:16 }}>✅</span>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, padding:"11px 16px" }}>
+                <span style={{ display:"flex", color:"#059669" }}><Ico name="checkCircle" size={18} /></span>
                 <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}>NDA généré avec succès · Prêt à envoyer</div>
               </div>
-              <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"20px 20px", maxHeight:320, overflowY:"auto", marginBottom:16 }}>
+              <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:14, padding:"20px 20px", maxHeight:320, overflowY:"auto", marginBottom:16 }}>
                 <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanNdaText(nda)}</pre>
               </div>
               <NdaSignatureCertificate partieA={partieA} partieB={partieB} freelanceSignature={ndaFreelanceSignature} clientSignature={ndaClientSignature} signedAt={ndaSignedAt} createdAt={ndaCreatedAt} />
               <div style={{ display:"flex", gap:10, marginBottom:10 }}>
-                <button onClick={() => { setStep("form"); setNda(""); }} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM, transition:"all 0.15s" }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
-                <button onClick={() => downloadNdaPDF(nda, ndaRef, partieA, partieB, ndaFreelanceSignature, ndaClientSignature, ndaSignedAt, ndaCreatedAt)} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}>⬇ PDF</button>
-                <button onClick={copy} style={{ flex:2, padding:"12px", background: copying ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px #1B2E4B30", transition:"all 0.2s" }}>
-                  {copying ? <><span>✓</span> Copié !</> : <><span>📋</span> Copier</>}
+                <button onClick={() => { setStep("form"); setNda(""); }} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM, transition:"all 0.15s" }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
+                <button onClick={() => downloadNdaPDF(nda, ndaRef, partieA, partieB, ndaFreelanceSignature, ndaClientSignature, ndaSignedAt, ndaCreatedAt)} style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}><IcoI name="download" />PDF</button>
+                <button onClick={copy} style={{ flex:2, padding:"12px", background: copying ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`, color:C.white, border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px #4338CA30", transition:"all 0.2s" }}>
+                  {copying ? <><span>✓</span> Copié !</> : <><IcoI name="copy" />Copier</>}
                 </button>
               </div>
-              <button onClick={sendByEmail} style={{ width:"100%", padding:"12px", background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px rgba(59,130,246,0.3)" }}>
-                <span>📧</span> Envoyer par email{partieB ? ` à ${partieB}` : ""}
+              <button onClick={sendByEmail} style={{ width:"100%", padding:"12px", background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", color:"#fff", border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 5px 18px rgba(59,130,246,0.3)" }}>
+                <IcoI name="mail" />Envoyer par email{partieB ? ` à ${partieB}` : ""}
               </button>
 
               {/* Signature à distance */}
@@ -12851,16 +12925,16 @@ function NdaExpressModal({ onClose, profile, authUser }) {
                   <button
                     onClick={generateSignLink}
                     disabled={signLinkGenerating || ndaSaving}
-                    style={{ width:"100%", padding:"12px", background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:10, cursor: (signLinkGenerating || ndaSaving) ? "default" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, display:"flex", alignItems:"center", justifyContent:"center", gap:8, opacity: ndaSaving ? 0.6 : 1 }}
+                    style={{ width:"100%", padding:"12px", background:C.white, border:`1.5px solid ${C.navy}`, borderRadius:12, cursor: (signLinkGenerating || ndaSaving) ? "default" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, display:"flex", alignItems:"center", justifyContent:"center", gap:8, opacity: ndaSaving ? 0.6 : 1 }}
                   >
-                    {ndaSaving ? "Sauvegarde du NDA en cours…" : signLinkGenerating ? "Génération du lien…" : <><span>✍️</span> Envoyer pour signature à distance</>}
+                    {ndaSaving ? "Sauvegarde du NDA en cours…" : signLinkGenerating ? "Génération du lien…" : <><IcoI name="pen" />Envoyer pour signature à distance</>}
                   </button>
                 ) : (
-                  <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 14px" }}>
+                  <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, padding:"12px 14px" }}>
                     <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534", marginBottom:8 }}>✓ Lien de signature prêt à envoyer</div>
                     <div style={{ display:"flex", gap:8 }}>
-                      <input readOnly value={signLink} style={{ flex:1, padding:"8px 10px", border:"1px solid #BBF7D0", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#166534", background:"#fff" }} onFocus={e=>e.target.select()} />
-                      <button onClick={copySignLink} style={{ flexShrink:0, padding:"8px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{signLinkCopied ? "Copié !" : "Copier"}</button>
+                      <input readOnly value={signLink} style={{ flex:1, padding:"8px 10px", border:"1px solid #BBF7D0", borderRadius:10, fontFamily:T.body, fontSize:11, color:"#166534", background:"#fff" }} onFocus={e=>e.target.select()} />
+                      <button onClick={copySignLink} style={{ flexShrink:0, padding:"8px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{signLinkCopied ? "Copié !" : "Copier"}</button>
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:10.5, color:"#166534", marginTop:8, lineHeight:1.5, opacity:0.85 }}>Envoie ce lien à {partieB || "ton contact"} (SMS, email, WhatsApp). Il pourra le lire et le signer depuis son téléphone, sans créer de compte.</div>
                   </div>
@@ -13167,7 +13241,7 @@ function FormalNoticeForm({ profile, mode, initial = {}, invoices = [], rateRef 
   const [error, setError] = useState("");
   const minRate = noticeMinRate(today);
   const toNum = (v) => { const n = parseFloat(String(v ?? "").replace(/\s/g, "").replace(",", ".")); return Number.isFinite(n) ? n : NaN; };
-  const inputSt = { width:"100%", padding:"11px 13px", border:`1.5px solid ${C.border}`, borderRadius:9, fontSize:13, fontFamily:T.body, color:C.text, outline:"none", background:C.white, boxSizing:"border-box" };
+  const inputSt = { width:"100%", padding:"11px 13px", border:`1.5px solid ${C.border}`, borderRadius:11, fontSize:13, fontFamily:T.body, color:C.text, outline:"none", background:C.white, boxSizing:"border-box" };
   const labelSt = { display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:6 };
   const box = { marginBottom:12 };
   const tooOldMsg = `Ce retard a commencé avant le ${longDateFr(NOTICE_RATES[0].from)}. Freeley ne connaît pas les taux de cette période : fais calculer les pénalités par un professionnel.`;
@@ -13208,7 +13282,7 @@ function FormalNoticeForm({ profile, mode, initial = {}, invoices = [], rateRef 
   };
   const ready = manual || selectable.length > 0;
   return (
-    <div data-testid="notice-form" className="fade-up" style={{ background:C.white, border:"1.5px solid #FECACA", borderRadius:14, padding:"16px 16px 18px", marginBottom:14 }}>
+    <div data-testid="notice-form" className="fade-up" style={{ background:C.white, border:"1.5px solid #FECACA", borderRadius:16, padding:"16px 16px 18px", marginBottom:14 }}>
       <div style={{ fontFamily:T.display, fontSize:15, fontWeight:700, color:"#7F1D1D", marginBottom:6 }}>Mise en demeure</div>
       <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:14 }}>
         {kind === "pro"
@@ -13220,7 +13294,7 @@ function FormalNoticeForm({ profile, mode, initial = {}, invoices = [], rateRef 
         <div style={box}>
           <label style={labelSt}>FACTURE EN RETARD</label>
           {late.map((i) => (
-            <label key={i.key} style={{ display:"flex", gap:9, alignItems:"flex-start", padding:"9px 11px", border:`1.5px solid ${invKey === i.key ? "#DC2626" : C.border}`, borderRadius:9, marginBottom:6, cursor: i.number ? "pointer" : "default", opacity: i.number ? 1 : 0.6, fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.5 }}>
+            <label key={i.key} style={{ display:"flex", gap:9, alignItems:"flex-start", padding:"9px 11px", border:`1.5px solid ${invKey === i.key ? "#DC2626" : C.border}`, borderRadius:11, marginBottom:6, cursor: i.number ? "pointer" : "default", opacity: i.number ? 1 : 0.6, fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.5 }}>
               <input type="radio" name="notice-invoice" disabled={!i.number} checked={invKey === i.key} onChange={() => setInvKey(i.key)} style={{ marginTop:3 }} />
               <span>{i.number ? <strong>Facture n° {i.number}</strong> : <strong>Pas encore de facture</strong>} · {i.label} · {noticeEur(i.amount)} € · échéance le {longDateFr(i.dueDate)}</span>
             </label>
@@ -13296,18 +13370,18 @@ function FormalNoticeForm({ profile, mode, initial = {}, invoices = [], rateRef 
                 { key:"lre", label:"Recommandé électronique" },
                 { key:"email", label:"Email" },
               ].map((o) => (
-                <button key={o.key} type="button" data-testid={`notice-send-${o.key}`} onClick={() => setSendMode(o.key)} style={{ flex:"1 1 auto", padding:"8px 10px", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, background: sendMode === o.key ? "#7F1D1D" : C.white, color: sendMode === o.key ? "#fff" : C.textM, border:`1.5px solid ${sendMode === o.key ? "#7F1D1D" : C.border}` }}>{o.label}</button>
+                <button key={o.key} type="button" data-testid={`notice-send-${o.key}`} onClick={() => setSendMode(o.key)} style={{ flex:"1 1 auto", padding:"8px 10px", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, background: sendMode === o.key ? "#7F1D1D" : C.white, color: sendMode === o.key ? "#fff" : C.textM, border:`1.5px solid ${sendMode === o.key ? "#7F1D1D" : C.border}` }}>{o.label}</button>
               ))}
             </div>
             <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>Le recommandé prouve que ton client a reçu la lettre. Le mode d'envoi est écrit en haut de la lettre.</div>
           </div>
         </>
       )}
-      {error && <div data-testid="notice-error" style={{ fontFamily:T.body, fontSize:12, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 11px", marginBottom:10, lineHeight:1.5 }}>{error}</div>}
+      {error && <div data-testid="notice-error" style={{ fontFamily:T.body, fontSize:12, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"8px 11px", marginBottom:10, lineHeight:1.5 }}>{error}</div>}
       <div style={{ display:"flex", gap:10 }}>
-        <button type="button" onClick={onCancel} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }}>← Annuler</button>
+        <button type="button" onClick={onCancel} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }}>← Annuler</button>
         {ready && (
-          <button type="button" data-testid="notice-submit" onClick={submit} style={{ flex:2, padding:"12px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}>Préparer la lettre</button>
+          <button type="button" data-testid="notice-submit" onClick={submit} style={{ flex:2, padding:"12px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}>Préparer la lettre</button>
         )}
       </div>
     </div>
@@ -13564,7 +13638,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
   /* ── Styles partagés ── */
   const inputStyle = {
     width:"100%", padding:"12px 15px",
-    border:`1.5px solid ${C.border}`, borderRadius:10,
+    border:`1.5px solid ${C.border}`, borderRadius:12,
     fontSize:13, fontFamily:T.body, color:C.text, outline:"none",
     background:C.white, transition:"border-color 0.16s", boxSizing:"border-box",
   };
@@ -13730,24 +13804,24 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
     const isSilence = type === "silence";
     return (
     <div className="fade-up">
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background: isSilence ? "#EFF6FF" : isPreventive ? "#FFFBEB" : "#FEF2F2", border:`1px solid ${isSilence ? "#BFDBFE" : isPreventive ? "#FCD34D" : "#FCA5A5"}`, borderRadius:10, padding:"11px 16px" }}>
-        <span>{isSilence ? "💬" : isPreventive ? "⏰" : "🚨"}</span>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background: isSilence ? "#EFF6FF" : isPreventive ? "#FFFBEB" : "#FEF2F2", border:`1px solid ${isSilence ? "#BFDBFE" : isPreventive ? "#FCD34D" : "#FCA5A5"}`, borderRadius:12, padding:"11px 16px" }}>
+        <span style={{ display:"flex" }}><Ico name={isSilence ? "message" : isPreventive ? "clock" : "alert"} size={18} /></span>
         <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color: isSilence ? "#1E3A8A" : isPreventive ? "#92400E" : "#991B1B" }}>{isSilence ? "Message de relance prêt · Client silencieux" : isAmicable ? "Relance amiable prête · Sans pénalités ni mise en demeure" : isPreventive ? "Relance préventive prête · Aucune pénalité (pas encore en retard)" : formalInfo?.kind === "conso" ? "Mise en demeure prête · Aucun intérêt réclamé pour la période passée" : "Mise en demeure prête · Pénalités de retard calculées"}</div>
       </div>
-      <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"18px 20px", maxHeight:260, overflowY:"auto", marginBottom:14 }}>
+      <div style={{ background:C.cream, border:`1.5px solid ${C.border}`, borderRadius:14, padding:"18px 20px", maxHeight:260, overflowY:"auto", marginBottom:14 }}>
         <pre style={{ fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{cleanLetterText(letter)}</pre>
       </div>
       {type === "formal" && formalInfo && NOTICE_SEND_NOTES[formalInfo.sendMode] && (
-        <div data-testid="notice-send-note" style={{ display:"flex", gap:8, alignItems:"flex-start", background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:10, padding:"10px 14px", marginBottom:10, fontFamily:T.body, fontSize:12, color:"#9A3412", lineHeight:1.55 }}>
-          <span>📮</span><div>{NOTICE_SEND_NOTES[formalInfo.sendMode]}</div>
+        <div data-testid="notice-send-note" style={{ display:"flex", gap:8, alignItems:"flex-start", background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:12, padding:"10px 14px", marginBottom:10, fontFamily:T.body, fontSize:12, color:"#9A3412", lineHeight:1.55 }}>
+          <span style={{ display:"flex" }}><Ico name="mail" size={16} /></span><div>{NOTICE_SEND_NOTES[formalInfo.sendMode]}</div>
         </div>
       )}
 
       {/* Paiement du montant dû — non pertinent pour une relance "silence prolongé", aucun montant n'est nécessairement dû.
           Version 232 : le virement est rappelé à égalité avec la carte. */}
       {!isSilence && (
-        <div data-testid="recouvrement-virement" style={{ display:"flex", gap:8, alignItems:"flex-start", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"10px 14px", marginBottom:10, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.55 }}>
-          <span>🏦</span>
+        <div data-testid="recouvrement-virement" style={{ display:"flex", gap:8, alignItems:"flex-start", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, padding:"10px 14px", marginBottom:10, fontFamily:T.body, fontSize:12, color:"#166534", lineHeight:1.55 }}>
+          <span style={{ display:"flex" }}><Ico name="bank" size={16} /></span>
           <div><strong>Virement bancaire (gratuit).</strong> {!String(profile?.iban || "").trim()
             ? "Ajoute ton IBAN dans ton profil (Facturation) pour que ton client puisse payer par virement."
             : ibanInText(letter, profile.iban)
@@ -13756,42 +13830,42 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
         </div>
       )}
       {!isSilence && (
-      <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
-        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}>💳 Carte bancaire (Stripe) : faire régler {isPreventive ? "" : "le montant total "}({total ? fmtEuro(total) : "0"} €) par carte</div>
+      <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:12, padding:"14px 16px", marginBottom:12 }}>
+        <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#6EE7B7", marginBottom:6 }}><IcoI name="card" />Carte bancaire (Stripe) : faire régler {isPreventive ? "" : "le montant total "}({total ? fmtEuro(total) : "0"} €) par carte</div>
         <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:10 }}>
           {isAmicable ? "Le client règle en un clic, par carte." : isPreventive ? "Le client règle avant échéance, en un clic, sans attendre d'éventuelles pénalités." : "Ce lien correspond au montant total réclamé dans la lettre : le client règle tout en un clic."}
         </div>
         <button
           onClick={() => handleGeneratePaymentLink(total, clientName || "Client", mission, clientEmail)}
           disabled={stripeLinkGenerating}
-          style={{ width:"100%", padding:"10px", background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.gold, color: stripeLinkCopied ? "#fff" : C.navyD, border:"none", borderRadius:8, cursor: stripeLinkGenerating ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, opacity: stripeLinkGenerating ? 0.7 : 1 }}
+          style={{ width:"100%", padding:"10px", background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.goldBg, color: stripeLinkCopied ? "#fff" : C.navyD, border:"none", borderRadius:10, cursor: stripeLinkGenerating ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, opacity: stripeLinkGenerating ? 0.7 : 1 }}
         >
-          {stripeLinkGenerating ? "⏳ Génération…" : stripeLinkCopied ? "✅ Lien copié !" : "💳 Copier le lien de paiement"}
+          {stripeLinkGenerating ? "Génération…" : stripeLinkCopied ? "✓ Lien copié !" : "Copier le lien de paiement"}
         </button>
         {stripeLinkUrl && qrDataUrl(stripeLinkUrl) && (
           <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:10 }}>
-            <img src={qrDataUrl(stripeLinkUrl)} alt="QR paiement" width={64} height={64} style={{ borderRadius:6, background:"#fff", flexShrink:0 }} />
-            <div style={{ fontFamily:T.body, fontSize:10, color:"#8BA3C0", lineHeight:1.5 }}>Scannable ou partageable — ce lien est aussi intégré automatiquement au PDF téléchargé.</div>
+            <img src={qrDataUrl(stripeLinkUrl)} alt="QR paiement" width={64} height={64} style={{ borderRadius:8, background:"#fff", flexShrink:0 }} />
+            <div style={{ fontFamily:T.body, fontSize:10, color:"#C7D2FE", lineHeight:1.5 }}>Scannable ou partageable — ce lien est aussi intégré automatiquement au PDF téléchargé.</div>
           </div>
         )}
       </div>
       )}
 
       <div style={{ display:"flex", gap:10 }}>
-        <button onClick={onEdit} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
+        <button onClick={onEdit} style={{ flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }} onMouseOver={e=>e.currentTarget.style.background=C.creamD} onMouseOut={e=>e.currentTarget.style.background=C.white}>← Modifier</button>
         <button
           onClick={() => downloadLetterPDF(letter, clientName || "Client", total, mission, clientEmail, type)}
-          style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}
+          style={{ flex:"0 0 auto", padding:"12px 16px", background:C.white, border:"1.5px solid #C4B5FD", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:"#7C3AED" }}
           onMouseOver={e=>e.currentTarget.style.background="#F5F3FF"}
           onMouseOut={e=>e.currentTarget.style.background=C.white}
-        >⬇ PDF</button>
+        ><IcoI name="download" />PDF</button>
         <button
           onClick={() => setSendModal({ letter, clientName: clientName || "Client", clientEmail, clientPhone, total, type })}
-          style={{ flex:2, padding:"12px", background: isSilence ? "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)" : isPreventive ? "linear-gradient(135deg, #B45309 0%, #D97706 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: isSilence ? "0 5px 18px rgba(37,99,235,0.3)" : isPreventive ? "0 5px 18px rgba(217,119,6,0.3)" : "0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
+          style={{ flex:2, padding:"12px", background: isSilence ? "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)" : isPreventive ? "linear-gradient(135deg, #B45309 0%, #D97706 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: isSilence ? "0 5px 18px rgba(37,99,235,0.3)" : isPreventive ? "0 5px 18px rgba(217,119,6,0.3)" : "0 5px 18px rgba(185,28,28,0.3)", transition:"all 0.2s" }}
           onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";}}
           onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";}}
         >
-          <span style={{ fontSize:16 }}>✉️</span> {isSilence ? "Envoyer le message" : isAmicable ? "Envoyer la relance" : isPreventive ? "Envoyer le rappel" : "Envoyer la mise en demeure"}
+          <IcoI name="mail" />{isSilence ? "Envoyer le message" : isAmicable ? "Envoyer la relance" : isPreventive ? "Envoyer le rappel" : "Envoyer la mise en demeure"}
         </button>
       </div>
 
@@ -13804,7 +13878,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
           {sendSuccess ? (
             /* ── Écran confirmation succès ── */
             <div className="fade-up" style={{ background:C.white, borderRadius:20, padding:"24px 16px", maxWidth:400, width:"100%", textAlign:"center", boxShadow:"0 40px 100px rgba(0,0,0,0.35)", border:"1px solid #BBF7D0" }}>
-              <div style={{ width:64, height:64, background:"linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%)", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:30, margin:"0 auto 18px" }}>🚀</div>
+              <div style={{ width:64, height:64, background:"linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%)", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:30, margin:"0 auto 18px", color:"#fff" }}><Ico name="send" size={30} /></div>
               <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:"#065F46", marginBottom:10, lineHeight:1.3 }}>{({ preventive: "Rappel envoyé", silence: "Message envoyé", amicable: "Relance envoyée" })[sendModal?.type] || "Notification officielle envoyée"} avec succès à {sendSuccess}.</div>
               <div style={{ fontFamily:T.body, fontSize:13, color:"#047857", marginBottom:24, lineHeight:1.65 }}>Le dossier est mis à jour.</div>
               <button
@@ -13818,8 +13892,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
               {/* Header */}
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:22 }}>
                 <div>
-                  <div style={{ fontFamily:T.display, fontSize:18, fontWeight:700, color:C.navy, marginBottom:3 }}>Choisir le canal d'envoi</div>
-                  <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>Envoi officiel à <strong style={{ color:C.navy }}>{sendModal.clientName}</strong></div>
+                  <div style={{ fontFamily:T.display, fontSize:18, fontWeight:700, color:C.ink, marginBottom:3 }}>Choisir le canal d'envoi</div>
+                  <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>Envoi officiel à <strong style={{ color:C.ink }}>{sendModal.clientName}</strong></div>
                 </div>
                 <button onClick={() => setSendModal(null)} style={{ width:30, height:30, borderRadius:"50%", background:C.creamD, border:"none", cursor:"pointer", color:C.textM, fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
               </div>
@@ -13838,12 +13912,12 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
                   setSendSuccess(sendModal.clientName);
                 }}
-                style={{ width:"100%", padding:"18px 20px", background:"linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)", border:"1.5px solid #93C5FD", borderRadius:14, cursor:"pointer", marginBottom:12, textAlign:"left", transition:"all 0.2s" }}
+                style={{ width:"100%", padding:"18px 20px", background:"linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)", border:"1.5px solid #93C5FD", borderRadius:16, cursor:"pointer", marginBottom:12, textAlign:"left", transition:"all 0.2s" }}
                 onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(59,130,246,0.25)";}}
                 onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="none";}}
               >
                 <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-                  <div style={{ width:44, height:44, background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>📧</div>
+                  <div style={{ width:44, height:44, background:"linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0, color:"#fff" }}><Ico name="mail" size={22} /></div>
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#1E3A8A", marginBottom:3 }}>Par Email</div>
                     <div style={{ fontFamily:T.body, fontSize:11.5, color:"#3B82F6", lineHeight:1.55 }}>Ouvre ton application email avec {({ silence: "le message déjà rédigé, prêt", preventive: "le rappel déjà rédigé, prêt", amicable: "la relance déjà rédigée, prête" })[sendModal.type] || "la mise en demeure déjà rédigée, prête"} à envoyer à {sendModal.clientName}.</div>
@@ -13864,12 +13938,12 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   window.location.href = `sms:${sendModal.clientPhone || ""}?body=${encodeURIComponent(msg)}`;
                   setSendSuccess(sendModal.clientName);
                 }}
-                style={{ width:"100%", padding:"18px 20px", background:"linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)", border:"1.5px solid #86EFAC", borderRadius:14, cursor:"pointer", textAlign:"left", transition:"all 0.2s" }}
+                style={{ width:"100%", padding:"18px 20px", background:"linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)", border:"1.5px solid #86EFAC", borderRadius:16, cursor:"pointer", textAlign:"left", transition:"all 0.2s" }}
                 onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(34,197,94,0.25)";}}
                 onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="none";}}
               >
                 <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-                  <div style={{ width:44, height:44, background:"linear-gradient(135deg, #15803D 0%, #22C55E 100%)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>💬</div>
+                  <div style={{ width:44, height:44, background:"linear-gradient(135deg, #15803D 0%, #22C55E 100%)", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0, color:"#fff" }}><Ico name="message" size={22} /></div>
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#14532D", marginBottom:3 }}>Par SMS</div>
                     <div style={{ fontFamily:T.body, fontSize:11.5, color:"#16A34A", lineHeight:1.55 }}>Ouvre ton application de messages avec un rappel factuel prêt à envoyer à {sendModal.clientName}.</div>
@@ -13896,7 +13970,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
           <div style={{ position:"absolute", top:-20, right:-20, width:100, height:100, borderRadius:"50%", background:"rgba(255,255,255,0.05)" }} />
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", position:"relative" }}>
             <div style={{ display:"flex", alignItems:"center", gap:13 }}>
-              <div style={{ width:42, height:42, background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:13, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>🚨</div>
+              <div style={{ width:42, height:42, background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:13, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, color:"#fff" }}><Ico name="alert" size={20} /></div>
               <div>
                 <div style={{ fontFamily:T.display, fontSize:17, fontWeight:700, color:"#fff", lineHeight:1.2 }}>Recouvrement Ferme</div>
                 <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>{FORMAL_LETTER_ENABLED ? "Rappels, relances amiables & mises en demeure" : "Rappels avant échéance & relances amiables"}</div>
@@ -13913,7 +13987,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
           {recouvrementCases.length > 0 && (
             <div className="fade-up" style={{ marginBottom:16 }}>
               <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:700, marginBottom:10 }}>
-                📋 {recouvrementCases.length} DOSSIER{recouvrementCases.length > 1 ? "S" : ""} À SURVEILLER
+                <IcoI name="folder" />{recouvrementCases.length} DOSSIER{recouvrementCases.length > 1 ? "S" : ""} À SURVEILLER
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:220, overflowY:"auto" }}>
                 {recouvrementCases.map(rc => (
@@ -13921,11 +13995,11 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                     display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
                     background: rc.status === "late" ? "#FEF2F2" : "#FFFBEB",
                     border:`1px solid ${rc.status === "late" ? "#FCA5A5" : "#FCD34D"}`,
-                    borderRadius:10, padding:"10px 12px",
+                    borderRadius:12, padding:"10px 12px",
                   }}>
                     <div style={{ minWidth:0, flex:1 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
-                        <span style={{ fontSize:12 }}>{rc.status === "late" ? "⚠️" : "⏰"}</span>
+                        <span style={{ display:"inline-flex" }}><Ico name={rc.status === "late" ? "alert" : "clock"} size={13} /></span>
                         <span style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color: rc.status === "late" ? "#991B1B" : "#92400E" }}>{rc.clientName}</span>
                       </div>
                       <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textM, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
@@ -13934,7 +14008,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                     </div>
                     <button
                       onClick={() => selectCase(rc)}
-                      style={{ flexShrink:0, padding:"7px 12px", background: rc.status === "late" ? "#DC2626" : "#D97706", color:"#fff", border:"none", borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}
+                      style={{ flexShrink:0, padding:"7px 12px", background: rc.status === "late" ? "#DC2626" : "#D97706", color:"#fff", border:"none", borderRadius:9, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}
                     >Traiter →</button>
                   </div>
                 ))}
@@ -13947,9 +14021,9 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
             {autoCase ? (
               <>
                 {/* Résumé du dossier réel */}
-                <div style={{ background:"linear-gradient(135deg, #FFF1F2 0%, #FEF2F2 100%)", border:"1.5px solid #FECACA", borderRadius:14, padding:"16px 18px", marginBottom: autoStep !== "alert" ? 14 : 0 }}>
+                <div style={{ background:"linear-gradient(135deg, #FFF1F2 0%, #FEF2F2 100%)", border:"1.5px solid #FECACA", borderRadius:16, padding:"16px 18px", marginBottom: autoStep !== "alert" ? 14 : 0 }}>
                   <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:12 }}>
-                    <div style={{ width:36, height:36, background:"#FEE2E2", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>{autoIsLate ? "⚠️" : "⏰"}</div>
+                    <div style={{ width:36, height:36, background:"#FEE2E2", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0, color: autoIsLate ? "#B91C1C" : "#B45309" }}><Ico name={autoIsLate ? "alert" : "clock"} size={18} /></div>
                     <div style={{ flex:1 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
                         <div style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#991B1B" }}>Dossier suivi</div>
@@ -13967,8 +14041,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                   </div>
                   {/* Détails mission */}
                   {autoCase.mission && (
-                    <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.7)", borderRadius:8, padding:"8px 12px", marginBottom:12, border:"1px solid #FECACA" }}>
-                      <span style={{ fontSize:13 }}>📋</span>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.7)", borderRadius:10, padding:"8px 12px", marginBottom:12, border:"1px solid #FECACA" }}>
+                      <span style={{ display:"flex" }}><Ico name="folder" size={14} /></span>
                       <div style={{ fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", fontWeight:500 }}>{autoCase.mission}</div>
                     </div>
                   )}
@@ -13989,18 +14063,18 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         )}
                         <button
                           onClick={generateAuto}
-                          style={{ width:"100%", padding:"13px 16px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:"0 6px 24px rgba(185,28,28,0.45)", transition:"all 0.2s", letterSpacing:"0.02em" }}
+                          style={{ width:"100%", padding:"13px 16px", background:"linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)", color:"#fff", border:"none", borderRadius:13, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9, boxShadow:"0 6px 24px rgba(185,28,28,0.45)", transition:"all 0.2s", letterSpacing:"0.02em" }}
                           onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 32px rgba(185,28,28,0.55)";}}
                           onMouseOut={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 6px 24px rgba(185,28,28,0.45)";}}
                         >
-                          <span style={{ fontSize:16 }}>⚡</span> {!latePath ? "Générer le rappel avant échéance" : "Générer la relance amiable"}
+                          <IcoI name="bolt" />{!latePath ? "Générer le rappel avant échéance" : "Générer la relance amiable"}
                         </button>
                         {noticeOn && (noticeRatesReady ? (
                           <button
                             data-testid="notice-open"
                             onClick={() => setAutoStep("notice")}
-                            style={{ width:"100%", marginTop:10, padding:"12px 16px", background:C.white, color:"#991B1B", border:"1.5px solid #FCA5A5", borderRadius:11, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9 }}
-                          ><span style={{ fontSize:15 }}>🚨</span> Préparer la mise en demeure</button>
+                            style={{ width:"100%", marginTop:10, padding:"12px 16px", background:C.white, color:"#991B1B", border:"1.5px solid #FCA5A5", borderRadius:13, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", gap:9 }}
+                          ><IcoI name="alert" />Préparer la mise en demeure</button>
                         ) : (
                           <div data-testid="notice-rates-pending" style={{ marginTop:10, fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", lineHeight:1.6 }}>{NOTICE_RATES_MSG}</div>
                         ))}
@@ -14042,8 +14116,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                 )}
               </>
             ) : (
-              <div style={{ background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"22px 18px", textAlign:"center" }}>
-                <div style={{ fontSize:22, marginBottom:8 }}>📭</div>
+              <div style={{ background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:16, padding:"22px 18px", textAlign:"center" }}>
+                <div style={{ fontSize:22, marginBottom:8, color:"#A5B4FC" }}><IcoI name="mail" size={24} stroke={1.6} gap={0} /></div>
                 <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, lineHeight:1.6 }}>
                   Aucun dossier suivi pour le moment.<br/>Renseigne un client et une date d'échéance sur un contrat pour qu'il apparaisse ici automatiquement — ou utilise la saisie manuelle ci-dessous.
                 </div>
@@ -14066,10 +14140,10 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
               {/* Toggle accordéon */}
               <button
                 onClick={() => setManualOpen(o => !o)}
-                style={{ width:"100%", padding:"13px 16px", background: manualOpen ? C.creamD : C.white, border:`1.5px solid ${manualOpen ? C.border : C.borderL}`, borderRadius: manualOpen ? "13px 13px 0 0" : 13, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, display:"flex", alignItems:"center", justifyContent:"space-between", transition:"all 0.2s" }}
+                style={{ width:"100%", padding:"13px 16px", background: manualOpen ? C.creamD : C.white, border:`1.5px solid ${manualOpen ? C.border : C.borderL}`, borderRadius: manualOpen ? "13px 13px 0 0" : 13, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.ink, display:"flex", alignItems:"center", justifyContent:"space-between", transition:"all 0.2s" }}
               >
                 <div style={{ display:"flex", alignItems:"center", gap:9 }}>
-                  <span style={{ fontSize:16 }}>✍️</span>
+                  <span style={{ display:"flex" }}><Ico name="pen" size={16} /></span>
                   <span>Saisie manuelle (Autre dossier)</span>
                 </div>
                 <span style={{ fontSize:14, color:C.textL, transform: manualOpen ? "rotate(180deg)" : "rotate(0deg)", transition:"transform 0.2s", display:"inline-block" }}>▾</span>
@@ -14084,15 +14158,15 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         <label style={labelSt}>TYPE DE RELANCE</label>
                         <div style={{ display:"flex", gap:8, marginTop:6 }}>
                           {[
-                            { key:"paiement", label:"💰 Paiement en retard/à venir" },
-                            { key:"silence", label:"💬 Client silencieux" },
+                            { key:"paiement", label:"Paiement en retard/à venir" },
+                            { key:"silence", label:"Client silencieux" },
                           ].map(o => (
                             <button
                               key={o.key}
                               type="button"
                               onClick={() => setManMode(o.key)}
                               style={{
-                                flex:1, padding:"9px 6px", borderRadius:8, cursor:"pointer",
+                                flex:1, padding:"9px 6px", borderRadius:10, cursor:"pointer",
                                 fontFamily:T.body, fontSize:11.5, fontWeight:700,
                                 background: manMode === o.key ? (o.key === "silence" ? "#2563EB" : "#7F1D1D") : C.white,
                                 color: manMode === o.key ? "#fff" : C.textM,
@@ -14129,7 +14203,7 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                               type="button"
                               onClick={() => setManClientType(o.key)}
                               style={{
-                                flex:1, padding:"9px 0", borderRadius:8, cursor:"pointer",
+                                flex:1, padding:"9px 0", borderRadius:10, cursor:"pointer",
                                 fontFamily:T.body, fontSize:12.5, fontWeight:700,
                                 background: manClientType === o.key ? "#7F1D1D" : C.white,
                                 color: manClientType === o.key ? "#fff" : C.textM,
@@ -14187,9 +14261,9 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                         <button
                           onClick={generateManual}
                           disabled={manDisabled}
-                          style={{ width:"100%", padding:"13px", background: manDisabled ? C.creamDD : (manMode === "silence" ? "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)"), color: manDisabled ? C.textL : "#fff", border:"none", borderRadius:11, cursor: manDisabled ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: manDisabled ? "none" : (manMode === "silence" ? "0 6px 22px rgba(37,99,235,0.4)" : "0 6px 22px rgba(185,28,28,0.4)"), transition:"all 0.2s" }}
+                          style={{ width:"100%", padding:"13px", background: manDisabled ? C.creamDD : (manMode === "silence" ? "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)" : "linear-gradient(135deg, #7F1D1D 0%, #DC2626 100%)"), color: manDisabled ? C.textL : "#fff", border:"none", borderRadius:13, cursor: manDisabled ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow: manDisabled ? "none" : (manMode === "silence" ? "0 6px 22px rgba(37,99,235,0.4)" : "0 6px 22px rgba(185,28,28,0.4)"), transition:"all 0.2s" }}
                         >
-                          <span>{manMode === "silence" ? "💬" : "🚨"}</span> {manLate ? "Générer la relance amiable" : "Générer"}
+                          <span style={{ display:"flex" }}><Ico name={manMode === "silence" ? "message" : "alert"} size={16} /></span> {manLate ? "Générer la relance amiable" : "Générer"}
                         </button>
                         );
                       })()}
@@ -14199,8 +14273,8 @@ Réponds uniquement avec le texte du message, sans titre ni introduction. Pas de
                           data-testid="notice-open-manual"
                           disabled={!manDebtor.trim()}
                           onClick={() => { setManNoticeDraft((d) => ({ ...(d || {}), kind: manClientType === "particulier" ? "conso" : "pro", debtorName: manDebtor, amount: manAmount, dueDate: manDueDate })); setManStep("notice"); }}
-                          style={{ width:"100%", marginTop:10, padding:"12px", background:C.white, color: manDebtor.trim() ? "#991B1B" : C.textL, border:`1.5px solid ${manDebtor.trim() ? "#FCA5A5" : C.border}`, borderRadius:11, cursor: manDebtor.trim() ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
-                        ><span>🚨</span> Préparer une mise en demeure</button>
+                          style={{ width:"100%", marginTop:10, padding:"12px", background:C.white, color: manDebtor.trim() ? "#991B1B" : C.textL, border:`1.5px solid ${manDebtor.trim() ? "#FCA5A5" : C.border}`, borderRadius:13, cursor: manDebtor.trim() ? "pointer" : "not-allowed", fontFamily:T.body, fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
+                        ><IcoI name="alert" />Préparer une mise en demeure</button>
                       ) : (
                         <div data-testid="notice-rates-pending-manual" style={{ marginTop:10, fontFamily:T.body, fontSize:11.5, color:"#7F1D1D", lineHeight:1.6 }}>{NOTICE_RATES_MSG}</div>
                       ))}
@@ -14258,8 +14332,8 @@ function ResetPasswordForm({ onSuccess }) {
     setTimeout(() => onSuccess(), 2000);
   };
   if (done) return React.createElement("p", { style: { color:"#2D6A4F" } }, "Mot de passe mis a jour !");
-  const s = { width:"100%", padding:"14px 44px 14px 16px", border:"1.5px solid #D8D4CB", borderRadius:12, fontSize:14, marginBottom:12, boxSizing:"border-box" };
-  const eyeBtn = (show, setShow) => React.createElement("button", { type:"button", onClick:()=>setShow(!show), style:{ position:"absolute", right:12, top:"50%", transform:"translateY(-60%)", background:"none", border:"none", cursor:"pointer", color:"#8A8780", fontSize:14, padding:0 } }, show ? "masquer" : "voir");
+  const s = { width:"100%", padding:"14px 44px 14px 16px", border:"1.5px solid #DCDCE6", borderRadius:14, fontSize:14, marginBottom:12, boxSizing:"border-box" };
+  const eyeBtn = (show, setShow) => React.createElement("button", { type:"button", onClick:()=>setShow(!show), style:{ position:"absolute", right:12, top:"50%", transform:"translateY(-60%)", background:"none", border:"none", cursor:"pointer", color:"#6B6A7B", fontSize:14, padding:0 } }, show ? "masquer" : "voir");
   return React.createElement("div", null,
     React.createElement("div", { style:{ position:"relative", marginBottom:0 } },
       React.createElement("input", { type:show1?"text":"password", placeholder:"Nouveau mot de passe", value:pwd, onChange:e=>setPwd(e.target.value), style:s }),
@@ -14270,7 +14344,7 @@ function ResetPasswordForm({ onSuccess }) {
       eyeBtn(show2, setShow2)
     ),
     error && React.createElement("p", { style:{ color:"#C0392B", fontSize:12, marginBottom:12 } }, error),
-    React.createElement("button", { onClick:handle, disabled:loading, style:{ width:"100%", padding:"14px", background:"#1B2E4B", color:"white", border:"none", borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer" } }, loading ? "..." : "Enregistrer")
+    React.createElement("button", { onClick:handle, disabled:loading, style:{ width:"100%", padding:"14px", background:"#4338CA", color:"white", border:"none", borderRadius:14, fontSize:14, fontWeight:700, cursor:"pointer" } }, loading ? "..." : "Enregistrer")
   );
 }
 
@@ -14349,7 +14423,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
 
   const inputBase = {
     width:"100%", padding:"14px 16px",
-    border:`1.5px solid ${C.border}`, borderRadius:12,
+    border:`1.5px solid ${C.border}`, borderRadius:14,
     fontSize:14, fontFamily:T.body, color:C.text, outline:"none",
     boxSizing:"border-box", background:C.white,
     transition:"border-color 0.18s, box-shadow 0.18s",
@@ -14358,7 +14432,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
   const oauthBtn = {
     width:"100%", padding:"14px 20px",
     background:C.white, border:`1.5px solid ${C.border}`,
-    borderRadius:14, cursor:"pointer",
+    borderRadius:16, cursor:"pointer",
     fontFamily:T.body, fontSize:14, fontWeight:600, color:C.text,
     display:"flex", alignItems:"center", justifyContent:"center", gap:12,
     transition:"all 0.18s",
@@ -14372,7 +14446,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
     >
       <div className="fade-up" style={{
         background:C.white, borderRadius:24, width:"100%", maxWidth:432, margin:"auto", flexShrink:0,
-        boxShadow:"0 40px 100px rgba(27,46,75,0.22), 0 0 0 1px rgba(27,46,75,0.06)",
+        boxShadow:"0 40px 100px rgba(30,27,75,0.22), 0 0 0 1px rgba(30,27,75,0.06)",
         overflow:"hidden", position:"relative",
       }}>
 
@@ -14392,16 +14466,16 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
           {/* ── Logo ── */}
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:24 }}>
             <img src={FREELEY_LOGO} alt="Freeley" style={{ height:36, width:"auto", objectFit:"contain" }} />
-            <span style={{ fontFamily:T.display, fontSize:17, color:C.navy, fontWeight:600, letterSpacing:"-0.01em" }}>Freeley</span>
+            <span style={{ fontFamily:LOGO_FONT, fontSize:17, color:LOGO_NAVY, fontWeight:600, letterSpacing:"-0.01em" }}>Freeley</span>
           </div>
 
           {needsEmailConfirm ? (
             /* ── État : confirmation email requise ── */
             <div style={{ textAlign:"center", paddingBottom:36 }}>
-              <div style={{ width:64, height:64, borderRadius:"50%", background:"linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)", border:"2px solid #6EE7B7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, margin:"0 auto 20px" }}>📬</div>
-              <div style={{ fontFamily:T.display, fontSize:22, color:C.navy, fontWeight:700, marginBottom:8, lineHeight:1.2 }}>Vérifie ta boîte mail</div>
+              <div style={{ width:64, height:64, borderRadius:"50%", background:"linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)", border:"2px solid #6EE7B7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, margin:"0 auto 20px" }}><IcoI name="mail" size={28} stroke={1.8} gap={0} /></div>
+              <div style={{ fontFamily:T.display, fontSize:22, color:C.ink, fontWeight:700, marginBottom:8, lineHeight:1.2 }}>Vérifie ta boîte mail</div>
               <p style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.7, marginBottom:8 }}>
-                Un email de confirmation a été envoyé à <strong style={{ color:C.navy }}>{email}</strong>.<br/>
+                Un email de confirmation a été envoyé à <strong style={{ color:C.ink }}>{email}</strong>.<br/>
                 Clique sur le lien qu'il contient pour activer ton compte, puis reviens te connecter ici.
               </p>
             </div>
@@ -14409,18 +14483,18 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
             <>
               {/* ── Titre ── */}
               <div style={{ marginBottom:20 }}>
-                <h2 style={{ fontFamily:T.display, fontSize:24, color:C.navy, fontWeight:700, marginBottom:6, lineHeight:1.2 }}>
-                  {mode === "signup" ? "Créez votre compte Freeley 🛡️" : "Bon retour parmi nous 👋"}
+                <h2 style={{ fontFamily:T.display, fontSize:24, color:C.ink, fontWeight:700, marginBottom:6, lineHeight:1.2 }}>
+                  {mode === "signup" ? "Créez votre compte Freeley" : "Bon retour parmi nous"}
                 </h2>
                 <p style={{ fontFamily:T.body, fontSize:13, color:C.textL, lineHeight:1.65, margin:0 }}>
                   {mode === "signup" ? "Rejoignez les freelances qui protègent leurs missions avec Freeley." : "Connectez-vous pour accéder à vos contrats."}
                 </p>
               </div>
               <div style={{ display:"flex", gap:8, marginBottom:20 }}>
-                <button onClick={() => { setMode("login"); setError(""); setResetEmailSent(""); setNeedsEmailConfirm(false); }} style={{ flex:1, padding:"10px", borderRadius:10, border:`2px solid ${mode === "login" ? C.navy : C.border}`, background: mode === "login" ? C.navy : "white", color: mode === "login" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                <button onClick={() => { setMode("login"); setError(""); setResetEmailSent(""); setNeedsEmailConfirm(false); }} style={{ flex:1, padding:"10px", borderRadius:12, border:`2px solid ${mode === "login" ? C.navy : C.border}`, background: mode === "login" ? C.navy : "white", color: mode === "login" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
                   Se connecter
                 </button>
-                <button onClick={() => { setMode("signup"); setError(""); setResetEmailSent(""); setNeedsEmailConfirm(false); }} style={{ flex:1, padding:"10px", borderRadius:10, border:`2px solid ${mode === "signup" ? C.navy : C.border}`, background: mode === "signup" ? C.navy : "white", color: mode === "signup" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                <button onClick={() => { setMode("signup"); setError(""); setResetEmailSent(""); setNeedsEmailConfirm(false); }} style={{ flex:1, padding:"10px", borderRadius:12, border:`2px solid ${mode === "signup" ? C.navy : C.border}`, background: mode === "signup" ? C.navy : "white", color: mode === "signup" ? "white" : C.textM, fontFamily:T.body, fontSize:13, fontWeight:600, cursor:"pointer" }}>
                   Créer un compte
                 </button>
               </div>
@@ -14430,7 +14504,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                 onClick={() => handleOAuth("google")}
                 disabled={!!oauthLoading}
                 style={{ ...oauthBtn, marginBottom:10 }}
-                onMouseOver={e => { if (!oauthLoading) { e.currentTarget.style.borderColor = C.navy+"55"; e.currentTarget.style.background = C.cream; e.currentTarget.style.boxShadow = "0 4px 16px #1B2E4B0E"; }}}
+                onMouseOver={e => { if (!oauthLoading) { e.currentTarget.style.borderColor = C.navy+"55"; e.currentTarget.style.background = C.cream; e.currentTarget.style.boxShadow = "0 4px 16px #4338CA0E"; }}}
                 onMouseOut={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.white; e.currentTarget.style.boxShadow = "none"; }}
               >
                 {oauthLoading === "google" ? (
@@ -14443,7 +14517,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                     <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                   </svg>
                 )}
-                <span>🌐 Continuer avec Google</span>
+                <span>Continuer avec Google</span>
               </button>
 
               {/* ── OAuth LinkedIn ── */}
@@ -14461,7 +14535,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                     <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
                   </svg>
                 )}
-                <span>💼 Continuer avec LinkedIn</span>
+                <span><IcoI name="briefcase" />Continuer avec LinkedIn</span>
               </button>
 
 
@@ -14482,7 +14556,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   placeholder="Votre adresse email pro"
                   onKeyDown={e => e.key === "Enter" && handleEmailPasswordSubmit()}
                   style={inputBase}
-                  onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
+                  onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #4338CA12"; }}
                   onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
                 />
               </div>
@@ -14494,7 +14568,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   placeholder="Mot de passe (6 caractères min.)"
                   onKeyDown={e => e.key === "Enter" && handleEmailPasswordSubmit()}
                   style={{ ...inputBase, paddingRight:44 }}
-                  onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
+                  onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #4338CA12"; }}
                   onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
                 />
                 <button type="button" onClick={() => setShowPwd(!showPwd)} style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", color:C.textL, fontSize:14, padding:0 }}>voir</button>
@@ -14508,7 +14582,7 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                   placeholder="Confirmer le mot de passe"
                   onKeyDown={e => e.key === "Enter" && handleEmailPasswordSubmit()}
                   style={{ ...inputBase, paddingRight:44 }}
-                  onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #1B2E4B12"; }}
+                  onFocus={e => { e.target.style.borderColor = C.navy; e.target.style.boxShadow = "0 0 0 3px #4338CA12"; }}
                   onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
                 />
                 <button type="button" onClick={() => setShowPwd2(!showPwd2)} style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", color:C.textL, fontSize:14, padding:0 }}>voir</button>
@@ -14516,8 +14590,8 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
               )}
 
               {error && (
-                <div style={{ padding:"9px 14px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, color:C.error, fontSize:12, fontFamily:T.body, marginBottom:12 }}>
-                  ⚠ {error}
+                <div style={{ padding:"9px 14px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, color:C.error, fontSize:12, fontFamily:T.body, marginBottom:12 }}>
+                  <IcoI name="alert" size={14} stroke={1.8} gap={0} /> {error}
                 </div>
               )}
 
@@ -14530,22 +14604,22 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
                     ? C.creamDD
                     : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`,
                   color: loading || !email.trim() ? C.textL : C.white,
-                  border:"none", borderRadius:14,
+                  border:"none", borderRadius:16,
                   cursor: loading || !email.trim() ? "not-allowed" : "pointer",
                   fontFamily:T.body, fontSize:14, fontWeight:700,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:9,
-                  boxShadow: loading || !email.trim() ? "none" : "0 8px 28px #1B2E4B30",
+                  boxShadow: loading || !email.trim() ? "none" : "0 8px 28px #4338CA30",
                   transition:"all 0.2s",
                   marginBottom:10,
                   boxSizing:"border-box",
                 }}
-                onMouseOver={e => { if (!loading && email.trim()) { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 12px 36px #1B2E4B40"; }}}
-                onMouseOut={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = loading || !email.trim() ? "none" : "0 8px 28px #1B2E4B30"; }}
+                onMouseOver={e => { if (!loading && email.trim()) { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 12px 36px #4338CA40"; }}}
+                onMouseOut={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = loading || !email.trim() ? "none" : "0 8px 28px #4338CA30"; }}
               >
                 {loading ? (
                   <><span style={{ width:15, height:15, border:`2px solid rgba(255,255,255,0.4)`, borderTopColor:"#fff", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }} /> {mode === "signup" ? "Création en cours…" : "Connexion en cours…"}</>
                 ) : (
-                  <><span>{mode === "signup" ? "🛡️" : "👋"}</span> {mode === "signup" ? "Créer mon compte" : "Se connecter"}</>
+                  <><span>{mode === "signup" ? <IcoI name="shield" gap={0} /> : ""}</span> {mode === "signup" ? "Créer mon compte" : "Se connecter"}</>
                 )}
               </button>
 
@@ -14587,8 +14661,8 @@ function AuthModal({ mode, setMode, onClose, onSuccess }) {
             flexWrap:"wrap",
           }}>
             {[
-              { icon:"📄", text:"Contrats prêts en 2 minutes" },
-              { icon:"🪄", text:"Scanner intégré" },
+              { icon:"", text:"Contrats prêts en 2 minutes" },
+              { icon:"", text:"Scanner intégré" },
             ].map((item, i) => (
               <React.Fragment key={i}>
                 {i > 0 && <span style={{ width:1, height:16, background:C.border, margin:"0 16px", flexShrink:0 }} />}
@@ -14634,7 +14708,7 @@ function MagicPhotoSectionTitle({ num, title, sub, delay=1, onMagicFill, loading
     <div className={`fade-up fade-up-${delay}`} style={{ marginBottom: success ? 16 : 32 }}>
       <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:6 }}>ÉTAPE {num}</div>
       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-        <h2 style={{ fontFamily:T.display, fontSize:28, color:C.navy, fontWeight:600, margin:0 }}>{title}</h2>
+        <h2 style={{ fontFamily:T.display, fontSize:26, color:C.ink, fontWeight:700, letterSpacing:"-0.02em", margin:0 }}>{title}</h2>
 
         {/* ✨📷 Mini camera icon */}
         <div ref={tooltipRef} style={{ position:"relative", display:"flex", alignItems:"center", gap:5 }}>
@@ -14644,28 +14718,27 @@ function MagicPhotoSectionTitle({ num, title, sub, delay=1, onMagicFill, loading
             title="Pré-remplir par photo"
             style={{
               display:"flex", alignItems:"center", gap:3,
-              background: loading ? "#E8EFF7" : "linear-gradient(135deg, #F0F4FA 0%, #E8EFF7 100%)",
-              border:`1px solid ${loading ? C.border : "#C8D8EF"}`,
+              background: loading ? "#EEF0FF" : "linear-gradient(135deg, #F5F6FF 0%, #EEF0FF 100%)",
+              border:`1px solid ${loading ? C.border : "#C7D2FE"}`,
               borderRadius:20, padding:"4px 9px 4px 6px",
               cursor: loading ? "default" : "pointer",
               fontFamily:T.body, fontSize:11.5, fontWeight:600,
               color: loading ? C.textL : C.navy,
               transition:"all 0.18s",
-              boxShadow: loading ? "none" : "0 1px 4px #1B2E4B12",
+              boxShadow: loading ? "none" : "0 1px 4px #4338CA12",
               flexShrink:0,
             }}
-            onMouseOver={e=>{ if(!loading){ e.currentTarget.style.background="linear-gradient(135deg, #E2EAF6 0%, #D6E1F2 100%)"; e.currentTarget.style.boxShadow="0 2px 8px #1B2E4B20"; e.currentTarget.style.transform="translateY(-1px)"; }}}
-            onMouseOut={e=>{ if(!loading){ e.currentTarget.style.background="linear-gradient(135deg, #F0F4FA 0%, #E8EFF7 100%)"; e.currentTarget.style.boxShadow="0 1px 4px #1B2E4B12"; e.currentTarget.style.transform="translateY(0)"; }}}
+            onMouseOver={e=>{ if(!loading){ e.currentTarget.style.background="linear-gradient(135deg, #E0E7FF 0%, #D5DCFE 100%)"; e.currentTarget.style.boxShadow="0 2px 8px #4338CA20"; e.currentTarget.style.transform="translateY(-1px)"; }}}
+            onMouseOut={e=>{ if(!loading){ e.currentTarget.style.background="linear-gradient(135deg, #F5F6FF 0%, #EEF0FF 100%)"; e.currentTarget.style.boxShadow="0 1px 4px #4338CA12"; e.currentTarget.style.transform="translateY(0)"; }}}
           >
             {loading ? (
               <>
-                <div style={{ width:11, height:11, border:"1.5px solid #C8D8EF", borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.7s linear infinite", flexShrink:0 }} />
+                <div style={{ width:11, height:11, border:"1.5px solid #C7D2FE", borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.7s linear infinite", flexShrink:0 }} />
                 <span style={{ fontSize:10 }}>Analyse…</span>
               </>
             ) : (
               <>
-                <span style={{ fontSize:13, lineHeight:1 }}>✨</span>
-                <span style={{ fontSize:13, lineHeight:1 }}>📷</span>
+                <Ico name="sparkle" size={12} stroke={2} /><Ico name="camera" size={15} />
               </>
             )}
           </button>
@@ -14691,14 +14764,14 @@ function MagicPhotoSectionTitle({ num, title, sub, delay=1, onMagicFill, loading
               zIndex:500,
               background:C.white,
               border:`1px solid ${C.border}`,
-              borderRadius:10,
+              borderRadius:12,
               padding:"12px 14px",
-              boxShadow:"0 8px 28px #1B2E4B18",
+              boxShadow:"0 8px 28px #4338CA18",
               maxWidth:260, minWidth:220,
               animation:"fadeUp 0.2s cubic-bezier(.22,.68,0,1.2) both",
             }}>
               <div style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
-                <span style={{ fontSize:14, flexShrink:0 }}>✨</span>
+                <span style={{ fontSize:14, flexShrink:0 }}><IcoI name="sparkle" size={14} stroke={1.8} gap={0} /></span>
                 <p style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, margin:0 }}>
                   {tooltipText}
                 </p>
@@ -14717,10 +14790,10 @@ function MagicPhotoSectionTitle({ num, title, sub, delay=1, onMagicFill, loading
           marginTop:14, display:"flex", alignItems:"center", gap:10,
           background: isGold ? "linear-gradient(135deg, #FFFBEB 0%, #FEF9EE 100%)" : "linear-gradient(135deg, #DCFCE7 0%, #F0FDF4 100%)",
           border:`1.5px solid ${isGold ? "#FCD34D" : "#86EFAC"}`,
-          borderRadius:10, padding:"10px 14px",
+          borderRadius:12, padding:"10px 14px",
           animation:"fadeUp 0.35s cubic-bezier(.22,.68,0,1.2) both",
         }}>
-          <span style={{ fontSize:16, flexShrink:0 }}>✨</span>
+          <span style={{ fontSize:16, flexShrink:0 }}><IcoI name="sparkle" size={16} stroke={1.8} gap={0} /></span>
           <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color: isGold ? "#92400E" : "#15803D" }}>
             {successMsg}
           </div>
@@ -14734,7 +14807,7 @@ function SectionTitle({ num, title, sub, delay=1 }) {
   return (
     <div className={`fade-up fade-up-${delay}`} style={{ marginBottom:32 }}>
       <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:6 }}>ÉTAPE {num}</div>
-      <h2 style={{ fontFamily:T.display, fontSize:28, color:C.navy, fontWeight:600, margin:"0 0 6px" }}>{title}</h2>
+      <h2 style={{ fontFamily:T.display, fontSize:28, color:C.ink, fontWeight:600, margin:"0 0 6px" }}>{title}</h2>
       <p style={{ fontFamily:T.body, color:C.textL, fontSize:13, margin:0 }}>{sub}</p>
     </div>
   );
@@ -14756,7 +14829,7 @@ function Field({ label, value, onChange, placeholder, type="text", error, delay,
   const showHint = !error && !!hint && !focused;
   return (
     <div className={delay ? `fade-up fade-up-${delay}` : ""} style={{ marginBottom: (error || showHint) ? 6 : 20 }}>
-      <label style={{ display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>{label.toUpperCase()}</label>
+      <label style={{ display:"block", fontFamily:T.body, fontSize:13, color:C.textM, fontWeight:600, marginBottom:7 }}>{label}</label>
       <div style={{ position:"relative" }}>
         {prefix && <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontFamily:T.body, color:C.textL, fontSize:14 }}>{prefix}</span>}
         <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
@@ -14764,14 +14837,14 @@ function Field({ label, value, onChange, placeholder, type="text", error, delay,
             width:"100%", padding: prefix ? "12px 14px 12px 28px" : "12px 14px",
             background: C.white,
             border:`1.5px solid ${error ? C.error : focused ? C.navy : C.border}`,
-            borderRadius:8, color:C.text, fontSize:14, outline:"none", boxSizing:"border-box",
+            borderRadius:10, color:C.text, fontSize:14, outline:"none", boxSizing:"border-box",
             fontFamily:T.body, transition:"border-color 0.18s",
-            boxShadow: focused ? `0 0 0 3px #1B2E4B10` : "none",
+            boxShadow: focused ? `0 0 0 4px rgba(79,70,229,0.14)` : "none",
           }}
           onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} />
       </div>
-      {error && <p style={{ fontFamily:T.body, color:C.error, fontSize:11, margin:"5px 0 10px" }}>⚠ {error}</p>}
-      {showHint && <p style={{ fontFamily:T.body, color:"#92400E", fontSize:11, margin:"5px 0 10px", lineHeight:1.5 }}>💡 {hint}</p>}
+      {error && <p style={{ fontFamily:T.body, color:C.error, fontSize:11, margin:"5px 0 10px" }}><IcoI name="alert" size={14} stroke={1.8} gap={0} /> {error}</p>}
+      {showHint && <p style={{ fontFamily:T.body, color:"#92400E", fontSize:11, margin:"5px 0 10px", lineHeight:1.5 }}><IcoI name="info" size={14} stroke={1.8} gap={0} /> {hint}</p>}
     </div>
   );
 }
@@ -14780,17 +14853,17 @@ function FieldArea({ label, value, onChange, placeholder, error, delay }) {
   const [focused, setFocused] = useState(false);
   return (
     <div className={delay ? `fade-up fade-up-${delay}` : ""} style={{ marginBottom: error ? 6 : 20 }}>
-      <label style={{ display:"block", fontFamily:T.body, fontSize:10, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>{label.toUpperCase()}</label>
+      <label style={{ display:"block", fontFamily:T.body, fontSize:13, color:C.textM, fontWeight:600, marginBottom:7 }}>{label}</label>
       <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={4}
         style={{
           width:"100%", padding:"12px 14px", background:C.white,
           border:`1.5px solid ${error ? C.error : focused ? C.navy : C.border}`,
-          borderRadius:8, color:C.text, fontSize:14, outline:"none", boxSizing:"border-box",
+          borderRadius:10, color:C.text, fontSize:14, outline:"none", boxSizing:"border-box",
           resize:"vertical", fontFamily:T.body, transition:"border-color 0.18s",
-          boxShadow: focused ? `0 0 0 3px #1B2E4B10` : "none",
+          boxShadow: focused ? `0 0 0 4px rgba(79,70,229,0.14)` : "none",
         }}
         onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} />
-      {error && <p style={{ fontFamily:T.body, color:C.error, fontSize:11, margin:"5px 0 10px" }}>⚠ {error}</p>}
+      {error && <p style={{ fontFamily:T.body, color:C.error, fontSize:11, margin:"5px 0 10px" }}><IcoI name="alert" size={14} stroke={1.8} gap={0} /> {error}</p>}
     </div>
   );
 }
@@ -14809,7 +14882,7 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
   const qualityColor = quality === "bonne" ? "#16A34A" : quality === "moyenne" ? "#D97706" : "#DC2626";
   const qualityBg = quality === "bonne" ? "#F0FDF4" : quality === "moyenne" ? "#FFFBEB" : "#FEF2F2";
   const qualityBorder = quality === "bonne" ? "#BBF7D0" : quality === "moyenne" ? "#FDE68A" : "#FECACA";
-  const qualityLabel = quality === "bonne" ? "✓ Description assez détaillée" : quality === "moyenne" ? "⚡ Ajoute plus de détails pour un contrat plus solide" : "⚠ Description trop courte — ton contrat sera vague";
+  const qualityLabel = quality === "bonne" ? "✓ Description assez détaillée" : quality === "moyenne" ? "Ajoute plus de détails pour un contrat plus solide" : "Description trop courte — ton contrat sera vague";
 
   const canImprove = len >= 20 && !improving;
 
@@ -14863,10 +14936,10 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
           width:"100%", padding:"12px 14px",
           background: improving ? C.creamD : C.white,
           border:`1.5px solid ${error ? C.error : improved ? "#16A34A" : focused ? C.navy : C.border}`,
-          borderRadius:8, color: improving ? C.textL : C.text,
+          borderRadius:10, color: improving ? C.textL : C.text,
           fontSize:14, outline:"none", boxSizing:"border-box",
           resize:"vertical", fontFamily:T.body, transition:"all 0.2s", lineHeight:1.6,
-          boxShadow: improved ? `0 0 0 3px #16A34A18` : focused ? `0 0 0 3px #1B2E4B10` : "none",
+          boxShadow: improved ? `0 0 0 3px #16A34A18` : focused ? `0 0 0 4px rgba(79,70,229,0.14)` : "none",
         }}
         onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
         disabled={improving}
@@ -14886,12 +14959,12 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
             background: improving ? C.creamD : canImprove ? C.navy : C.creamDD,
             color: improving ? C.textL : canImprove ? C.white : C.textL,
             border:`1.5px solid ${improving ? C.border : canImprove ? C.navy : C.border}`,
-            borderRadius:7, cursor: canImprove ? "pointer" : "not-allowed",
+            borderRadius:9, cursor: canImprove ? "pointer" : "not-allowed",
             fontSize:12, fontFamily:T.body, fontWeight:600,
             transition:"all 0.18s",
             flexShrink:0,
           }}
-          onMouseOver={e=>{ if(canImprove && !improving){ e.currentTarget.style.background="#152438"; e.currentTarget.style.boxShadow="0 4px 12px #1B2E4B30"; }}}
+          onMouseOver={e=>{ if(canImprove && !improving){ e.currentTarget.style.background="#152438"; e.currentTarget.style.boxShadow="0 4px 12px #4338CA30"; }}}
           onMouseOut={e=>{ if(canImprove && !improving){ e.currentTarget.style.background=C.navy; e.currentTarget.style.boxShadow="none"; }}}
         >
           {improving ? (
@@ -14911,7 +14984,7 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
         {canUndo && previousValue && (
           <button onClick={handleUndo} style={{
             padding:"7px 12px", background:"transparent",
-            border:`1.5px solid ${C.border}`, borderRadius:7,
+            border:`1.5px solid ${C.border}`, borderRadius:9,
             color:C.textM, fontSize:12, fontFamily:T.body,
             cursor:"pointer", transition:"all 0.15s",
           }}
@@ -14942,14 +15015,14 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
 
       {/* Version 224 : le texte amélioré deviendra l'article 2 du contrat, à relire */}
       {canUndo && (
-        <div style={{ marginTop:8, padding:"9px 12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:6, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
+        <div style={{ marginTop:8, padding:"9px 12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:8, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
           Relis ce texte avant de continuer : il deviendra l'article 2 de ton contrat. Garde seulement ce que tu vas vraiment faire, et vérifie la liste « Non inclus ».
         </div>
       )}
 
       {/* Improve error */}
       {improveError && (
-        <div style={{ marginTop:6, padding:"8px 12px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:6, fontFamily:T.body, fontSize:11, color:C.error }}>
+        <div style={{ marginTop:6, padding:"8px 12px", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, fontFamily:T.body, fontSize:11, color:C.error }}>
           {improveError}
         </div>
       )}
@@ -14960,7 +15033,7 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
           display:"flex", alignItems:"center", gap:8,
           marginTop:8, padding:"8px 12px",
           background:qualityBg, border:`1px solid ${qualityBorder}`,
-          borderRadius:6, fontFamily:T.body, fontSize:11, color:qualityColor, fontWeight:500,
+          borderRadius:8, fontFamily:T.body, fontSize:11, color:qualityColor, fontWeight:500,
         }}>
           <div style={{ flex:1 }}>{qualityLabel}</div>
           <div style={{ width:60, height:4, background:"#E5E7EB", borderRadius:4, overflow:"hidden", flexShrink:0 }}>
@@ -14975,12 +15048,12 @@ function DescriptionField({ value, onChange, error, missionTitle }) {
 
       {/* Tips */}
       {focused && len < 150 && !improving && (
-        <div style={{ marginTop:8, padding:"10px 12px", background:C.creamD, borderRadius:6, fontFamily:T.body, fontSize:11, color:C.textM, lineHeight:1.7 }}>
-          <strong style={{color:C.navy}}>Pense à inclure :</strong> livrables exacts · technologies utilisées · nombre de pages/écrans · délais intermédiaires · ce qui n'est <em>pas</em> inclus
+        <div style={{ marginTop:8, padding:"10px 12px", background:C.creamD, borderRadius:8, fontFamily:T.body, fontSize:11, color:C.textM, lineHeight:1.7 }}>
+          <strong style={{color:C.ink}}>Pense à inclure :</strong> livrables exacts · technologies utilisées · nombre de pages/écrans · délais intermédiaires · ce qui n'est <em>pas</em> inclus
         </div>
       )}
 
-      {error && <p style={{ fontFamily:T.body, color:C.error, fontSize:11, margin:"5px 0 10px" }}>⚠ {error}</p>}
+      {error && <p style={{ fontFamily:T.body, color:C.error, fontSize:11, margin:"5px 0 10px" }}><IcoI name="alert" size={14} stroke={1.8} gap={0} /> {error}</p>}
     </div>
   );
 }
@@ -15000,7 +15073,7 @@ function ToggleGroup({ label, options, labels, value, onChange, tooltip }) {
               <div style={{
                 position:"absolute", bottom:"calc(100% + 6px)", left:"50%", transform:"translateX(-50%)",
                 background:C.navy, color:C.white, fontSize:11, fontFamily:T.body, lineHeight:1.6,
-                padding:"8px 12px", borderRadius:6, width:220, zIndex:10,
+                padding:"8px 12px", borderRadius:8, width:220, zIndex:10,
                 boxShadow:"0 4px 16px #00000030",
               }}>
                 {tooltip}
@@ -15017,7 +15090,7 @@ function ToggleGroup({ label, options, labels, value, onChange, tooltip }) {
             background: value===o ? C.navy : C.white,
             color: value===o ? C.white : C.textM,
             border:`1.5px solid ${value===o ? C.navy : C.border}`,
-            borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body,
+            borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body,
             fontWeight: value===o ? 600 : 400, transition:"all 0.15s",
           }}
             onMouseOver={e=>{ if(value!==o){ e.currentTarget.style.borderColor=C.navy; e.currentTarget.style.color=C.navy; }}}
@@ -15034,19 +15107,19 @@ function PricingCard({ icon, title, price, sub, features, color, cta, recommende
     <div className="plan-card" style={{
       background: recommended ? C.navy : C.white,
       border: recommended ? `2px solid ${C.navy}` : `1.5px solid ${C.border}`,
-      borderRadius:14, padding:"20px 16px", position:"relative",
-      boxShadow: recommended ? "0 12px 40px #1B2E4B28" : "0 2px 8px #1B2E4B06",
+      borderRadius:16, padding:"20px 16px", position:"relative",
+      boxShadow: recommended ? "0 12px 40px #4338CA28" : "0 2px 8px #4338CA06",
     }}>
       {(recommended || badge) && (
         <div style={{
           position:"absolute", top:-11, left:"50%", transform:"translateX(-50%)",
-          background: recommended ? C.gold : color, color: C.navyD,
+          background: recommended ? C.goldBg : color, color: C.navyD,
           fontSize:9, fontWeight:700, padding:"3px 14px", borderRadius:20,
           letterSpacing:"0.1em", whiteSpace:"nowrap", fontFamily:T.body,
         }}>{recommended ? "RECOMMANDÉ" : badge}</div>
       )}
       <div style={{ fontSize:20, color: recommended ? C.goldL : color, marginBottom:10, fontFamily:T.display }}>{icon}</div>
-      <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.12em", fontWeight:600, color: recommended ? "#8BA3C0" : C.textL, marginBottom:6 }}>{title.toUpperCase()}</div>
+      <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.12em", fontWeight:600, color: recommended ? "#C7D2FE" : C.textL, marginBottom:6 }}>{title.toUpperCase()}</div>
       <div style={{ fontFamily:T.display, fontSize:32, color: recommended ? C.white : C.navy, fontWeight:600, lineHeight:1, marginBottom:4 }}>{price}</div>
       <div style={{ fontFamily:T.body, fontSize:11, color: recommended ? "#6A8AAA" : C.textL, marginBottom:20 }}>{sub}</div>
       {features.map(f => (
@@ -15057,9 +15130,9 @@ function PricingCard({ icon, title, price, sub, features, color, cta, recommende
       {cta && onSelect ? (
         <button onClick={onSelect} style={{
           width:"100%", marginTop:20, padding:"12px",
-          background: recommended ? C.gold : `${color}18`,
+          background: recommended ? C.goldBg : `${color}18`,
           border: recommended ? "none" : `1.5px solid ${color}`,
-          borderRadius:8, color: recommended ? C.navyD : color,
+          borderRadius:10, color: recommended ? C.navyD : color,
           fontSize:13, cursor:"pointer", fontWeight:600, fontFamily:T.body,
           transition:"all .18s",
         }}
@@ -15067,7 +15140,7 @@ function PricingCard({ icon, title, price, sub, features, color, cta, recommende
           onMouseOut={e=>{ e.currentTarget.style.opacity="1"; }}
         >{cta}</button>
       ) : (
-        <div style={{ marginTop:20, padding:"11px", background:C.creamD, borderRadius:8, textAlign:"center", fontSize:12, color:C.textL, fontFamily:T.body }}>Plan actuel</div>
+        <div style={{ marginTop:20, padding:"11px", background:C.creamD, borderRadius:10, textAlign:"center", fontSize:12, color:C.textL, fontFamily:T.body }}>Plan actuel</div>
       )}
     </div>
   );
@@ -15082,7 +15155,7 @@ function ContractTimeline({ entry, profile }) {
     {
       id: 1,
       date: entry?.date || new Date().toLocaleDateString("fr-FR"),
-      icon: "🟢",
+      icon: "",
       iconBg: "#DCFCE7",
       iconColor: "#15803D",
       label: "Contrat initial créé",
@@ -15097,11 +15170,11 @@ function ContractTimeline({ entry, profile }) {
       borderRadius: 16,
       padding: "24px 28px",
       marginTop: 28,
-      boxShadow: "0 2px 12px #1B2E4B06",
+      boxShadow: "0 2px 12px #4338CA06",
     }}>
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:22 }}>
-        <span style={{ fontSize:16 }}>🕒</span>
+        <span style={{ fontSize:16 }}><IcoI name="clock" size={16} stroke={1.8} gap={0} /></span>
         <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.16em", fontWeight:700, color:C.textL }}>HISTORIQUE DU CONTRAT</div>
       </div>
 
@@ -15167,7 +15240,7 @@ function ContractTimeline({ entry, profile }) {
         fontFamily:T.body, fontSize:11, color:C.textL,
         display:"flex", alignItems:"center", gap:6,
       }}>
-        <span>🔒</span>
+        <span><IcoI name="lock" size={16} stroke={1.8} gap={0} /></span>
         <span>Toutes les modifications sont horodatées et traçables pour protéger tes droits.</span>
       </div>
     </div>
@@ -15210,10 +15283,10 @@ function PayLinkQr({ url }) {
   const src = url ? qrDataUrl(url) : null;
   if (!src) return null;
   return (
-    <div style={{ display:"flex", alignItems:"center", gap:12, background:"#F8F6F0", border:"1px solid #E8E0D0", borderRadius:10, padding:"10px 12px", textAlign:"left" }}>
-      <img src={src} alt="QR code de paiement" width={110} height={110} style={{ borderRadius:6, background:"#fff", flexShrink:0, border:`1px solid ${C.border}` }} />
+    <div style={{ display:"flex", alignItems:"center", gap:12, background:"#F7F7FB", border:"1px solid #E2E2EC", borderRadius:12, padding:"10px 12px", textAlign:"left" }}>
+      <img src={src} alt="QR code de paiement" width={110} height={110} style={{ borderRadius:8, background:"#fff", flexShrink:0, border:`1px solid ${C.border}` }} />
       <div style={{ fontFamily:T.body, fontSize:11, color:C.textM, lineHeight:1.5 }}>
-        <strong style={{ color:C.navy }}>Scannable ou partageable</strong> — en face à face ou à distance.{isPermanentPayLink(url) ? " Ce lien n'expire pas : ton client peut payer quand il veut." : ""}
+        <strong style={{ color:C.ink }}>Scannable ou partageable</strong> — en face à face ou à distance.{isPermanentPayLink(url) ? " Ce lien n'expire pas : ton client peut payer quand il veut." : ""}
       </div>
     </div>
   );
@@ -15223,9 +15296,9 @@ function PayLinkQr({ url }) {
 // boutons propres à chaque écran (marquer comme reçu, copier le lien…). cardAction n'apparaît qu'avec Stripe connecté.
 function PaymentWaysBox({ profile, stripeConnectReady, onConnectStripe, connectingStripe, onAddIban, transferNote, transferRef, transferAction, cardAction, title = "COMMENT TON CLIENT PEUT PAYER" }) {
   const iban = String(profile?.iban || "").trim();
-  const tile = { flex:"1 1 240px", minWidth:0, background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:9, boxSizing:"border-box", textAlign:"left" };
+  const tile = { flex:"1 1 240px", minWidth:0, background:C.white, border:`1.5px solid ${C.border}`, borderRadius:14, padding:"14px 16px", display:"flex", flexDirection:"column", gap:9, boxSizing:"border-box", textAlign:"left" };
   const head = { display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 };
-  const name = { fontFamily:T.body, fontSize:13.5, fontWeight:800, color:C.navy };
+  const name = { fontFamily:T.body, fontSize:13.5, fontWeight:800, color:C.ink };
   const badge = (bg, color) => ({ fontFamily:T.body, fontSize:10, fontWeight:800, letterSpacing:"0.04em", padding:"3px 9px", borderRadius:20, background:bg, color, whiteSpace:"nowrap" });
   const text = { fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.55 };
   const small = { fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.5 };
@@ -15234,7 +15307,7 @@ function PaymentWaysBox({ profile, stripeConnectReady, onConnectStripe, connecti
       {title && <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.15em", color:C.gold, fontWeight:700, marginBottom:8, textAlign:"left" }}>{title}</div>}
       <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
         <div data-testid="payment-way-transfer" style={tile}>
-          <div style={head}><span style={name}>🏦 Virement bancaire</span><span style={badge("#DCFCE7", "#166534")}>Gratuit</span></div>
+          <div style={head}><span style={name}><IcoI name="bank" />Virement bancaire</span><span style={badge("#DCFCE7", "#166534")}>Gratuit</span></div>
           {iban ? (
             <>
               <div style={text}>{transferNote || "Ton IBAN est indiqué sur la facture."}</div>
@@ -15243,13 +15316,13 @@ function PaymentWaysBox({ profile, stripeConnectReady, onConnectStripe, connecti
           ) : (
             <>
               <div style={text}>Ton IBAN n'est pas encore renseigné : sans lui, ton client ne sait pas où faire le virement.</div>
-              {onAddIban && <button onClick={onAddIban} style={{ alignSelf:"flex-start", padding:"7px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:C.navy }}>Ajouter mon IBAN</button>}
+              {onAddIban && <button onClick={onAddIban} style={{ alignSelf:"flex-start", padding:"7px 12px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:C.ink }}>Ajouter mon IBAN</button>}
             </>
           )}
           {transferAction}
         </div>
         <div data-testid="payment-way-card" style={tile}>
-          <div style={head}><span style={name}>💳 Carte bancaire</span><span style={badge("#EEF2FF", "#4338CA")}>Stripe</span></div>
+          <div style={head}><span style={name}><IcoI name="card" />Carte bancaire</span><span style={badge("#EEF2FF", "#4338CA")}>Stripe</span></div>
           <div style={small}>Frais de Stripe : {STRIPE_FEES_SHORT}. Freeley ne prend aucune commission.</div>
           {stripeConnectReady ? (
             <>
@@ -15259,7 +15332,7 @@ function PaymentWaysBox({ profile, stripeConnectReady, onConnectStripe, connecti
           ) : (
             <>
               <div style={text}>Stripe pas encore connecté : connecte ton compte pour proposer la carte.</div>
-              {onConnectStripe && <button onClick={onConnectStripe} disabled={connectingStripe} style={{ alignSelf:"flex-start", padding:"8px 14px", background: connectingStripe ? "#D1D5DB" : "#635BFF", border:"none", borderRadius:8, cursor: connectingStripe ? "wait" : "pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff", whiteSpace:"nowrap" }}>{connectingStripe ? "Redirection…" : "Connecter maintenant"}</button>}
+              {onConnectStripe && <button onClick={onConnectStripe} disabled={connectingStripe} style={{ alignSelf:"flex-start", padding:"8px 14px", background: connectingStripe ? "#D1D5DB" : "#635BFF", border:"none", borderRadius:10, cursor: connectingStripe ? "wait" : "pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff", whiteSpace:"nowrap" }}>{connectingStripe ? "Redirection…" : "Connecter maintenant"}</button>}
             </>
           )}
         </div>
@@ -15327,7 +15400,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   const hasIbanNow = !ibanMissingForInvoice;
   // Ni IBAN ni Stripe : la relance ne dirait pas au client comment payer. On prévient, sans bloquer.
   const confirmNoPayWay = () => hasIbanNow || stripeConnectReady || window.confirm("Ton IBAN n'est pas renseigné et Stripe n'est pas connecté : ta relance ne dira pas à ton client comment te payer.\n\nTu peux ajouter ton IBAN dans ton profil (Facturation).\n\nEnvoyer la relance quand même ?");
-  const markPaidBtnStyle = { padding:"10px 14px", background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534" };
+  const markPaidBtnStyle = { padding:"10px 14px", background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#166534" };
 
   const [linkCopied, setLinkCopied] = useState(false);
   const [stripeLinkUrl, setStripeLinkUrl] = useState("");
@@ -15356,8 +15429,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
   // Le client s'est rétracté : plus aucun paiement à demander, et ce qui a été payé doit être remboursé
   if (entry?.retractationExercisedAt) {
     return (
-      <div className="fade-up" style={{ marginBottom:24, background:"#FEF2F2", border:"1.5px solid #FECACA", borderRadius:14, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
-        ⛔ <strong>Le client s'est rétracté le {frDate(entry.retractationExercisedAt)}.</strong> Ne lui demande plus aucun paiement. S'il t'a déjà payé quelque chose, tu dois le rembourser au plus tard 14 jours après sa rétractation, par le même moyen de paiement (sauf s'il accepte expressément un autre moyen), sans frais pour lui.
+      <div className="fade-up" style={{ marginBottom:24, background:"#FEF2F2", border:"1.5px solid #FECACA", borderRadius:16, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
+        <IcoI name="alert" /><strong>Le client s'est rétracté le {frDate(entry.retractationExercisedAt)}.</strong> Ne lui demande plus aucun paiement. S'il t'a déjà payé quelque chose, tu dois le rembourser au plus tard 14 jours après sa rétractation, par le même moyen de paiement (sauf s'il accepte expressément un autre moyen), sans frais pour lui.
       </div>
     );
   }
@@ -15395,7 +15468,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       setTimeout(() => setSoldeLinkCopied(false), 2800);
     } catch(e) {
       if (e.message === "STRIPE_NOT_CONNECTED") {
-        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi.");
+        alert("Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi.");
         if (onGoToProfileTva) onGoToProfileTva();
       } else {
         alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
@@ -15467,7 +15540,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
       setTimeout(() => setLinkCopied(false), 2800);
     } catch(e) {
       if (e.message === "STRIPE_NOT_CONNECTED") {
-        alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
+        alert("Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
         if (onGoToProfileTva) onGoToProfileTva();
       } else {
         alert("Erreur lors de la création du lien de paiement : " + (e.message || "réessaie."));
@@ -15508,8 +15581,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 
   if (depositBaseAmt <= 0) {
     return (
-      <div className="fade-up" style={{ marginBottom:24, background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:C.textL, textAlign:"center" }}>
-        🛡️ Renseigne un montant sur ce contrat pour activer le suivi automatique du paiement.
+      <div className="fade-up" style={{ marginBottom:24, background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:16, padding:"16px 20px", fontFamily:T.body, fontSize:12.5, color:C.textL, textAlign:"center" }}>
+        <IcoI name="shield" />Renseigne un montant sur ce contrat pour activer le suivi automatique du paiement.
       </div>
     );
   }
@@ -15530,15 +15603,15 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
 
       {/* Version 237 : remise signée qui n'a pas pu être déduite : à rendre au client (on prévient, on ne bloque pas) */}
       {remise.unappliedTotal > 0 && (
-        <div data-testid="remise-a-rembourser" style={{ background:"#FEF2F2", border:"1.5px solid #FECACA", borderRadius:14, padding:"14px 18px", marginBottom:14, fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
+        <div data-testid="remise-a-rembourser" style={{ background:"#FEF2F2", border:"1.5px solid #FECACA", borderRadius:16, padding:"14px 18px", marginBottom:14, fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.6 }}>
           ↩️ <strong>{fmtDue(withTva(remise.unappliedTotal, profile))} €{dueUnit} à rendre à ton client.</strong> {remiseRefundWhy} Rembourse-lui cette somme, ou fais-lui une facture d'avoir.
         </div>
       )}
 
       {/* Contrat hors établissement, moins de 7 jours : rappel de la loi (version 247 : boutons de paiement bloqués) */}
       {earlyWindow && (
-        <div style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:14, padding:"14px 18px", marginBottom:14, fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
-          ⏳ <strong>Pas de paiement avant le {frDate(payNotBefore)}, d'après la loi.</strong> Ce contrat a été signé chez le client ou ailleurs que dans tes locaux. La loi interdit d'exiger ou de recevoir un paiement pendant 7 jours après la signature (article L221-10 du Code de la consommation).{" "}
+        <div style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:16, padding:"14px 18px", marginBottom:14, fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
+          <IcoI name="hourglass" /><strong>Pas de paiement avant le {frDate(payNotBefore)}, d'après la loi.</strong> Ce contrat a été signé chez le client ou ailleurs que dans tes locaux. La loi interdit d'exiger ou de recevoir un paiement pendant 7 jours après la signature (article L221-10 du Code de la consommation).{" "}
           Pour te protéger, Freeley bloque les boutons de paiement jusqu'à cette date. Tu pourras alors envoyer ta facture, ton lien de paiement ou ta relance.
         </div>
       )}
@@ -15572,7 +15645,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
           {/* Indicateur état */}
           <div style={{ display:"flex", alignItems:"flex-start", gap: 14 }}>
             <div style={{
-              width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+              width: 44, height: 44, borderRadius: 14, flexShrink: 0,
               background: paid
                 ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)"
                 : "linear-gradient(135deg, #EA580C 0%, #F97316 100%)",
@@ -15582,7 +15655,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               transition: "all 0.5s ease",
               animation: !paid ? "shimmer 2s infinite" : "none",
             }}>
-              {paid ? "🟢" : payAfterDelivery ? "🗓️" : "⛔️"}
+              <span style={{ display:"flex", color:"#fff" }}><Ico name={paid ? "checkCircle" : payAfterDelivery ? "calendar" : "pause"} size={22} /></span>
             </div>
 
             <div style={{ flex: 1 }}>
@@ -15618,7 +15691,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               </div>
               {remise.target === "first" && remise.appliedTotal > 0 && (
                 <div data-testid="remise-deduite" style={{ fontFamily: T.body, fontSize: 11.5, fontWeight: 700, color: paid ? "#166534" : "#9A3412", marginTop: 6 }}>
-                  🏷️ {remiseAppliedText}
+                  <IcoI name="tag" />{remiseAppliedText}
                 </div>
               )}
             </div>
@@ -15646,9 +15719,9 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 <span style={{ fontFamily:T.body, fontSize:11, color:"#166534", fontWeight:600 }}>Avancement de la mission</span>
                 <span style={{ fontFamily:T.body, fontSize:11, color:"#15803D", fontWeight:800 }}>{progress}%</span>
               </div>
-              <div style={{ background:"#BBF7D0", borderRadius:8, height:8, overflow:"hidden" }}>
+              <div style={{ background:"#BBF7D0", borderRadius:10, height:8, overflow:"hidden" }}>
                 <div style={{
-                  height:"100%", borderRadius:8,
+                  height:"100%", borderRadius:10,
                   background:"linear-gradient(90deg, #15803D, #22C55E)",
                   width:`${progress}%`,
                   transition:"width 1.2s cubic-bezier(.22,.68,0,1.2)",
@@ -15660,8 +15733,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               </div>
               <button
                 onClick={() => downloadPaymentInvoicePDF(paymentWordCap, entry?.missionTitle, depositBaseAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "acompte", { form: entry?.form, applyRemises: true })}
-                style={{ marginTop:10, padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
-              >🧾 Télécharger la facture ({paymentWordCap.toLowerCase()})</button>
+                style={{ marginTop:10, padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
+              ><IcoI name="receipt" />Télécharger la facture ({paymentWordCap.toLowerCase()})</button>
               <SendElectronicInvoiceButton
                 contractId={entry?.id} invoiceKey="acompteInvoiceNumber"
                 designation={acompteSpec.designation} montant={depositBaseAmt} shownMontant={depositAmt} applyRemises missionTitle={entry?.missionTitle}
@@ -15681,7 +15754,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
             padding: "16px 22px",
             background: soldePaid ? "#F0FDF4" : "#FFFBEB",
             border: `1.5px solid ${soldePaid ? "#86EFAC" : "#FDE68A"}`,
-            borderRadius: 14,
+            borderRadius: 16,
             marginBottom: 24,
           }}>
             {soldePaid ? (
@@ -15691,8 +15764,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 </div>
                 <button
                   onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeBaseAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form, applyRemises: true })}
-                  style={{ padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
-                >🧾 Télécharger la facture (solde)</button>
+                  style={{ padding:"8px 14px", background:"#fff", border:"1.5px solid #86EFAC", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#166534" }}
+                ><IcoI name="receipt" />Télécharger la facture (solde)</button>
                 <SendElectronicInvoiceButton
                   contractId={entry?.id} invoiceKey="soldeInvoiceNumber"
                   designation="Solde" montant={soldeBaseAmt} shownMontant={soldeAmt} applyRemises missionTitle={entry?.missionTitle}
@@ -15708,7 +15781,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 <div style={{ fontFamily:T.body, fontSize:12, fontWeight:700, color:"#92400E", marginBottom:2, textTransform:"uppercase", letterSpacing:"0.05em" }}>Solde restant à encaisser</div>
                 <div style={{ fontFamily:T.display, fontSize:22, fontWeight:800, color:"#92400E", marginBottom: remise.target === "solde" && remise.appliedTotal > 0 ? 4 : 12 }}>{fmtDue(soldeDue)} €{dueUnit}</div>
                 {remise.target === "solde" && remise.appliedTotal > 0 && (
-                  <div data-testid="remise-deduite" style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E", marginBottom:12 }}>🏷️ {remiseAppliedText}</div>
+                  <div data-testid="remise-deduite" style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E", marginBottom:12 }}><IcoI name="tag" />{remiseAppliedText}</div>
                 )}
                 {/* Version 232 : le virement et la carte, à égalité ; la relance marche aussi sans Stripe */}
                 <div style={{ marginBottom:12 }}>
@@ -15727,22 +15800,22 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                     </>}
                     cardAction={<>
                       <button onClick={handleCopySoldeLink} disabled={soldeLinkGenerating} style={{
-                        padding:"10px 14px", background: soldeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "linear-gradient(135deg, #1B2E4B 0%, #2A4167 100%)", border:"none", borderRadius:10,
+                        padding:"10px 14px", background: soldeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "linear-gradient(135deg, #4338CA 0%, #4F46E5 100%)", border:"none", borderRadius:12,
                         cursor: soldeLinkGenerating ? "wait" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#fff", opacity: soldeLinkGenerating ? 0.7 : 1,
-                      }}>{soldeLinkGenerating ? "Génération…" : soldeLinkCopied ? "✓ Copié !" : "💳 Copier le lien de paiement"}</button>
+                      }}>{soldeLinkGenerating ? "Génération…" : soldeLinkCopied ? "✓ Copié !" : <><IcoI name="card" />Copier le lien de paiement</>}</button>
                       {soldeStripeLinkUrl && <PayLinkQr url={soldeStripeLinkUrl} />}
                     </>}
                   />
                 </div>
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                   <button onClick={handleSendSoldeRelance} style={{
-                    padding:"9px 14px", background:"#92400E", border:"none", borderRadius:8,
+                    padding:"9px 14px", background:"#92400E", border:"none", borderRadius:10,
                     cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#fff",
-                  }}>{soldeRelanceSent ? "✓ Envoyé !" : "✉️ Relancer pour le solde"}</button>
+                  }}>{soldeRelanceSent ? "✓ Envoyé !" : <><IcoI name="mail" />Relancer pour le solde</>}</button>
                   <button
                     onClick={() => downloadPaymentInvoicePDF("Solde", entry?.missionTitle, soldeBaseAmt, entry?.form?.freelanceName, entry?.form?.freelanceSiret, entry?.form?.freelanceEmail, entry?.clientName, entry?.form?.clientCompany, entry?.form?.clientAddress, entry?.form?.clientEmail, entry?.form?.typeClient, profile, authUser, entry?.id, "solde", { form: entry?.form, applyRemises: true })}
-                    style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
-                  >🧾 Télécharger la facture</button>
+                    style={{ padding:"9px 14px", background:"#fff", border:"1.5px solid #FDE68A", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#92400E" }}
+                  ><IcoI name="receipt" />Télécharger la facture</button>
                 </div>
                 <SendElectronicInvoiceButton
                   contractId={entry?.id} invoiceKey="soldeInvoiceNumber"
@@ -15771,8 +15844,8 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
           }}>
             {/* Mentions manquantes sur les factures : on prévient, on ne bloque pas */}
             {invoiceWarning && (
-              <div style={{ flexBasis:"100%", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"9px 12px", fontFamily:T.body, fontSize:12, color:"#991B1B", lineHeight:1.55 }}>
-                ⚠️ {invoiceWarning}{" "}
+              <div style={{ flexBasis:"100%", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"9px 12px", fontFamily:T.body, fontSize:12, color:"#991B1B", lineHeight:1.55 }}>
+                <IcoI name="alert" />{invoiceWarning}{" "}
                 {onGoToProfileTva && (
                   <button onClick={onGoToProfileTva} style={{ background:"none", border:"none", padding:0, color:"#991B1B", fontWeight:700, textDecoration:"underline", cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Compléter mon profil</button>
                 )}
@@ -15801,20 +15874,20 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                       padding:"11px 14px",
                       background: linkCopied
                         ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)"
-                        : "linear-gradient(135deg, #1B2E4B 0%, #2A4167 100%)",
-                      color:"#fff", border:"none", borderRadius:10, cursor: linkGenerating ? "wait" : "pointer",
+                        : "linear-gradient(135deg, #4338CA 0%, #4F46E5 100%)",
+                      color:"#fff", border:"none", borderRadius:12, cursor: linkGenerating ? "wait" : "pointer",
                       fontFamily:T.body, fontSize:12.5, fontWeight:700,
-                      boxShadow: linkCopied ? "0 5px 18px #15803D35" : "0 5px 18px #1B2E4B35",
+                      boxShadow: linkCopied ? "0 5px 18px #15803D35" : "0 5px 18px #4338CA35",
                       transition:"all 0.25s",
                       opacity: linkGenerating ? 0.7 : 1,
                     }}
                   >
                     {linkGenerating ? (
-                      <><span>⏳</span> Génération du lien…</>
+                      <><IcoI name="hourglass" />Génération du lien…</>
                     ) : linkCopied ? (
-                      <><span>✅</span> Lien copié !</>
+                      <><IcoI name="checkCircle" />Lien copié !</>
                     ) : (
-                      <><span>💳</span> Copier le lien de paiement (Stripe)</>
+                      <><IcoI name="card" />Copier le lien de paiement (Stripe)</>
                     )}
                   </button>
                   {stripeLinkUrl && <PayLinkQr url={stripeLinkUrl} />}
@@ -15836,7 +15909,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                   : "linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%)",
                 color: relanceSent ? "#fff" : "#9A3412",
                 border: `1.5px solid ${relanceSent ? "#7C3AED" : "#FED7AA"}`,
-                borderRadius:10, cursor: relanceSending ? "wait" : "pointer",
+                borderRadius:12, cursor: relanceSending ? "wait" : "pointer",
                 fontFamily:T.body, fontSize:13, fontWeight:700,
                 boxShadow: relanceSent ? "0 5px 18px #7C3AED35" : "none",
                 transition:"all 0.25s",
@@ -15845,11 +15918,11 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
               onMouseOut={e=>{ if(!relanceSent){ e.currentTarget.style.background="linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%)"; e.currentTarget.style.transform="translateY(0)"; }}}
             >
               {relanceSending ? (
-                <><span>⏳</span> Préparation de la relance…</>
+                <><IcoI name="hourglass" />Préparation de la relance…</>
               ) : relanceSent ? (
-                <><span>✅</span> Relance envoyée !</>
+                <><IcoI name="checkCircle" />Relance envoyée !</>
               ) : (
-                <><span>✉️</span> Relancer automatiquement le client</>
+                <><IcoI name="mail" />Relancer automatiquement le client</>
               )}
             </button>
 
@@ -15862,10 +15935,10 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
                 padding:"13px 18px",
                 background: "#fff", color: "#9A3412",
                 border: "1.5px solid #FED7AA",
-                borderRadius:10, cursor:"pointer",
+                borderRadius:12, cursor:"pointer",
                 fontFamily:T.body, fontSize:13, fontWeight:700,
               }}
-            ><span>🧾</span> Télécharger la facture</button>
+            ><IcoI name="receipt" />Télécharger la facture</button>
             {/* Version 247 : pas de facture électronique d'acompte pendant les 7 jours (contrat hors établissement) */}
             {!earlyWindow && <div style={{ flexBasis:"100%" }}>
               <SendElectronicInvoiceButton
@@ -15896,7 +15969,7 @@ function DepositGuard({ entry, paid, onMarkPaid, onMarkSoldePaid, profile, authU
             fontFamily:T.body, fontSize:13, fontWeight:600,
             boxShadow:"0 8px 32px #7C3AED40", whiteSpace:"nowrap",
           }}>
-            ✉️ Email de relance envoyé à {entry?.form?.clientEmail || "votre client"} !
+            <IcoI name="mail" />Email de relance envoyé à {entry?.form?.clientEmail || "votre client"} !
           </div>
         </div>
       )}
@@ -16037,21 +16110,21 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
   };
 
   const stat = (label, value, sub, color, { onClick = null, testId, subColor } = {}) => (
-    <div data-testid={testId} onClick={onClick || undefined} role={onClick ? "button" : undefined} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06", flex:"1 1 200px", minWidth:0, cursor: onClick ? "pointer" : "default" }}>
+    <div data-testid={testId} onClick={onClick || undefined} role={onClick ? "button" : undefined} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #4338CA06", flex:"1 1 200px", minWidth:0, cursor: onClick ? "pointer" : "default" }}>
       <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.1em", color:C.textL, fontWeight:600, marginBottom:8, textTransform:"uppercase" }}>{label}</div>
       <div style={{ fontFamily:T.display, fontSize:28, color: color || C.navy, fontWeight:700, lineHeight:1.1 }}>{value}</div>
       {sub && <div style={{ fontFamily:T.body, fontSize:12, color: subColor || C.textM, marginTop:6, lineHeight:1.45 }}>{sub}</div>}
     </div>
   );
 
-  const cardStyle = { background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #1B2E4B06" };
+  const cardStyle = { background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 24px", boxShadow:"0 2px 12px #4338CA06" };
   const cardTitle = { fontFamily:T.body, fontSize:11, letterSpacing:"0.1em", color:C.gold, fontWeight:700, marginBottom:16, textTransform:"uppercase" };
 
   const encaisseLabel = chartFromLedger ? `Encaissé en ${currentYear}` : "Encaissé";
   const encaisseValue = ledger === null ? "…" : `${fmt(ledgerOk ? encaisseYear : paidFallback)} €${ttc}`;
   const encaisseSub = ledger === null ? "Lecture de ton livre des recettes…"
     : !ledgerOk ? "Paiements marqués « payés » (livre des recettes indisponible)"
-      : toComplete.length ? `⚠️ ${plural(toComplete.length, "paiement reçu", "paiements reçus")} sans date : complète ton livre des recettes`
+      : toComplete.length ? `${plural(toComplete.length, "paiement reçu", "paiements reçus")} sans date : complète ton livre des recettes`
         : `${fmt(encaisseAll)} €${ttc} depuis le début, d'après ton livre des recettes`;
   const dueSub = dueRows.length
     ? `sur ${[dueContracts ? plural(dueContracts, "contrat signé", "contrats signés") : null, dueInvoices ? plural(dueInvoices, "facture libre", "factures libres") : null].filter(Boolean).join(" et ")}`
@@ -16064,20 +16137,20 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
   return (
     <div style={{ maxWidth:960, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
-      <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Tableau de bord</div>
+      <div style={{ fontFamily:T.display, fontSize:26, color:C.ink, fontWeight:700, marginBottom:4 }}>Tableau de bord</div>
       <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:4 }}>Vue d'ensemble de ton activité freelance.</div>
       <div data-testid="dashboard-rule" style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom: onOpenRecettes ? 12 : 28, lineHeight:1.5 }}>Seuls les contrats signés par ton client et tes factures libres comptent dans les chiffres.</div>
       {/* Version 234 : les sommes vraiment reçues, avec leur date (déclarations, comptabilité) */}
       {onOpenRecettes && (
-        <button data-testid="dashboard-recettes" onClick={onOpenRecettes} style={{ marginBottom:24, padding:"10px 16px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy }}>📒 Livre des recettes →</button>
+        <button data-testid="dashboard-recettes" onClick={onOpenRecettes} style={{ marginBottom:24, padding:"10px 16px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700, color:C.ink }}><IcoI name="book" />Livre des recettes →</button>
       )}
 
       {all.length === 0 ? (
-        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #1B2E4B06" }}>
-          <div style={{ fontSize:40, marginBottom:16 }}>📊</div>
-          <div style={{ fontFamily:T.display, fontSize:19, color:C.navy, marginBottom:8 }}>Aucune donnée pour l'instant</div>
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #4338CA06" }}>
+          <div style={{ fontSize:40, marginBottom:16, color:"#A5B4FC" }}><IcoI name="chart" size={40} stroke={1.5} gap={0} /></div>
+          <div style={{ fontFamily:T.display, fontSize:19, color:C.ink, marginBottom:8 }}>Aucune donnée pour l'instant</div>
           <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:24, lineHeight:1.6 }}>Crée ton premier contrat pour voir tes statistiques apparaître ici.</div>
-          <button onClick={onNewContract} style={{ padding:"13px 28px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Créer un contrat</button>
+          <button onClick={onNewContract} style={{ padding:"13px 28px", background:C.navy, color:C.white, border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Créer un contrat</button>
         </div>
       ) : (
         <>
@@ -16117,7 +16190,7 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
           {/* ── Meilleurs clients + Missions en cours ── */}
           <div style={{ display:"flex", gap:16, flexWrap:"wrap", marginBottom:16 }}>
             <div data-testid="dash-clients" style={{ ...cardStyle, flex:"1 1 320px", minWidth:0 }}>
-              <div style={cardTitle}>🏆 Meilleurs clients</div>
+              <div style={cardTitle}><IcoI name="award" size={14} />Meilleurs clients</div>
               {topClients.length === 0 ? (
                 <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textL }}>Aucun contrat signé pour l'instant.</div>
               ) : (
@@ -16125,7 +16198,7 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
                   {topClients.map((cl, i) => (
                     <div key={i}>
                       <div style={{ display:"flex", justifyContent:"space-between", gap:8, marginBottom:4 }}>
-                        <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{cl.name}{cl.contracts > 1 ? ` · ${cl.contracts} contrats` : ""}</span>
+                        <span style={{ fontFamily:T.body, fontSize:12.5, color:C.ink, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{cl.name}{cl.contracts > 1 ? ` · ${cl.contracts} contrats` : ""}</span>
                         <span style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, fontWeight:700, flexShrink:0 }}>{fmt(cl.total)} €{ht}</span>
                       </div>
                       <div style={{ height:6, background:C.creamD, borderRadius:4, overflow:"hidden" }}>
@@ -16138,7 +16211,7 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
             </div>
 
             <div data-testid="dash-missions" style={{ ...cardStyle, flex:"1 1 320px", minWidth:0 }}>
-              <div style={cardTitle}>🚀 Missions en cours</div>
+              <div style={cardTitle}><IcoI name="briefcase" size={14} />Missions en cours</div>
               {missions.length === 0 ? (
                 <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textL }}>Aucune mission en cours actuellement.</div>
               ) : (
@@ -16150,7 +16223,7 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
                     return (
                       <div key={c.id || i} onClick={() => onOpenContract && onOpenContract(c)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor: onOpenContract ? "pointer" : "default", padding:"6px 0", borderBottom: i < missions.length-1 ? `1px solid ${C.borderL}` : "none" }}>
                         <div style={{ minWidth:0 }}>
-                          <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
+                          <div style={{ fontFamily:T.body, fontSize:12.5, color:C.ink, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
                           <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName}</div>
                         </div>
                         <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color: upcoming ? "#1D4ED8" : urgent ? "#DC2626" : "#059669", background: upcoming ? "#DBEAFE" : urgent ? "#FEE2E2" : "#D1FAE5", borderRadius:20, padding:"3px 9px", flexShrink:0, marginLeft:8 }}>
@@ -16167,16 +16240,16 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
           {/* ── Avenants à suivre ── */}
           {avenantsASuivre.length > 0 && (
             <div data-testid="dash-avenants" style={{ ...cardStyle, marginBottom:16 }}>
-              <div style={cardTitle}>📎 Avenants à suivre</div>
+              <div style={cardTitle}><IcoI name="paperclip" size={14} />Avenants à suivre</div>
               <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                 {avenantsASuivre.map(({ contract: c, avenant: a, refund }, i) => (
                   <div key={i} onClick={() => onOpenContract && onOpenContract(c)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor: onOpenContract ? "pointer" : "default", padding:"6px 0", borderBottom: i < avenantsASuivre.length-1 ? `1px solid ${C.borderL}` : "none" }}>
                     <div style={{ minWidth:0 }}>
-                      <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{refund ? "Remise à rendre" : `Avenant n°${a.num}`} — {c.missionTitle || "Sans titre"}</div>
+                      <div style={{ fontFamily:T.body, fontSize:12.5, color:C.ink, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{refund ? "Remise à rendre" : `Avenant n°${a.num}`} — {c.missionTitle || "Sans titre"}</div>
                       <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName}{refund ? ` · ${fmt(withTva(refund.unappliedTotal, profile))} €${ttc}` : a.ajustementMontant > 0 ? ` · ${fmt(a.ajustementMontant)} €${ht}` : ""}</div>
                     </div>
                     <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color: refund ? "#991B1B" : a.status === "pending_signature" ? "#B45309" : "#D97706", background: refund ? "#FEE2E2" : a.status === "pending_signature" ? "#FEF3C7" : "#FFFBEB", borderRadius:20, padding:"3px 9px", flexShrink:0, marginLeft:8 }}>
-                      {refund ? "↩️ À rembourser" : a.status === "pending_signature" ? "⏳ À signer" : "💰 À encaisser"}
+                      {refund ? "↩️ À rembourser" : a.status === "pending_signature" ? "À signer" : "À encaisser"}
                     </span>
                   </div>
                 ))}
@@ -16186,7 +16259,7 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
 
           {/* ── Activité récente ── */}
           <div data-testid="dash-recent" style={{ ...cardStyle, marginBottom:28 }}>
-            <div style={cardTitle}>🕓 Activité récente</div>
+            <div style={cardTitle}><IcoI name="clock" size={14} />Activité récente</div>
             <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
               {recent.map((c, i) => {
                 const [stLabel, stColor, stBg] = statusOf(c);
@@ -16198,14 +16271,14 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
                     borderBottom: i < recent.length-1 ? `1px solid ${C.borderL}` : "none",
                   }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10, minWidth:0 }}>
-                      <div style={{ width:32, height:32, borderRadius:9, background:C.creamD, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>{c.isStandaloneInvoice ? "🧾" : "📄"}</div>
+                      <div style={{ width:32, height:32, borderRadius:11, background:C.creamD, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}><IcoI name={c.isStandaloneInvoice ? "receipt" : "invoice"} size={16} gap={0} /></div>
                       <div style={{ minWidth:0 }}>
-                        <div style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
+                        <div style={{ fontFamily:T.body, fontSize:12.5, color:C.ink, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.missionTitle || "Sans titre"}</div>
                         <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{c.clientName} · {c.date}</div>
                       </div>
                     </div>
                     <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:3, flexShrink:0, marginLeft:8 }}>
-                      {!c.retractationExercisedAt && <span style={{ fontFamily:T.body, fontSize:12.5, color:C.navy, fontWeight:700 }}>{fmt(isClientSigned(c) ? valueOf(c) : priceOf(c))} €{ht}</span>}
+                      {!c.retractationExercisedAt && <span style={{ fontFamily:T.body, fontSize:12.5, color:C.ink, fontWeight:700 }}>{fmt(isClientSigned(c) ? valueOf(c) : priceOf(c))} €{ht}</span>}
                       <span style={{ fontFamily:T.body, fontSize:10.5, fontWeight:700, color:stColor, background:stBg, borderRadius:20, padding:"2px 8px", whiteSpace:"nowrap" }}>{stLabel}</span>
                     </div>
                   </div>
@@ -16215,8 +16288,8 @@ function DashboardPage({ history: allHistory, profile, authUser, onBack, onNewCo
           </div>
 
           <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
-            <button onClick={onNewContract} style={{ flex:1, minWidth:160, padding:"14px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>+ Nouveau contrat</button>
-            <button onClick={onOpenHistory} style={{ flex:1, minWidth:160, padding:"14px", background:C.white, color:C.navy, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Voir tous mes contrats</button>
+            <button onClick={onNewContract} style={{ flex:1, minWidth:160, padding:"14px", background:C.navy, color:C.white, border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>+ Nouveau contrat</button>
+            <button onClick={onOpenHistory} style={{ flex:1, minWidth:160, padding:"14px", background:C.white, color:C.ink, border:`1.5px solid ${C.border}`, borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Voir tous mes contrats</button>
           </div>
         </>
       )}
@@ -16253,7 +16326,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Mes contrats</button>
       <div className="fade-up" style={{ marginBottom:28 }}>
         <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:10 }}>ARCHIVES</div>
-        <h1 style={{ fontFamily:T.display, fontSize:28, color:C.navy, fontWeight:600, marginBottom:6 }}>Archives</h1>
+        <h1 style={{ fontFamily:T.display, fontSize:28, color:C.ink, fontWeight:600, marginBottom:6 }}>Archives</h1>
         <p style={{ fontFamily:T.body, fontSize:13, color:C.textM }}>Contrats supprimés et factures générées seules depuis l'accueil — rien n'est jamais vraiment perdu.</p>
       </div>
 
@@ -16266,13 +16339,13 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
           width:"100%", padding:"12px 16px", marginBottom:24,
           fontFamily:T.body, fontSize:14, color:C.text,
           background:C.white, border:`1.5px solid ${C.border}`,
-          borderRadius:10, outline:"none", boxSizing:"border-box",
+          borderRadius:12, outline:"none", boxSizing:"border-box",
         }}
       />
 
       {filtered.length === 0 ? (
-        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"48px 24px", textAlign:"center" }}>
-          <div style={{ fontSize:36, marginBottom:12 }}>🗄️</div>
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"48px 24px", textAlign:"center" }}>
+          <div style={{ fontSize:36, marginBottom:12 }}><IcoI name="archive" size={36} stroke={1.8} gap={0} /></div>
           <div style={{ fontFamily:T.body, fontSize:14, color:C.textM }}>
             {archived.length === 0 ? "Rien à afficher pour l'instant." : "Aucun résultat pour cette recherche."}
           </div>
@@ -16293,10 +16366,10 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
             const shownAcompteA = remA.target === "first" ? Math.max(acompteAmtA - remA.appliedTotal, 0) : acompteAmtA;
             const shownSoldeA = remA.target === "solde" ? Math.max(soldeAmtA - remA.appliedTotal, 0) : soldeAmtA;
             return (
-              <div key={entry.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
+              <div key={entry.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, overflow:"hidden" }}>
                 <div onClick={() => setOpenId(isOpen ? null : entry.id)} style={{ padding:"14px 18px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
                   <div style={{ minWidth:0 }}>
-                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:C.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:C.ink, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
                       {entry.isStandaloneInvoice && <span style={{ fontSize:10, fontWeight:700, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:20, padding:"2px 8px", marginRight:8, verticalAlign:"middle" }}>FACTURE LIBRE</span>}
                       {entry.isStandaloneInvoice && entry.paymentStatus === "paid" && <span style={{ fontSize:10, fontWeight:700, color:"#166534", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:20, padding:"2px 8px", marginRight:8, verticalAlign:"middle" }}>✓ PAYÉE</span>}
                       {entry.missionTitle || "Sans titre"}
@@ -16312,8 +16385,8 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                         <>
                           <button
                             onClick={() => downloadPaymentInvoicePDF("Facture", entry.missionTitle, Number(entry.price) || 0, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte", { clientSiret: entry.form?.clientSiret, serviceStart: entry.form?.startDate, serviceEnd: entry.form?.endDate })}
-                            style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                          >🧾 Télécharger la facture</button>
+                            style={{ padding:"8px 14px", background:C.goldBg, border:"none", borderRadius:10, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                          ><IcoI name="receipt" />Télécharger la facture</button>
                           <SendElectronicInvoiceButton compact
                             contractId={entry.id} invoiceKey="acompteInvoiceNumber"
                             designation="Facture" montant={Number(entry.price) || 0} missionTitle={entry.missionTitle}
@@ -16324,26 +16397,26 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                             clientEmail={entry.form?.clientEmail} typeClient={entry.form?.typeClient} authUser={authUser}
                           />
                           {entry.paymentStatus === "paid" ? (
-                            <span style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, fontFamily:T.body }}>✓ Payée</span>
+                            <span style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:10, color:"#166534", fontSize:12, fontWeight:700, fontFamily:T.body }}>✓ Payée</span>
                           ) : (
                             <button data-testid="archive-mark-paid"
                               onClick={() => { setReceiptError(""); setReceiptFor(recetteInfoFor(entry, "facture", profile)); }}
-                              style={{ padding:"8px 14px", background:"#fff", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                              style={{ padding:"8px 14px", background:"#fff", border:"1px solid #86EFAC", borderRadius:10, color:"#166534", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
                             >✓ Marquer comme payée</button>
                           )}
                         </>
                       ) : (
                       <button
                         onClick={() => onDownloadPDF && onDownloadPDF(entry)}
-                        style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                      >⬇ PDF du contrat</button>
+                        style={{ padding:"8px 14px", background:C.goldBg, border:"none", borderRadius:10, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                      ><IcoI name="download" />PDF du contrat</button>
                       )}
                       {!entry.isStandaloneInvoice && acompteAmtA > 0 && (
                         <>
                           <button
                             onClick={() => downloadPaymentInvoicePDF(isComptantA ? "Paiement" : "Acompte", entry.missionTitle, acompteAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "acompte", { form: entry.form, applyRemises: true })}
-                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                          >🧾 Facture {isComptantA ? "paiement" : "acompte"}</button>
+                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                          ><IcoI name="receipt" />Facture {isComptantA ? "paiement" : "acompte"}</button>
                           <SendElectronicInvoiceButton compact
                             contractId={entry.id} invoiceKey="acompteInvoiceNumber"
                             designation={contractInvoiceSpec(entry.form, "acompte").designation} montant={acompteAmtA} shownMontant={shownAcompteA} applyRemises missionTitle={entry.missionTitle}
@@ -16359,8 +16432,8 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                         <>
                           <button
                             onClick={() => downloadPaymentInvoicePDF("Solde", entry.missionTitle, soldeAmtA, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, "solde", { form: entry.form, applyRemises: true })}
-                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                          >🧾 Facture solde</button>
+                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                          ><IcoI name="receipt" />Facture solde</button>
                           <SendElectronicInvoiceButton compact
                             contractId={entry.id} invoiceKey="soldeInvoiceNumber"
                             designation="Solde" montant={soldeAmtA} shownMontant={shownSoldeA} applyRemises missionTitle={entry.missionTitle}
@@ -16376,8 +16449,8 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                         <React.Fragment key={av.num}>
                           <button
                             onClick={() => downloadAvenantInvoicePDF(av.num, entry.missionTitle, av.ajustementMontant, entry.form?.freelanceName, entry.form?.freelanceSiret, entry.form?.freelanceEmail, entry.clientName, entry.form?.clientCompany, entry.form?.clientAddress, entry.form?.clientEmail, entry.form?.typeClient, profile, authUser, entry.id, entry.form?.freelanceAddress, entry.form?.clientSiret, { serviceStart: entry.form?.startDate, serviceEnd: entry.form?.endDate })}
-                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
-                          >🧾 Facture avenant n°{av.num}</button>
+                            style={{ padding:"8px 14px", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, color:C.textM, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}
+                          ><IcoI name="receipt" />Facture avenant n°{av.num}</button>
                           <SendElectronicInvoiceButton compact
                             contractId={entry.id} invoiceKey="avenant" avenantNum={av.num}
                             designation={`Avenant n°${av.num}`} montant={av.ajustementMontant} missionTitle={entry.missionTitle}
@@ -16393,7 +16466,7 @@ function ArchivesPage({ history, onBack, profile, authUser, onRestore, onMarkPai
                         <button
                           onClick={async () => { setRestoringId(entry.id); await onRestore(entry.id); setRestoringId(null); }}
                           disabled={restoringId === entry.id}
-                          style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:8, color:"#166534", fontSize:12, fontWeight:700, cursor: restoringId === entry.id ? "wait" : "pointer", fontFamily:T.body }}
+                          style={{ padding:"8px 14px", background:"#F0FDF4", border:"1px solid #86EFAC", borderRadius:10, color:"#166534", fontSize:12, fontWeight:700, cursor: restoringId === entry.id ? "wait" : "pointer", fontFamily:T.body }}
                         >{restoringId === entry.id ? "Restauration…" : "↩ Restaurer dans Mes contrats"}</button>
                       )}
                     </div>
@@ -16438,30 +16511,30 @@ function DraftsPage({ onBack, onResume, onNewContract }) {
   return (
     <div style={{ maxWidth:760, margin:"0 auto", padding:"24px 16px 80px" }}>
       <button onClick={onBack} style={{ background:"none", border:"none", color:C.textM, fontSize:13, cursor:"pointer", fontFamily:T.body, marginBottom:16, padding:0 }}>← Accueil</button>
-      <div style={{ fontFamily:T.display, fontSize:26, color:C.navy, fontWeight:700, marginBottom:4 }}>Mes brouillons</div>
+      <div style={{ fontFamily:T.display, fontSize:26, color:C.ink, fontWeight:700, marginBottom:4 }}>Mes brouillons</div>
       <div data-testid="drafts-where" style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom:6, lineHeight:1.5 }}>
-        {where === "account" ? "☁️ Tes brouillons sont gardés sur ton compte : tu les retrouves sur tous tes appareils."
-          : where === "device" ? "📱 Tes brouillons sont gardés sur cet appareil."
+        {where === "account" ? "Tes brouillons sont gardés sur ton compte : tu les retrouves sur tous tes appareils."
+          : where === "device" ? <><IcoI name="phone" />Tes brouillons sont gardés sur cet appareil.</>
           : where === "offline" ? "Pas de connexion à ton compte pour l'instant : voici les brouillons de cet appareil."
           : "Chargement de tes brouillons…"}
       </div>
       <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:28 }}>Reprends un contrat en pause — utile quand le client n'a pas encore décidé.</div>
 
       {drafts.length === 0 ? (
-        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #1B2E4B06" }}>
-          <div style={{ fontSize:40, marginBottom:16 }}>📝</div>
-          <div style={{ fontFamily:T.display, fontSize:19, color:C.navy, marginBottom:8 }}>Aucun brouillon</div>
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", boxShadow:"0 2px 12px #4338CA06" }}>
+          <div style={{ fontSize:40, marginBottom:16 }}><IcoI name="pen" size={40} stroke={1.8} gap={0} /></div>
+          <div style={{ fontFamily:T.display, fontSize:19, color:C.ink, marginBottom:8 }}>Aucun brouillon</div>
           <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, marginBottom:24, lineHeight:1.6 }}>Pendant la création d'un contrat, clique sur « Enregistrer comme brouillon » pour le retrouver ici plus tard.</div>
-          <button onClick={onNewContract} style={{ padding:"13px 28px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Créer un contrat</button>
+          <button onClick={onNewContract} style={{ padding:"13px 28px", background:C.navy, color:C.white, border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600 }}>Créer un contrat</button>
         </div>
       ) : (
         <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
           {drafts.map(d => (
-            <div key={d.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"16px 18px", boxShadow:"0 2px 12px #1B2E4B06", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+            <div key={d.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"16px 18px", boxShadow:"0 2px 12px #4338CA06", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
               <div style={{ display:"flex", alignItems:"center", gap:12, minWidth:0, flex:1 }}>
-                <div style={{ width:38, height:38, borderRadius:10, background:C.creamD, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>📝</div>
+                <div style={{ width:38, height:38, borderRadius:12, background:C.creamD, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}><IcoI name="pen" size={17} stroke={1.8} gap={0} /></div>
                 <div style={{ minWidth:0 }}>
-                  <div style={{ fontFamily:T.body, fontSize:13.5, color:C.navy, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{d.label}</div>
+                  <div style={{ fontFamily:T.body, fontSize:13.5, color:C.ink, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{d.label}</div>
                   <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>
                     {d.clientName ? `${d.clientName} · ` : ""}Étape {Number(d.step) + 1}/3 · {timeAgo(d.savedAt)}
                   </div>
@@ -16470,13 +16543,13 @@ function DraftsPage({ onBack, onResume, onNewContract }) {
               <div style={{ display:"flex", gap:8, flexShrink:0 }}>
                 {confirmDelete === d.id ? (
                   <>
-                    <button onClick={() => handleDelete(d.id)} style={{ padding:"8px 14px", background:"#DC2626", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>Confirmer</button>
-                    <button onClick={() => setConfirmDelete(null)} style={{ padding:"8px 14px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:C.textM }}>Annuler</button>
+                    <button onClick={() => handleDelete(d.id)} style={{ padding:"8px 14px", background:"#DC2626", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>Confirmer</button>
+                    <button onClick={() => setConfirmDelete(null)} style={{ padding:"8px 14px", background:"none", border:`1px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, color:C.textM }}>Annuler</button>
                   </>
                 ) : (
                   <>
-                    <button onClick={() => onResume(d)} style={{ padding:"9px 16px", background:C.navy, color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700 }}>Reprendre</button>
-                    <button onClick={() => setConfirmDelete(d.id)} style={{ padding:"9px 12px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:14, color:C.textL }}>🗑</button>
+                    <button onClick={() => onResume(d)} style={{ padding:"9px 16px", background:C.navy, color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700 }}>Reprendre</button>
+                    <button onClick={() => setConfirmDelete(d.id)} style={{ padding:"9px 12px", background:"none", border:`1px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:14, color:C.textL }}><IcoI name="trash" size={14} stroke={1.8} gap={0} /></button>
                   </>
                 )}
               </div>
@@ -16785,77 +16858,77 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
     <div style={{ maxWidth:820, margin:"0 auto", padding:"24px 16px 80px" }}>
       {/* Back + actions bar */}
       <div className="fade-up" style={{
-        background:C.navy, borderRadius:12, padding:"20px 24px",
+        background:C.navy, borderRadius:14, padding:"20px 24px",
         display:"flex", alignItems:"center", justifyContent:"space-between",
         marginBottom:24, flexWrap:"wrap", gap:12,
-        boxShadow:"0 8px 32px #1B2E4B30",
+        boxShadow:"0 8px 32px #4338CA30",
       }}>
         <div>
-          <button onClick={() => setHistoryView(null)} style={{ background:"none", border:"none", color:"#8BA3C0", fontSize:12, cursor:"pointer", fontFamily:T.body, marginBottom:6, padding:0 }}>
+          <button onClick={() => setHistoryView(null)} style={{ background:"none", border:"none", color:"#C7D2FE", fontSize:12, cursor:"pointer", fontFamily:T.body, marginBottom:6, padding:0 }}>
             ← Retour à l'historique
           </button>
           <div style={{ fontFamily:T.display, fontSize:18, color:C.white }}>{historyView.missionTitle}</div>
-          <div style={{ fontFamily:T.body, fontSize:12, color:"#8BA3C0", marginTop:2 }}>
+          <div style={{ fontFamily:T.body, fontSize:12, color:"#C7D2FE", marginTop:2 }}>
             {historyView.clientName}{historyView.clientCompany ? ` · ${historyView.clientCompany}` : ""} · <span style={{color:C.goldL}}>{historyView.date}</span>
           </div>
         </div>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           <button onClick={() => onDownloadPDF(historyView)} disabled={!jsPDFReady} style={{
-            padding:"10px 20px", background: jsPDFReady ? C.gold : "#2A4167",
-            color: jsPDFReady ? C.navyD : "#5A7A9A",
-            border:"none", borderRadius:7, cursor: jsPDFReady ? "pointer" : "not-allowed",
+            padding:"10px 20px", background: jsPDFReady ? C.goldBg : C.creamDD,
+            color: jsPDFReady ? C.navyD : C.textL,
+            border:"none", borderRadius:9, cursor: jsPDFReady ? "pointer" : "not-allowed",
             fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
-          }}>⬇ Télécharger PDF</button>
+          }}><IcoI name="download" />Télécharger PDF</button>
           {historyView.form?.typeClient === "particulier" && historyView.form?.contenuNumeriquePret && historyView.retractationWaivedAt && (
             historyView.retractationConfirmationSentAt ? (
-              <span style={{ padding:"10px 14px", background:"#0F2E1F", color:"#6FCFA0", border:"1px solid #2D6A4F", borderRadius:7, fontSize:13, fontFamily:T.body, fontWeight:600, display:"flex", alignItems:"center" }}>
+              <span style={{ padding:"10px 14px", background:"#0F2E1F", color:"#6FCFA0", border:"1px solid #2D6A4F", borderRadius:9, fontSize:13, fontFamily:T.body, fontWeight:600, display:"flex", alignItems:"center" }}>
                 ✓ Confirmation envoyée le {new Date(historyView.retractationConfirmationSentAt).toLocaleDateString("fr-FR")}
               </span>
             ) : retractMailOpenedFor === historyView.id ? (
               <>
                 <button onClick={markRetractationConfirmationSent} style={{
                   padding:"10px 20px", background:"#14532D", color:"#86EFAC",
-                  border:"1px solid #22C55E", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
+                  border:"1px solid #22C55E", borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
                 }}>✓ J'ai bien envoyé l'email</button>
                 <button onClick={sendRetractationConfirmation} style={{
                   padding:"10px 14px", background:"transparent", color:"#FDBA74",
-                  border:"1px solid #C2410C", borderRadius:7, cursor:"pointer", fontSize:12, fontFamily:T.body, transition:"all .2s",
+                  border:"1px solid #C2410C", borderRadius:9, cursor:"pointer", fontSize:12, fontFamily:T.body, transition:"all .2s",
                 }}>Rouvrir l'email</button>
               </>
             ) : (
               <>
                 <button onClick={sendRetractationConfirmation} style={{
                   padding:"10px 20px", background:"#7C2D12", color:"#FDBA74",
-                  border:"1px solid #C2410C", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
-                }}>✉️ Ouvrir l'email de confirmation</button>
+                  border:"1px solid #C2410C", borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
+                }}><IcoI name="mail" />Ouvrir l'email de confirmation</button>
                 <span style={{ fontSize:11.5, color:"#FDBA74", fontFamily:T.body, alignSelf:"center", lineHeight:1.4 }}>À envoyer avant de livrer le contenu à ton client.</span>
               </>
             )
           )}
           <button onClick={() => handleCopy(historyView.contract)} style={{
             padding:"10px 20px",
-            background: copied ? "#1E4A3A" : "#253D5E",
-            color: copied ? "#6FCFA0" : "#8BA3C0",
-            border:`1px solid ${copied ? "#2D6A4F" : "#354F6E"}`,
-            borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, transition:"all .2s",
+            background: copied ? "#1E4A3A" : "#3730A3",
+            color: copied ? "#6FCFA0" : "#C7D2FE",
+            border:`1px solid ${copied ? "#2D6A4F" : "#6366F1"}`,
+            borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, transition:"all .2s",
           }}>{copied ? "✓ Copié" : "Copier le texte"}</button>
           {CONTRACT_ASSISTANT_ENABLED && (
           <button onClick={() => { setShowAssistantModal(true); setAssistantQuestion(""); setAssistantAnswer(""); }} style={{
             padding:"10px 20px", background:"#1E3A8A", color:"#fff",
-            border:"1px solid #2563EB", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
-          }}>🤖 J'ai un problème</button>
+            border:"1px solid #2563EB", borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:600, transition:"all .2s",
+          }}><IcoI name="help" />J'ai un problème</button>
           )}
           <button onClick={() => setConfirmDelete(historyView.id)} style={{
-            padding:"10px 14px", background:"transparent", color:"#7A4A4A",
-            border:"1px solid #5A3030", borderRadius:7, cursor:"pointer", fontSize:13, fontFamily:T.body,
-          }}>🗑</button>
+            padding:"10px 14px", background:"transparent", color:"#FECACA",
+            border:"1px solid rgba(254,202,202,0.45)", borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body,
+          }}><IcoI name="trash" size={16} gap={0} /></button>
         </div>
       </div>
 
       {/* Version 249 : le client a choisi de recevoir son exemplaire sur papier (contrat signé chez lui ou ailleurs) */}
       {historyView.copyMedium === "papier" && historyView.signatureStatus === "signed" && historyView.signedByClientAt && Date.now() - new Date(historyView.signedByClientAt).getTime() < 15 * 86400000 && (
-        <div data-testid="paper-copy-reminder" className="fade-up" style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, padding:"14px 18px", marginBottom:24, fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
-          📄 <strong>Ton client a choisi de recevoir son exemplaire sur papier.</strong> Imprime le contrat avec le bouton « Télécharger PDF », en haut de cette fiche{hasRetractationRight(historyView.form, historyView) ? ", avec le formulaire de rétractation qui est à la fin" : ""}. Signez-le tous les deux à la main, dans le cadre prévu, datez-le, puis remets-le-lui.
+        <div data-testid="paper-copy-reminder" className="fade-up" style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:14, padding:"14px 18px", marginBottom:24, fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
+          <IcoI name="invoice" /><strong>Ton client a choisi de recevoir son exemplaire sur papier.</strong> Imprime le contrat avec le bouton « Télécharger PDF », en haut de cette fiche{hasRetractationRight(historyView.form, historyView) ? ", avec le formulaire de rétractation qui est à la fin" : ""}. Signez-le tous les deux à la main, dans le cadre prévu, datez-le, puis remets-le-lui.
         </div>
       )}
 
@@ -16867,7 +16940,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         const fmtAt = (iso) => new Date(iso).toLocaleString("fr-FR", { day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit", timeZone:"Europe/Paris" });
         const lastDay = historyView.signedByClientAt ? retractationLastDay(historyView.signedByClientAt) : null;
         const box = (bg, border, color, children) => (
-          <div className="fade-up" style={{ background:bg, border:`1.5px solid ${border}`, borderRadius:12, padding:"16px 18px", marginBottom:24, fontFamily:T.body, fontSize:12.5, color, lineHeight:1.6 }}>
+          <div className="fade-up" style={{ background:bg, border:`1.5px solid ${border}`, borderRadius:14, padding:"16px 18px", marginBottom:24, fontFamily:T.body, fontSize:12.5, color, lineHeight:1.6 }}>
             <div style={{ fontSize:10, letterSpacing:"0.15em", fontWeight:700, marginBottom:8 }}>CONTENU NUMÉRIQUE ET RÉTRACTATION</div>
             {children}
           </div>
@@ -16884,7 +16957,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
               : <>Ton client n'avait pas donné son accord avant : il garde son droit de rétractation{lastDay ? <> jusqu'au {frDate(lastDay)}</> : null}.</>}
             {lateAt && (
               <div data-testid="late-retract-request" style={{ marginTop:12, paddingTop:12, borderTop:"1px solid #FDBA74" }}>
-                📨 <strong>Le {fmtAt(lateAt)}, ton client a quand même envoyé une demande de rétractation.</strong> Le contrat n'est pas annulé automatiquement. Vérifie d'abord les faits, puis réponds-lui par email{replyTo ? <> ({replyTo})</> : null}. Si le contenu lui a bien été fourni à la date indiquée, joins la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement) : tu n'es alors pas obligé d'accepter. Si ce n'est pas le cas, ou en cas de doute, traite sa demande comme une rétractation : rembourse-lui les sommes reçues dans les 14 jours, par le même moyen de paiement que celui qu'il a utilisé (sauf s'il accepte expressément un autre moyen), sans frais pour lui.
+                <IcoI name="mail" /><strong>Le {fmtAt(lateAt)}, ton client a quand même envoyé une demande de rétractation.</strong> Le contrat n'est pas annulé automatiquement. Vérifie d'abord les faits, puis réponds-lui par email{replyTo ? <> ({replyTo})</> : null}. Si le contenu lui a bien été fourni à la date indiquée, joins la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement) : tu n'es alors pas obligé d'accepter. Si ce n'est pas le cas, ou en cas de doute, traite sa demande comme une rétractation : rembourse-lui les sommes reçues dans les 14 jours, par le même moyen de paiement que celui qu'il a utilisé (sauf s'il accepte expressément un autre moyen), sans frais pour lui.
               </div>
             )}
           </>);
@@ -16898,7 +16971,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         return box("#EFF6FF", "#93C5FD", "#1E3A8A", <>
           Ton client a accepté de perdre son droit de rétractation dès que tu lui fournis le contenu, et la confirmation lui a été envoyée. Au moment où tu lui envoies les fichiers ou le lien de téléchargement, touche ce bouton : la date et l'heure seront enregistrées, et sa page lui indiquera que son droit a pris fin. Avant ce moment, il peut encore se rétracter.
           <div style={{ marginTop:12 }}>
-            <button onClick={() => { setDeliveryError(""); setDeliveryAskFor(historyView.id); }} style={{ padding:"10px 16px", background:"#1D4ED8", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}>📦 J'ai fourni le contenu au client</button>
+            <button onClick={() => { setDeliveryError(""); setDeliveryAskFor(historyView.id); }} style={{ padding:"10px 16px", background:"#1D4ED8", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}><IcoI name="package" />J'ai fourni le contenu au client</button>
           </div>
         </>);
       })()}
@@ -16912,7 +16985,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
       {/* Suivi du paiement — remplacé par une simple note si le client s'est rétracté (contrat annulé) */}
       {historyView.retractationExercisedAt ? (
-        <div className="fade-up" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"18px 20px", marginBottom:24, boxShadow:"0 2px 12px #1B2E4B06" }}>
+        <div className="fade-up" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"18px 20px", marginBottom:24, boxShadow:"0 2px 12px #4338CA06" }}>
           <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.15em", color:C.gold, fontWeight:700, marginBottom:8 }}>SUIVI DU PAIEMENT</div>
           <div style={{ fontFamily:T.body, fontSize:12.5, color:C.textM, lineHeight:1.6 }}>Contrat annulé par la rétractation du client : il n'y a plus de paiement à suivre.</div>
         </div>
@@ -16921,18 +16994,18 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         // Version 234 : acompte payé mais solde encore dû : la mission n'est pas encore réglée
         const soldeStillDue = !historyView.isStandaloneInvoice && recetteInfoFor(historyView, "solde", profile).amount > 0 && historyView.soldeStatus !== "paid";
         const options = [
-          { key:"pending", label:"⏳ En attente", bg:"#FEF3C7", border:"#FCD34D", color:"#92400E" },
+          { key:"pending", label:"En attente", bg:"#FEF3C7", border:"#FCD34D", color:"#92400E" },
           { key:"paid", label:"✓ Payé", bg:"#D1FAE5", border:"#6EE7B7", color:"#065F46" },
-          { key:"late", label:"⚠️ En retard", bg:"#FEE2E2", border:"#FCA5A5", color:"#991B1B" },
+          { key:"late", label:"En retard", bg:"#FEE2E2", border:"#FCA5A5", color:"#991B1B" },
         ];
         return (
-          <div className="fade-up" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"18px 20px", marginBottom:24, boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div className="fade-up" style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"18px 20px", marginBottom:24, boxShadow:"0 2px 12px #4338CA06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.15em", color:C.gold, fontWeight:700, marginBottom:12 }}>SUIVI DU PAIEMENT</div>
             <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
               {options.map(o => (
                 <button key={o.key} onClick={() => setPaymentStatus(historyView.id, o.key)}
                   style={{
-                    padding:"10px 18px", borderRadius:9, cursor:"pointer",
+                    padding:"10px 18px", borderRadius:11, cursor:"pointer",
                     background: st === o.key ? o.bg : C.white,
                     border: `1.5px solid ${st === o.key ? o.border : C.border}`,
                     color: st === o.key ? o.color : C.textM,
@@ -16944,7 +17017,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             </div>
             {/* Version 232 : la carte est détectée toute seule ; un virement se marque à la main */}
             {st !== "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, marginTop:10, lineHeight:1.5 }}>{stripeConnectReady ? "Un paiement par carte passe tout seul en « Payé ». Pour un virement, touche « ✓ Payé » quand l'argent arrive sur ton compte." : "Quand le virement arrive sur ton compte, touche « ✓ Payé »."}</div>}
-            {st === "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#059669", marginTop:10 }}>{soldeStillDue ? "Acompte encaissé. Le solde reste à encaisser (plus bas)." : "Paiement encaissé — mission réglée. 🎉"}</div>}
+            {st === "paid" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#059669", marginTop:10 }}>{soldeStillDue ? "Acompte encaissé. Le solde reste à encaisser (plus bas)." : "Paiement encaissé — mission réglée."}</div>}
             {st === "late" && <div style={{ fontFamily:T.body, fontSize:11.5, color:"#DC2626", marginTop:10 }}>Pense à relancer le client (module Recouvrement disponible).</div>}
             {/* Version 234 : date d'encaissement notée dans le livre des recettes (ou à ajouter) */}
             <RecetteNoteLines entry={historyView} rows={contractRecettes} profile={profile} onAdd={(kind) => askReceipt(kind, null, true)} />
@@ -16961,15 +17034,15 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
           animation:"fadeUp 0.2s ease both",
         }}>
           <div className="fade-up" style={{ background:C.white, borderRadius:16, padding:"24px 16px", maxWidth:380, width:"100%", boxShadow:"0 24px 64px #00000035" }}>
-            <div style={{ fontSize:32, marginBottom:12, textAlign:"center" }}>⚠️</div>
-            <div style={{ fontFamily:T.display, fontSize:21, color:C.navy, marginBottom:10, textAlign:"center" }}>Supprimer ce contrat ?</div>
-            <p style={{ fontFamily:T.body, fontSize:12, color:"#7A4A4A", marginBottom:28, lineHeight:1.7, textAlign:"center", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"10px 14px" }}>
+            <div style={{ fontSize:32, marginBottom:12, textAlign:"center", color:"#DC2626" }}><IcoI name="alert" size={32} stroke={1.6} gap={0} /></div>
+            <div style={{ fontFamily:T.display, fontSize:21, color:C.ink, marginBottom:10, textAlign:"center" }}>Supprimer ce contrat ?</div>
+            <p style={{ fontFamily:T.body, fontSize:12, color:"#7A4A4A", marginBottom:28, lineHeight:1.7, textAlign:"center", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 14px" }}>
               Le contrat quittera ta liste et ira dans tes Archives : tu pourras le retrouver et le restaurer à tout moment. Un contrat signé n'est jamais effacé, et sa preuve de signature est conservée.
             </p>
             <div style={{ display:"flex", gap:10 }}>
               <button onClick={() => setConfirmDelete(null)} style={{
                 flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`,
-                borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM, fontWeight:500,
+                borderRadius:11, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM, fontWeight:500,
                 transition:"all .15s",
               }}
                 onMouseOver={e=>{ e.currentTarget.style.background=C.creamD; }}
@@ -16977,12 +17050,12 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
               >Annuler</button>
               <button onClick={() => { onDelete(confirmDelete); setConfirmDelete(null); setHistoryView(null); }} style={{
                 flex:1, padding:"12px", background:"#C0392B", border:"none",
-                borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.white, fontWeight:700,
+                borderRadius:11, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.white, fontWeight:700,
                 transition:"all .15s", boxShadow:"0 4px 14px #C0392B30",
               }}
                 onMouseOver={e=>{ e.currentTarget.style.background="#A93226"; e.currentTarget.style.transform="translateY(-1px)"; }}
                 onMouseOut={e=>{ e.currentTarget.style.background="#C0392B"; e.currentTarget.style.transform="translateY(0)"; }}
-              >🗑️ Supprimer</button>
+              ><IcoI name="trash" />Supprimer</button>
             </div>
           </div>
         </div>
@@ -16996,47 +17069,47 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         <div className="fade-up fade-up-2" style={{
           margin:"20px 0", padding:"16px 18px",
           background:"linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%)",
-          border:"1.5px solid #C7D2FE", borderRadius:12,
+          border:"1.5px solid #C7D2FE", borderRadius:14,
         }}>
           <div style={{ fontFamily:T.body, fontSize:13, color:"#3730A3", fontWeight:600, marginBottom:14 }}>
             Ce contrat n'est pas encore signé — le lien pour ton client n'existe pas tant que tu n'as pas signé en premier.
           </div>
 
           {signingContractId === historyView.id && remoteSignLink ? (
-            <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:12, padding:"14px 16px" }}>
               <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:8 }}>✓ Lien de signature prêt !</div>
               <div style={{ fontFamily:T.body, fontSize:11, color:"#A7F3D0", lineHeight:1.5, marginBottom:12 }}>
                 Envoie ce lien à ton client (SMS, email, WhatsApp). Il pourra lire et signer le contrat depuis son téléphone.
               </div>
               <button
                 onClick={() => { navigator.clipboard.writeText(remoteSignLink); setRemoteSignCopied(true); setTimeout(()=>setRemoteSignCopied(false), 2500); }}
-                style={{ width:"100%", padding:"10px", background: remoteSignCopied ? "#15803D" : "#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:8, cursor:"pointer", fontSize:12.5, fontWeight:600 }}
-              >{remoteSignCopied ? "✓ Copié !" : "📋 Copier le lien"}</button>
+                style={{ width:"100%", padding:"10px", background: remoteSignCopied ? "#15803D" : "#134E2E", color:"#fff", border:"1px solid #15803D", borderRadius:10, cursor:"pointer", fontSize:12.5, fontWeight:600 }}
+              >{remoteSignCopied ? "✓ Copié !" : <><IcoI name="copy" />Copier le lien</>}</button>
             </div>
           ) : signingContractId === historyView.id && showRemoteSignPad ? (
-            <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ background:"#0D2818", border:"1.5px solid #15803D", borderRadius:12, padding:"14px 16px" }}>
               <div style={{ fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#6EE7B7", marginBottom:4 }}>Signe d'abord ta part avant d'envoyer le lien au client</div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginBottom:10 }}>Le client signera ensuite de son côté, sur son propre appareil.</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#C7D2FE", marginBottom:10 }}>Le client signera ensuite de son côté, sur son propre appareil.</div>
               <canvas
                 ref={remoteSigCanvasRef}
                 width={420} height={120}
                 onMouseDown={startRemoteSigDraw} onMouseMove={drawRemoteSig} onMouseUp={endRemoteSigDraw} onMouseLeave={endRemoteSigDraw}
                 onTouchStart={startRemoteSigDraw} onTouchMove={drawRemoteSig} onTouchEnd={endRemoteSigDraw}
-                style={{ width:"100%", height:110, border:"2px dashed #22C55E", borderRadius:8, background:"#FFFDF9", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
+                style={{ width:"100%", height:110, border:"2px dashed #22C55E", borderRadius:10, background:"#FFFFFF", touchAction:"none", cursor:"crosshair", marginBottom:10 }}
               />
               <div style={{ display:"flex", gap:8 }}>
-                <button onClick={clearRemoteSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"transparent", border:"1.5px solid #2A4167", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#8BA3C0" }}>Effacer</button>
+                <button onClick={clearRemoteSig} style={{ flex:"0 0 auto", padding:"10px 14px", background:"transparent", border:"1.5px solid #4F46E5", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, color:"#C7D2FE" }}>Effacer</button>
                 <button
                   onClick={handleRemoteSign}
                   disabled={!remoteSigHasStrokes || remoteSignLoading}
                   style={{
                     flex:1, padding:"10px",
-                    background: (remoteSigHasStrokes && !remoteSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#2A4167",
-                    color: (remoteSigHasStrokes && !remoteSignLoading) ? "#fff" : "#8BA3C0",
-                    border:"none", borderRadius:8, cursor: (remoteSigHasStrokes && !remoteSignLoading) ? "pointer" : "not-allowed",
+                    background: (remoteSigHasStrokes && !remoteSignLoading) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#4F46E5",
+                    color: (remoteSigHasStrokes && !remoteSignLoading) ? "#fff" : "#C7D2FE",
+                    border:"none", borderRadius:10, cursor: (remoteSigHasStrokes && !remoteSignLoading) ? "pointer" : "not-allowed",
                     fontFamily:T.body, fontSize:13, fontWeight:700,
                   }}
-                >{remoteSignLoading ? "Création du lien…" : "✅ Valider ma signature et créer le lien"}</button>
+                >{remoteSignLoading ? "Création du lien…" : <><IcoI name="checkCircle" />Valider ma signature et créer le lien</>}</button>
               </div>
             </div>
           ) : (
@@ -17046,19 +17119,19 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                 style={{
                   flex:1, minWidth:200, padding:"11px 16px",
                   background:"linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)",
-                  color:"#fff", border:"none", borderRadius:8, cursor:"pointer",
+                  color:"#fff", border:"none", borderRadius:10, cursor:"pointer",
                   fontSize:13, fontFamily:T.body, fontWeight:700,
                 }}
-              >✍️ Signer maintenant avec le client</button>
+              ><IcoI name="pen" />Signer maintenant avec le client</button>
               <button
                 onClick={() => { setForm(historyView.form); setSigningContractId(historyView.id); setRemoteSignLink(""); setRemoteSigHasStrokes(false); setShowRemoteSignPad(true); }}
                 style={{
                   flex:1, minWidth:200, padding:"11px 16px",
                   background:"linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
-                  color:"#fff", border:"none", borderRadius:8, cursor:"pointer",
+                  color:"#fff", border:"none", borderRadius:10, cursor:"pointer",
                   fontSize:13, fontFamily:T.body, fontWeight:700,
                 }}
-              >📲 Envoyer au client à distance</button>
+              ><IcoI name="send" />Envoyer au client à distance</button>
             </div>
           )}
         </div>
@@ -17099,18 +17172,18 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             Avenants de ce contrat ({historyView.avenants.length})
           </div>
           {historyView.avenants.map((av) => {
-            const statusLabel = av.status === "signed" ? "✓ Signé" : av.status === "pending_signature" ? "⏳ En attente de signature" : "📝 Brouillon";
+            const statusLabel = av.status === "signed" ? "✓ Signé" : av.status === "pending_signature" ? "En attente de signature" : "Brouillon";
             const statusColor = av.status === "signed" ? "#15803D" : av.status === "pending_signature" ? "#B45309" : C.textL;
             const cNumMatch = historyView.contract && historyView.contract.match(/CP-\d{4}-\d{3,5}/);
             const cNum = cNumMatch ? cNumMatch[0] : null;
             return (
-              <details key={av.num} style={{ marginBottom:10, border:`1.5px solid ${C.border}`, borderRadius:10, overflow:"hidden" }}>
-                <summary style={{ padding:"12px 14px", cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy, background:C.creamD, listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:6 }}>
+              <details key={av.num} style={{ marginBottom:10, border:`1.5px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
+                <summary style={{ padding:"12px 14px", cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600, color:C.ink, background:C.creamD, listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:6 }}>
                   <span>Avenant n°{av.num} — {av.objet ? av.objet.slice(0,40) : "Modification"}{av.objet && av.objet.length > 40 ? "…" : ""}</span>
                   <span style={{ fontSize:11, fontWeight:700, color: statusColor }}>{statusLabel}</span>
                 </summary>
                 <div style={{ padding:"14px 16px" }}>
-                  <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 14px", maxHeight:220, overflowY:"auto", marginBottom:10, whiteSpace:"pre-wrap", fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7 }}>
+                  <div style={{ background:C.cream, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 14px", maxHeight:220, overflowY:"auto", marginBottom:10, whiteSpace:"pre-wrap", fontFamily:T.body, fontSize:11.5, color:C.text, lineHeight:1.7 }}>
                     {(av.text || "").replace(/\\n/g, "\n")}
                   </div>
                   {(av.freelanceSignature || av.clientSignature) && (
@@ -17118,13 +17191,13 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                       {av.freelanceSignature && (
                         <div>
                           <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginBottom:4 }}>Prestataire</div>
-                          <img src={av.freelanceSignature} alt="Signature prestataire" style={{ maxWidth:140, height:40, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:6 }} />
+                          <img src={av.freelanceSignature} alt="Signature prestataire" style={{ maxWidth:140, height:40, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
                         </div>
                       )}
                       {av.clientSignature && (
                         <div>
                           <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginBottom:4 }}>Client</div>
-                          <img src={av.clientSignature} alt="Signature client" style={{ maxWidth:140, height:40, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:6 }} />
+                          <img src={av.clientSignature} alt="Signature client" style={{ maxWidth:140, height:40, objectFit:"contain", background:"#fff", border:`1px solid ${C.border}`, borderRadius:8 }} />
                         </div>
                       )}
                     </div>
@@ -17135,11 +17208,11 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
                   {/* Relance si en attente de signature */}
                   {av.status === "pending_signature" && (
-                    <div style={{ background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
-                      <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#9A3412", marginBottom:8 }}>⏳ Toujours en attente de signature</div>
+                    <div style={{ background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:10, padding:"10px 12px", marginBottom:10 }}>
+                      <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#9A3412", marginBottom:8 }}><IcoI name="hourglass" />Toujours en attente de signature</div>
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <button onClick={() => copyAvenantSignLink(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #FED7AA", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#9A3412" }}>{avenantLinkCopiedNum === av.num ? "✓ Copié !" : "🔗 Copier le lien"}</button>
-                        <button onClick={() => sendAvenantSignEmail(av)} style={{ padding:"7px 12px", background:"#9A3412", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700 }}>⚡ Relancer par email</button>
+                        <button onClick={() => copyAvenantSignLink(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #FED7AA", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#9A3412" }}>{avenantLinkCopiedNum === av.num ? "✓ Copié !" : <><IcoI name="link" />Copier le lien</>}</button>
+                        <button onClick={() => sendAvenantSignEmail(av)} style={{ padding:"7px 12px", background:"#9A3412", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700 }}><IcoI name="mail" />Relancer par email</button>
                       </div>
                     </div>
                   )}
@@ -17149,8 +17222,8 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                     const remInfo = contractRemiseInfo(historyView);
                     const appliedHere = remInfo.applied.some(r => r.num === Number(av.num));
                     return (
-                      <div data-testid={`avenant-remise-${av.num}`} style={{ background: appliedHere ? "#F0FDF4" : "#FEF2F2", border:`1px solid ${appliedHere ? "#86EFAC" : "#FECACA"}`, borderRadius:8, padding:"10px 12px", marginBottom:10, fontFamily:T.body, fontSize:11.5, color: appliedHere ? "#166534" : "#991B1B", lineHeight:1.55 }}>
-                        🏷️ <strong>Remise de {fmtEuro(Math.abs(Number(av.ajustementMontant)))} € {contractPricing(historyView.form, profile).enteredUnit}</strong>
+                      <div data-testid={`avenant-remise-${av.num}`} style={{ background: appliedHere ? "#F0FDF4" : "#FEF2F2", border:`1px solid ${appliedHere ? "#86EFAC" : "#FECACA"}`, borderRadius:10, padding:"10px 12px", marginBottom:10, fontFamily:T.body, fontSize:11.5, color: appliedHere ? "#166534" : "#991B1B", lineHeight:1.55 }}>
+                        <IcoI name="tag" /><strong>Remise de {fmtEuro(Math.abs(Number(av.ajustementMontant)))} € {contractPricing(historyView.form, profile).enteredUnit}</strong>
                         {appliedHere
                           ? ` : déduite ${remInfo.target === "solde" ? "du solde" : "du paiement"}.`
                           : " : pas déduite, car la facture était déjà faite ou le paiement déjà reçu. Rends cette somme à ton client, ou fais-lui une facture d'avoir."}
@@ -17160,20 +17233,20 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
                   {/* Ajustement de prix : facture + paiement */}
                   {av.ajustementMontant > 0 && (
-                    <div style={{ background: av.paymentReceived ? "#F0FDF4" : "#FFFBEB", border:`1px solid ${av.paymentReceived ? "#86EFAC" : "#FDE68A"}`, borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
+                    <div style={{ background: av.paymentReceived ? "#F0FDF4" : "#FFFBEB", border:`1px solid ${av.paymentReceived ? "#86EFAC" : "#FDE68A"}`, borderRadius:10, padding:"10px 12px", marginBottom:10 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: (av.paymentLink || !av.paymentReceived) ? 8 : 0 }}>
-                        <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color: av.paymentReceived ? "#166534" : "#92400E" }}>💰 + {av.ajustementMontant} € {contractPricing(historyView.form, profile).enteredUnit}</div>
+                        <div style={{ fontFamily:T.body, fontSize:11.5, fontWeight:700, color: av.paymentReceived ? "#166534" : "#92400E" }}><IcoI name="coins" />+ {av.ajustementMontant} € {contractPricing(historyView.form, profile).enteredUnit}</div>
                         {av.paymentReceived && <span style={{ fontFamily:T.body, fontSize:11, fontWeight:700, color:"#166534" }}>✓ Payé</span>}
                       </div>
                       {/* Version 232 : seul un lien Freeley qui n'expire pas est montré (un ancien lien Stripe ne marche plus après 24 h) */}
                       {isPermanentPayLink(av.paymentLink) && !av.paymentReceived && (
                         <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-                          <input readOnly value={av.paymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"6px 8px", border:"1px solid #FDE68A", borderRadius:6, fontFamily:T.body, fontSize:10.5, color:"#92400E", background:"#fff" }} />
-                          <button onClick={() => navigator.clipboard.writeText(av.paymentLink)} style={{ flexShrink:0, padding:"6px 10px", background:"#92400E", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700 }}>Copier</button>
+                          <input readOnly value={av.paymentLink} onFocus={e=>e.target.select()} style={{ flex:1, padding:"6px 8px", border:"1px solid #FDE68A", borderRadius:8, fontFamily:T.body, fontSize:10.5, color:"#92400E", background:"#fff" }} />
+                          <button onClick={() => navigator.clipboard.writeText(av.paymentLink)} style={{ flexShrink:0, padding:"6px 10px", background:"#92400E", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11, fontWeight:700 }}>Copier</button>
                         </div>
                       )}
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id, historyView.form?.freelanceAddress, historyView.form?.clientSiret, { serviceStart: historyView.form?.startDate, serviceEnd: historyView.form?.endDate })} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}>🧾 Facture PDF</button>
+                        <button onClick={() => downloadAvenantInvoicePDF(av.num, historyView.missionTitle, av.ajustementMontant, historyView.form?.freelanceName, historyView.form?.freelanceSiret, historyView.form?.freelanceEmail, historyView.form?.clientName, historyView.form?.clientCompany, historyView.form?.clientAddress, historyView.form?.clientEmail, historyView.form?.typeClient, profile, authUser, historyView.id, historyView.form?.freelanceAddress, historyView.form?.clientSiret, { serviceStart: historyView.form?.startDate, serviceEnd: historyView.form?.endDate })} style={{ padding:"7px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:C.textM }}><IcoI name="receipt" />Facture PDF</button>
                         <SendElectronicInvoiceButton compact
                           contractId={historyView.id} invoiceKey="avenant" avenantNum={av.num}
                           designation={`Avenant n°${av.num}`} montant={av.ajustementMontant} missionTitle={historyView.missionTitle}
@@ -17184,19 +17257,19 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                           clientEmail={historyView.form?.clientEmail} typeClient={historyView.form?.typeClient} authUser={authUser}
                         />
                         {!av.paymentReceived && stripeConnectReady && !isPermanentPayLink(av.paymentLink) && (
-                          <button onClick={() => createAvenantPayLink(av)} disabled={avenantPayLoadingNum != null} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #FDE68A", borderRadius:6, cursor: avenantPayLoadingNum != null ? "wait" : "pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E" }}>{avenantPayLoadingNum === av.num ? "Génération…" : "💳 Lien de paiement par carte"}</button>
+                          <button onClick={() => createAvenantPayLink(av)} disabled={avenantPayLoadingNum != null} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #FDE68A", borderRadius:8, cursor: avenantPayLoadingNum != null ? "wait" : "pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#92400E" }}>{avenantPayLoadingNum === av.num ? "Génération…" : <><IcoI name="card" />Lien de paiement par carte</>}</button>
                         )}
                         {!av.paymentReceived && (
-                          <button data-testid={`avenant-mark-paid-${av.num}`} onClick={() => markAvenantPaid(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #86EFAC", borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534" }}>✓ Marquer comme reçu</button>
+                          <button data-testid={`avenant-mark-paid-${av.num}`} onClick={() => markAvenantPaid(av)} style={{ padding:"7px 12px", background:"#fff", border:"1px solid #86EFAC", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:700, color:"#166534" }}>✓ Marquer comme reçu</button>
                         )}
                       </div>
                       {/* Version 234 : livre des recettes */}
                       {av.paymentReceived && Array.isArray(contractRecettes) && (() => {
                         const row = contractRecettes.find((x) => x.kind === "avenant" && Number(x.avenant_num) === Number(av.num));
                         return row ? (
-                          <div data-testid={`avenant-recette-${av.num}`} style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginTop:8, lineHeight:1.5 }}>📒 Reçu le {isoDayLong(row.received_on)}, {RECETTE_METHOD_PHRASE[row.method] || "par un autre moyen"}{row.source === "stripe" ? " (Stripe)" : ""}. C'est noté dans ton livre des recettes.</div>
+                          <div data-testid={`avenant-recette-${av.num}`} style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginTop:8, lineHeight:1.5 }}><IcoI name="book" />Reçu le {isoDayLong(row.received_on)}, {RECETTE_METHOD_PHRASE[row.method] || "par un autre moyen"}{row.source === "stripe" ? " (Stripe)" : ""}. C'est noté dans ton livre des recettes.</div>
                         ) : (
-                          <div data-testid={`avenant-recette-missing-${av.num}`} style={{ fontFamily:T.body, fontSize:11, color:"#92400E", marginTop:8, lineHeight:1.5 }}>📒 La date où tu l'as reçu n'est pas encore notée dans ton livre des recettes.{" "}
+                          <div data-testid={`avenant-recette-missing-${av.num}`} style={{ fontFamily:T.body, fontSize:11, color:"#92400E", marginTop:8, lineHeight:1.5 }}><IcoI name="book" />La date où tu l'as reçu n'est pas encore notée dans ton livre des recettes.{" "}
                             <button onClick={() => askReceipt("avenant", av, true)} style={{ background:"none", border:"none", padding:0, color:"#92400E", fontFamily:T.body, fontSize:11, fontWeight:700, textDecoration:"underline", cursor:"pointer" }}>Ajouter la date</button>
                           </div>
                         );
@@ -17204,7 +17277,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                     </div>
                   )}
 
-                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature, historyView.form?.freelanceLogo, !!historyView.form?.freelanceLogoLight, av.status === "signed" ? (av.signatureProof || null) : null)} style={{ padding:"8px 14px", background:C.gold, border:"none", borderRadius:8, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}>⬇ Télécharger le PDF de l'avenant</button>
+                  <button onClick={() => downloadAvenantPDF(av.text, av.num, cNum, contractFreelanceName(historyView.form), historyView.form?.clientName, av.freelanceSignature, av.clientSignature, historyView.form?.freelanceLogo, !!historyView.form?.freelanceLogoLight, av.status === "signed" ? (av.signatureProof || null) : null)} style={{ padding:"8px 14px", background:C.goldBg, border:"none", borderRadius:10, color:C.navyD, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:T.body }}><IcoI name="download" />Télécharger le PDF de l'avenant</button>
                 </div>
               </details>
             );
@@ -17220,20 +17293,20 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             style={{
               width:"100%", padding:"16px 20px",
               background: "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)",
-              border:"none", borderRadius:14, cursor:"pointer",
+              border:"none", borderRadius:16, cursor:"pointer",
               display:"flex", alignItems:"center", gap:12,
               boxShadow:"0 4px 24px #7C3AED30",
             }}
           >
-            <span style={{ fontSize:22 }}>⚡</span>
+            <span style={{ display:"flex", color:"#4338CA" }}><Ico name="bolt" size={22} /></span>
             <div style={{ textAlign:"left" }}>
               <div style={{ fontFamily:T.display, fontSize:15, color:"#fff", fontWeight:700 }}>Créer un avenant</div>
               <div style={{ fontFamily:T.body, fontSize:11.5, color:"#DDD6FE" }}>Colle le message de ton client, ou remplis le formulaire toi-même</div>
             </div>
           </button>
         ) : (
-          <div style={{ background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"16px 20px", display:"flex", alignItems:"center", gap:12 }}>
-            <span style={{ fontSize:22, opacity:0.5 }}>⚡</span>
+          <div style={{ background:C.creamD, border:`1.5px dashed ${C.border}`, borderRadius:16, padding:"16px 20px", display:"flex", alignItems:"center", gap:12 }}>
+            <span style={{ display:"flex", opacity:0.5 }}><Ico name="bolt" size={22} /></span>
             <div>
               <div style={{ fontFamily:T.display, fontSize:14, color:C.textM, fontWeight:700 }}>Créer un avenant</div>
               <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL }}>Disponible une fois ce contrat signé par les deux parties. Avant, utilise « Modifier le contrat », plus haut sur cette page.</div>
@@ -17266,7 +17339,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         >
           <div style={{ background:C.white, borderRadius:16, padding:"24px 22px", maxWidth:520, width:"100%", maxHeight:"85vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-              <div style={{ width:36, height:36, background:"linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🤖</div>
+              <div style={{ width:36, height:36, background:"linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}><Ico name="sparkle" size={18} /></div>
               <div style={{ fontFamily:T.display, fontSize:16, color:C.navyD, fontWeight:700 }}>Un problème avec ce contrat ?</div>
             </div>
             <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, marginBottom:16, lineHeight:1.5 }}>
@@ -17280,14 +17353,14 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                   onChange={e=>setAssistantQuestion(e.target.value)}
                   placeholder="Ex : Mon client veut annuler la mission alors que j'ai déjà bien avancé, est-ce que je suis protégé ?"
                   rows={4}
-                  style={{ width:"100%", padding:"12px 14px", border:`1.5px solid ${C.border}`, borderRadius:10, fontFamily:T.body, fontSize:13, resize:"vertical", lineHeight:1.6, minHeight:90, boxSizing:"border-box", marginBottom:14 }}
+                  style={{ width:"100%", padding:"12px 14px", border:`1.5px solid ${C.border}`, borderRadius:12, fontFamily:T.body, fontSize:13, resize:"vertical", lineHeight:1.6, minHeight:90, boxSizing:"border-box", marginBottom:14 }}
                   onFocus={e=>e.target.style.borderColor="#2563EB"}
                   onBlur={e=>e.target.style.borderColor=C.border}
                 />
                 <button
                   onClick={askContractAssistant}
                   disabled={!assistantQuestion.trim()}
-                  style={{ width:"100%", padding:"13px", background: !assistantQuestion.trim() ? C.creamDD : "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)", color: !assistantQuestion.trim() ? C.textL : "#fff", border:"none", borderRadius:11, cursor: !assistantQuestion.trim() ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}
+                  style={{ width:"100%", padding:"13px", background: !assistantQuestion.trim() ? C.creamDD : "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)", color: !assistantQuestion.trim() ? C.textL : "#fff", border:"none", borderRadius:13, cursor: !assistantQuestion.trim() ? "not-allowed" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:700 }}
                 >Poser la question</button>
               </>
             )}
@@ -17301,12 +17374,12 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
             {assistantAnswer && !assistantLoading && (
               <>
-                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"16px 18px", marginBottom:14 }}>
+                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:12, padding:"16px 18px", marginBottom:14 }}>
                   <pre style={{ fontFamily:T.body, fontSize:12.5, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word", margin:0 }}>{assistantAnswer}</pre>
                 </div>
                 <div style={{ display:"flex", gap:10 }}>
-                  <button onClick={() => { setAssistantAnswer(""); setAssistantQuestion(""); }} style={{ flex:1, padding:"11px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }}>← Nouvelle question</button>
-                  <button onClick={() => setShowAssistantModal(false)} style={{ flex:1, padding:"11px", background:"#1E3A8A", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff" }}>Fermer</button>
+                  <button onClick={() => { setAssistantAnswer(""); setAssistantQuestion(""); }} style={{ flex:1, padding:"11px", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:600, color:C.textM }}>← Nouvelle question</button>
+                  <button onClick={() => setShowAssistantModal(false)} style={{ flex:1, padding:"11px", background:"#1E3A8A", border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff" }}>Fermer</button>
                 </div>
               </>
             )}
@@ -17332,7 +17405,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       <div className="fade-up" style={{ marginBottom:36 }}>
         <div style={{ fontFamily:T.body, fontSize:11, letterSpacing:"0.2em", color:C.gold, fontWeight:600, marginBottom:10 }}>HISTORIQUE</div>
         <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
-          <h1 style={{ fontFamily:T.display, fontSize:32, color:C.navy, fontWeight:600, lineHeight:1.2 }}>
+          <h1 style={{ fontFamily:T.display, fontSize:32, color:C.ink, fontWeight:600, lineHeight:1.2 }}>
             Mes contrats
           </h1>
           <span style={{ fontFamily:T.body, fontSize:13, color:C.textL }}>
@@ -17341,12 +17414,12 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         </div>
         {onGoToArchives && history.some(h => h.deleted || h.isStandaloneInvoice) && (
           <button onClick={onGoToArchives} style={{ marginTop:8, background:"none", border:"none", color:C.textL, fontSize:12, cursor:"pointer", fontFamily:T.body, padding:0, textDecoration:"underline" }}>
-            🗄️ Voir les contrats supprimés et factures libres ({history.filter(h => h.deleted || h.isStandaloneInvoice).length})
+            <IcoI name="archive" />Voir les contrats supprimés et factures libres ({history.filter(h => h.deleted || h.isStandaloneInvoice).length})
           </button>
         )}
         {onGoToRecettes && (
           <button data-testid="open-recettes" onClick={onGoToRecettes} style={{ display:"block", marginTop:8, background:"none", border:"none", color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:T.body, padding:0, textDecoration:"underline" }}>
-            📒 Livre des recettes (sommes reçues, totaux par mois)
+            <IcoI name="book" />Livre des recettes (sommes reçues, totaux par mois)
           </button>
         )}
         {history.length > 0 && (
@@ -17356,8 +17429,8 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
 
       {/* Scan results link */}
       {localStorage.getItem("freeley_scan_results") && (
-        <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:8, padding:"10px 16px", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"space-between", fontFamily:T.body, fontSize:13 }}>
-          <span style={{ color:"#1D4ED8" }}>🔍 Analyse de contrat en attente</span>
+        <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"10px 16px", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"space-between", fontFamily:T.body, fontSize:13 }}>
+          <span style={{ color:"#1D4ED8" }}><IcoI name="search" />Analyse de contrat en attente</span>
           <span onClick={() => window.dispatchEvent(new CustomEvent("freeley-goto-scan"))} style={{ color:"#1D4ED8", fontWeight:700, cursor:"pointer", textDecoration:"underline", fontSize:12 }}>Voir →</span>
         </div>
       )}
@@ -17368,9 +17441,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
           <input
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="🔍 Rechercher par client, entreprise ou SIRET…"
+            placeholder="Rechercher par client, entreprise ou SIRET…"
             style={{
-              width:"100%", padding:"12px 40px 12px 16px", borderRadius:10,
+              width:"100%", padding:"12px 40px 12px 16px", borderRadius:12,
               border:`1.5px solid ${C.border}`, background:C.white,
               fontFamily:T.body, fontSize:14, color:C.text, outline:"none",
             }}
@@ -17390,9 +17463,9 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       {history.length > 0 && !searchQuery && (
         <div className="fade-up" style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
           {[
-            { id:"tous", label:"Tous", emoji:"📄" },
-            { id:"pending", label:"En attente 🟡", emoji:null },
-            { id:"signed", label:"Scellés 🟢", emoji:null },
+            { id:"tous", label:"Tous", emoji:null },
+            { id:"pending", label:"En attente", emoji:null },
+            { id:"signed", label:"Scellés", emoji:null },
           ].map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)} style={{
               padding:"6px 14px",
@@ -17412,18 +17485,18 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
       {/* Empty state */}
       {history.filter(h => !h.deleted && !h.isStandaloneInvoice).length === 0 && (
         <div className="fade-up fade-up-2" style={{
-          background:C.white, border:`1px solid ${C.border}`, borderRadius:12,
+          background:C.white, border:`1px solid ${C.border}`, borderRadius:14,
           padding:"64px 32px", textAlign:"center",
-          boxShadow:"0 2px 12px #1B2E4B06",
+          boxShadow:"0 2px 12px #4338CA06",
         }}>
-          <div style={{ fontSize:40, marginBottom:16 }}>📄</div>
-          <div style={{ fontFamily:T.display, fontSize:20, color:C.navy, marginBottom:8 }}>Aucun contrat pour l'instant</div>
+          <div style={{ fontSize:40, marginBottom:16, color:"#A5B4FC" }}><IcoI name="invoice" size={40} stroke={1.5} gap={0} /></div>
+          <div style={{ fontFamily:T.display, fontSize:20, color:C.ink, marginBottom:8 }}>Aucun contrat pour l'instant</div>
           <p style={{ fontFamily:T.body, color:C.textL, fontSize:14, marginBottom:24 }}>
             Génère ton premier contrat et il apparaîtra ici automatiquement.
           </p>
           <button onClick={onBack} style={{
             padding:"12px 28px", background:C.navy, color:C.white,
-            border:"none", borderRadius:8, cursor:"pointer", fontSize:14, fontFamily:T.body, fontWeight:600,
+            border:"none", borderRadius:10, cursor:"pointer", fontSize:14, fontFamily:T.body, fontWeight:600,
           }}>← Créer un contrat</button>
         </div>
       )}
@@ -17450,12 +17523,12 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
         return (
         <div className="fade-up fade-up-2" style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {filtered.length === 0 && q && (
-            <div style={{ textAlign:"center", padding:"40px 24px", fontFamily:T.body, fontSize:13, color:C.textL, background:C.white, border:`1px solid ${C.border}`, borderRadius:12 }}>
+            <div style={{ textAlign:"center", padding:"40px 24px", fontFamily:T.body, fontSize:13, color:C.textL, background:C.white, border:`1px solid ${C.border}`, borderRadius:14 }}>
               Aucun résultat pour "{searchQuery}".
             </div>
           )}
           {filtered.length === 0 && !q && filter !== "tous" && (
-            <div style={{ textAlign:"center", padding:"40px 24px", fontFamily:T.body, fontSize:13, color:C.textL, background:C.white, border:`1px solid ${C.border}`, borderRadius:12 }}>
+            <div style={{ textAlign:"center", padding:"40px 24px", fontFamily:T.body, fontSize:13, color:C.textL, background:C.white, border:`1px solid ${C.border}`, borderRadius:14 }}>
               Aucun contrat dans cette catégorie.
             </div>
           )}
@@ -17464,26 +17537,26 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
             return (
             <div key={entry.id} className={deletingId === entry.id ? "card-deleting" : ""} style={{
               background: isLocked ? C.creamD : C.white,
-              border:`1px solid ${isLocked ? C.borderL : C.border}`, borderRadius:10,
+              border:`1px solid ${isLocked ? C.borderL : C.border}`, borderRadius:12,
               padding:"18px 20px", display:"flex", alignItems:"center", justifyContent:"space-between",
               gap:12, flexWrap:"wrap",
-              boxShadow: isLocked ? "none" : "0 2px 8px #1B2E4B05",
+              boxShadow: isLocked ? "none" : "0 2px 8px #4338CA05",
               transition:"box-shadow 0.18s, transform 0.18s",
               cursor: isLocked ? "default" : "pointer",
               opacity: isLocked ? 0.6 : 1,
               animation: deletingId === entry.id ? undefined : `fadeUp 0.4s ${i * 0.04}s both cubic-bezier(.22,.68,0,1.2)`,
             }}
-              onMouseOver={e=>{ if(!isLocked){ e.currentTarget.style.boxShadow="0 6px 20px #1B2E4B10"; e.currentTarget.style.transform="translateY(-1px)"; }}}
-              onMouseOut={e=>{ e.currentTarget.style.boxShadow= isLocked ? "none" : "0 2px 8px #1B2E4B05"; e.currentTarget.style.transform="translateY(0)"; }}
+              onMouseOver={e=>{ if(!isLocked){ e.currentTarget.style.boxShadow="0 6px 20px #4338CA10"; e.currentTarget.style.transform="translateY(-1px)"; }}}
+              onMouseOut={e=>{ e.currentTarget.style.boxShadow= isLocked ? "none" : "0 2px 8px #4338CA05"; e.currentTarget.style.transform="translateY(0)"; }}
               onClick={() => { if(!isLocked) setHistoryView(entry); }}
             >
               {/* Left info — au moins 220 px : sur téléphone, les boutons passent à la ligne au lieu
                   d'écraser le titre (il disparaissait et le texte se chevauchait) */}
               <div style={{ display:"flex", alignItems:"center", gap:14, flex:"1 1 220px", minWidth:0 }}>
                 <div style={{
-                  width:40, height:40, background: isLocked ? C.creamDD : C.creamD, borderRadius:8, flexShrink:0,
+                  width:40, height:40, background: isLocked ? C.creamDD : C.creamD, borderRadius:10, flexShrink:0,
                   display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
-                }}>{isLocked ? "🔒" : "📄"}</div>
+                }}><IcoI name={isLocked ? "lock" : "invoice"} size={18} gap={0} /></div>
                 <div style={{ minWidth:0 }}>
                   <div style={{ fontFamily:T.body, fontSize:14, fontWeight:600, color: isLocked ? C.textL : C.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
                     {isLocked ? "Contrat verrouillé" : entry.missionTitle}
@@ -17491,13 +17564,13 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                   <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginTop:2, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                     {isLocked ? "Passe premium pour accéder à ce contrat" : `${entry.clientName}${entry.clientCompany ? ` · ${entry.clientCompany}` : ""}`}
                     {!isLocked && (entry.signatureStatus === "pending_client" || entry.signatureStatus === "pending_signature") && (
-                      <span style={{ fontFamily:T.body, fontSize:9, background:"#DBEAFE", color:"#1D4ED8", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>✍ SIGNATURE EN ATTENTE</span>
+                      <span style={{ fontFamily:T.body, fontSize:9, background:"#DBEAFE", color:"#1D4ED8", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>SIGNATURE EN ATTENTE</span>
                     )}
                     {!isLocked && entry.signatureStatus === "signed" && !entry.retractationExercisedAt && (
                       <span style={{ fontFamily:T.body, fontSize:9, background:"#DCFCE7", color:"#15803D", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>✓ SIGNÉ</span>
                     )}
                     {!isLocked && entry.retractationExercisedAt && (
-                      <span style={{ fontFamily:T.body, fontSize:9, background:"#FEE2E2", color:"#B91C1C", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>⛔ RÉTRACTÉ</span>
+                      <span style={{ fontFamily:T.body, fontSize:9, background:"#FEE2E2", color:"#B91C1C", padding:"2px 8px", borderRadius:20, fontWeight:700, letterSpacing:"0.05em" }}>RÉTRACTÉ</span>
                     )}
                   </div>
                 </div>
@@ -17507,7 +17580,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
               <div style={{ display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
                 {!isLocked && (
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:T.display, fontSize:15, fontWeight:600, color:C.navy }}>
+                    <div style={{ fontFamily:T.display, fontSize:15, fontWeight:600, color:C.ink }}>
                       {Number(entry.price).toLocaleString("fr-FR")} €
                     </div>
                     <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{entry.date}</div>
@@ -17516,7 +17589,7 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                 {isLocked ? (
                   <button onClick={e => { e.stopPropagation(); onUpgrade(); }} style={{
                     padding:"8px 14px", background:C.navy, color:C.white,
-                    border:"none", borderRadius:7, cursor:"pointer",
+                    border:"none", borderRadius:9, cursor:"pointer",
                     fontSize:11, fontFamily:T.body, fontWeight:600,
                   }}>Débloquer →</button>
                 ) : (
@@ -17527,25 +17600,25 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                       title="Télécharger PDF"
                       style={{
                         width:34, height:34, background:C.creamD, border:`1px solid ${C.border}`,
-                        borderRadius:7, cursor: jsPDFReady ? "pointer" : "not-allowed",
+                        borderRadius:9, cursor: jsPDFReady ? "pointer" : "not-allowed",
                         display:"flex", alignItems:"center", justifyContent:"center", fontSize:14,
                         transition:"all .15s", flexShrink:0,
                       }}
                       onMouseOver={e=>{ e.stopPropagation(); if(jsPDFReady){ e.currentTarget.style.background=C.gold; e.currentTarget.style.borderColor=C.gold; }}}
                       onMouseOut={e=>{ e.currentTarget.style.background=C.creamD; e.currentTarget.style.borderColor=C.border; }}
-                    >⬇</button>
+                    ><IcoI name="download" size={16} gap={0} /></button>
                     <button
                       onClick={e => { e.stopPropagation(); if(onDuplicate) onDuplicate(entry); }}
                       title="Dupliquer"
                       style={{
                         width:34, height:34, background:C.creamD, border:`1px solid ${C.border}`,
-                        borderRadius:7, cursor:"pointer",
+                        borderRadius:9, cursor:"pointer",
                         display:"flex", alignItems:"center", justifyContent:"center", fontSize:14,
                         transition:"all .15s", flexShrink:0,
                       }}
                       onMouseOver={e=>{ e.stopPropagation(); e.currentTarget.style.background="#EFF6FF"; e.currentTarget.style.borderColor="#93C5FD"; }}
                       onMouseOut={e=>{ e.currentTarget.style.background=C.creamD; e.currentTarget.style.borderColor=C.border; }}
-                    >📋</button>
+                    ><IcoI name="copy" size={16} gap={0} /></button>
                     {(entry.signatureStatus === "pending_client" || entry.signatureStatus === "none" || !entry.signatureStatus) && (
                       <button
                         onClick={e => { e.stopPropagation(); if(onRelance) onRelance(entry); }}
@@ -17553,14 +17626,14 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                         style={{
                           height:34, padding:"0 10px",
                           background:"#F0FDF4", border:"1px solid #86EFAC",
-                          borderRadius:7, cursor:"pointer",
+                          borderRadius:9, cursor:"pointer",
                           display:"flex", alignItems:"center", justifyContent:"center", gap:5,
                           fontSize:11, fontFamily:T.body, fontWeight:700, color:"#15803D",
                           transition:"all .15s", flexShrink:0, whiteSpace:"nowrap",
                         }}
                         onMouseOver={e=>{ e.stopPropagation(); e.currentTarget.style.background="#DCFCE7"; e.currentTarget.style.borderColor="#4ADE80"; e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 4px 12px #15803D20"; }}
                         onMouseOut={e=>{ e.currentTarget.style.background="#F0FDF4"; e.currentTarget.style.borderColor="#86EFAC"; e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="none"; }}
-                      >⚡ Relancer</button>
+                      ><IcoI name="mail" />Relancer</button>
                     )}
                     <button
                       onClick={e => { e.stopPropagation(); if(onRateClient) onRateClient(entry); }}
@@ -17568,26 +17641,26 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
                       style={{
                         height:34, padding:"0 10px",
                         background:"#FFFBEB", border:"1px solid #FCD34D",
-                        borderRadius:7, cursor:"pointer",
+                        borderRadius:9, cursor:"pointer",
                         display:"flex", alignItems:"center", justifyContent:"center", gap:5,
                         fontSize:11, fontFamily:T.body, fontWeight:700, color:"#92400E",
                         transition:"all .15s", flexShrink:0, whiteSpace:"nowrap",
                       }}
                       onMouseOver={e=>{ e.stopPropagation(); e.currentTarget.style.background="#FEF3C7"; e.currentTarget.style.borderColor="#FBBF24"; e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 4px 12px #FBBF2430"; }}
                       onMouseOut={e=>{ e.currentTarget.style.background="#FFFBEB"; e.currentTarget.style.borderColor="#FCD34D"; e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="none"; }}
-                    >🌟 Clôturer</button>
+                    ><IcoI name="checkCircle" />Clôturer</button>
                     <button
                       onClick={e => { e.stopPropagation(); setConfirmDelete(entry.id); }}
                       title="Supprimer"
                       style={{
                         width:34, height:34, background:C.creamD, border:`1px solid ${C.border}`,
-                        borderRadius:7, cursor:"pointer",
+                        borderRadius:9, cursor:"pointer",
                         display:"flex", alignItems:"center", justifyContent:"center", fontSize:13,
                         transition:"all .15s", flexShrink:0,
                       }}
                       onMouseOver={e=>{ e.stopPropagation(); e.currentTarget.style.background="#FEF2F2"; e.currentTarget.style.borderColor="#FECACA"; }}
                       onMouseOut={e=>{ e.currentTarget.style.background=C.creamD; e.currentTarget.style.borderColor=C.border; }}
-                    >🗑</button>
+                    ><IcoI name="trash" size={16} gap={0} /></button>
                   </>
                 )}
               </div>
@@ -17607,15 +17680,15 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
           animation:"fadeUp 0.2s ease both",
         }}>
           <div className="fade-up" style={{ background:C.white, borderRadius:16, padding:"24px 16px", maxWidth:380, width:"100%", boxShadow:"0 24px 64px #00000035" }}>
-            <div style={{ fontSize:32, marginBottom:12, textAlign:"center" }}>⚠️</div>
-            <div style={{ fontFamily:T.display, fontSize:21, color:C.navy, marginBottom:10, textAlign:"center" }}>Supprimer ce contrat ?</div>
-            <p style={{ fontFamily:T.body, fontSize:12, color:"#7A4A4A", marginBottom:28, lineHeight:1.7, textAlign:"center", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"10px 14px" }}>
+            <div style={{ fontSize:32, marginBottom:12, textAlign:"center", color:"#DC2626" }}><IcoI name="alert" size={32} stroke={1.6} gap={0} /></div>
+            <div style={{ fontFamily:T.display, fontSize:21, color:C.ink, marginBottom:10, textAlign:"center" }}>Supprimer ce contrat ?</div>
+            <p style={{ fontFamily:T.body, fontSize:12, color:"#7A4A4A", marginBottom:28, lineHeight:1.7, textAlign:"center", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 14px" }}>
               Le contrat quittera ta liste et ira dans tes Archives : tu pourras le retrouver et le restaurer à tout moment. Un contrat signé n'est jamais effacé, et sa preuve de signature est conservée.
             </p>
             <div style={{ display:"flex", gap:10 }}>
               <button onClick={() => setConfirmDelete(null)} style={{
                 flex:1, padding:"12px", background:C.white, border:`1.5px solid ${C.border}`,
-                borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM, fontWeight:500,
+                borderRadius:11, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM, fontWeight:500,
                 transition:"all .15s",
               }}
                 onMouseOver={e=>{ e.currentTarget.style.background=C.creamD; }}
@@ -17623,12 +17696,12 @@ function HistoryPage({ history, historyView, setHistoryView, onBack, onDownloadP
               >Annuler</button>
               <button onClick={() => { handleDeleteWithAnim(confirmDelete); }} style={{
                 flex:1, padding:"12px", background:"#C0392B", border:"none",
-                borderRadius:9, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.white, fontWeight:700,
+                borderRadius:11, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.white, fontWeight:700,
                 transition:"all .15s", boxShadow:"0 4px 14px #C0392B30",
               }}
                 onMouseOver={e=>{ e.currentTarget.style.background="#A93226"; e.currentTarget.style.transform="translateY(-1px)"; }}
                 onMouseOut={e=>{ e.currentTarget.style.background="#C0392B"; e.currentTarget.style.transform="translateY(0)"; }}
-              >🗑️ Supprimer</button>
+              ><IcoI name="trash" />Supprimer</button>
             </div>
           </div>
         </div>
@@ -17791,17 +17864,17 @@ function SendElectronicInvoiceButton({
     <div data-testid="einvoice-confirm" style={{
       marginTop:8, padding:"10px 12px", textAlign:"left",
       background: sentInfo ? "#FFFBEB" : "#F8FAFC", border:`1px solid ${sentInfo ? "#FCD34D" : C.border}`,
-      borderRadius:8, fontFamily:T.body, fontSize:12, color: sentInfo ? "#92400E" : C.textM, lineHeight:1.55,
+      borderRadius:10, fontFamily:T.body, fontSize:12, color: sentInfo ? "#92400E" : C.textM, lineHeight:1.55,
       maxWidth: compact ? 320 : "none",
     }}>
       {sentInfo ? (
-        <div><strong>⚠️ Cette facture{numLabel} a déjà été envoyée{sentDate ? ` le ${sentDate}` : ""}.</strong> La renvoyer créerait un doublon chez ton client. Tu veux vraiment la renvoyer ?</div>
+        <div><strong><IcoI name="alert" />Cette facture{numLabel} a déjà été envoyée{sentDate ? ` le ${sentDate}` : ""}.</strong> La renvoyer créerait un doublon chez ton client. Tu veux vraiment la renvoyer ?</div>
       ) : (
         <div>Envoyer la facture{numLabel} de {amount} à {who} par la facturation électronique ? Une fois envoyée, une facture ne se modifie plus : pour la corriger, il faudra faire un avoir.</div>
       )}
       <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
-        <button data-testid="einvoice-confirm-send" onClick={handleSend} style={{ padding:"7px 12px", background:C.navy, color:C.white, border:"none", borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{sentInfo ? "Renvoyer quand même" : "Confirmer l'envoi"}</button>
-        <button data-testid="einvoice-confirm-cancel" onClick={() => setConfirming(false)} style={{ padding:"7px 12px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Annuler</button>
+        <button data-testid="einvoice-confirm-send" onClick={handleSend} style={{ padding:"7px 12px", background:C.navy, color:C.white, border:"none", borderRadius:9, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{sentInfo ? "Renvoyer quand même" : "Confirmer l'envoi"}</button>
+        <button data-testid="einvoice-confirm-cancel" onClick={() => setConfirming(false)} style={{ padding:"7px 12px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:9, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Annuler</button>
       </div>
     </div>
   );
@@ -17813,11 +17886,11 @@ function SendElectronicInvoiceButton({
           padding:"8px 14px",
           background: sent ? "#16A34A" : "#fff",
           border: `1px solid ${sent ? "#16A34A" : C.border}`,
-          borderRadius:8, cursor: sending ? "wait" : "pointer",
+          borderRadius:10, cursor: sending ? "wait" : "pointer",
           fontSize:12, fontFamily:T.body, fontWeight:700,
           color: sent ? C.white : (result?.error ? C.error : C.textM),
         }}>
-          {sending ? "⏳ Envoi…" : sent ? (sentDate ? `✓ Envoyée le ${sentDate}` : "✓ Envoyée") : result?.error ? "⚠ Échec — réessayer" : "📤 Facturation électronique"}
+          {sending ? "Envoi…" : sent ? (sentDate ? `✓ Envoyée le ${sentDate}` : "✓ Envoyée") : result?.error ? "Échec — réessayer" : "Facturation électronique"}
         </button>
         {confirmBox}
         {result?.error && (
@@ -17826,7 +17899,7 @@ function SendElectronicInvoiceButton({
         {result?.details && (
           <div style={{
             marginTop:6, padding:"8px 10px", background:"#FEF2F2", border:"1px solid #FECACA",
-            borderRadius:6, fontSize:10, color:"#7F1D1D", fontFamily:"monospace",
+            borderRadius:8, fontSize:10, color:"#7F1D1D", fontFamily:"monospace",
             maxHeight:160, overflowY:"auto", whiteSpace:"pre-wrap", wordBreak:"break-word",
             userSelect:"text", maxWidth:320,
           }}>
@@ -17848,17 +17921,17 @@ function SendElectronicInvoiceButton({
         width:"100%", padding:"10px",
         background: sent ? "#16A34A" : "transparent",
         border: `1px solid ${sent ? "#16A34A" : C.borderL}`,
-        borderRadius:8, cursor: sending ? "wait" : "pointer",
+        borderRadius:10, cursor: sending ? "wait" : "pointer",
         fontSize:12.5, fontFamily:T.body, fontWeight:700,
         color: sent ? C.white : C.textM,
         display:"flex", alignItems:"center", justifyContent:"center", gap:7,
         opacity: sending ? 0.7 : 1,
       }}>
         {sending
-          ? <><span style={{fontSize:14}}>⏳</span> Envoi en cours…</>
+          ? <><IcoI name="hourglass" />Envoi en cours…</>
           : sent
           ? <><span style={{fontSize:14}}>✓</span> {sentDate ? `Envoyée électroniquement le ${sentDate}` : "Envoyée électroniquement"}</>
-          : <><span style={{fontSize:14}}>📤</span> Envoyer via facturation électronique (bêta)</>
+          : <><IcoI name="send" />Envoyer via facturation électronique (bêta)</>
         }
       </button>
       {confirmBox}
@@ -17873,7 +17946,7 @@ function SendElectronicInvoiceButton({
       {result?.details && (
         <div style={{
           marginTop:6, padding:"8px 10px", background:"#FEF2F2", border:"1px solid #FECACA",
-          borderRadius:6, fontSize:10, color:"#7F1D1D", fontFamily:"monospace",
+          borderRadius:8, fontSize:10, color:"#7F1D1D", fontFamily:"monospace",
           maxHeight:160, overflowY:"auto", whiteSpace:"pre-wrap", wordBreak:"break-word",
           userSelect:"text",
         }}>
@@ -18007,7 +18080,7 @@ function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctP
     const amountNow = priceHTNow * (depositPct / 100);
     if (!amountNow || amountNow <= 0) { alert("Renseigne d'abord le montant de la mission dans le champ ci-dessus."); return; }
     if (!stripeConnectReady || !stripeConnectAccountId) {
-      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
+      alert("Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
       if (onGoToProfileTva) onGoToProfileTva();
       return;
     }
@@ -18224,21 +18297,21 @@ ${freelanceName}`;
           display:"flex", alignItems:"center", justifyContent:"space-between",
         }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ width:36, height:36, background:"#FFFBEB", borderRadius:8,
-              display:"flex", alignItems:"center", justifyContent:"center", fontSize:17 }}>🧾</div>
+            <div style={{ width:36, height:36, background:"#FFFBEB", borderRadius:10,
+              display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, color:"#B45309" }}><Ico name="receipt" size={18} /></div>
             <div>
               <div style={{ fontFamily:T.display, fontSize:17, color:C.white, fontWeight:600 }}>
                 {depositPct === 100 ? "Facture — Paiement comptant" : "Facture d'acompte"}
               </div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:1 }}>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#C7D2FE", marginTop:1 }}>
                 {/* Particulier sans TVA : le montant saisi est le prix à payer, donc TTC */}
                 {(() => { const u = form?.typeClient === "particulier" && !tvaApplicableUI ? "TTC" : "HT"; return depositPct === 100 ? `100% du montant total ${u} — règlement immédiat` : `${depositPct}% du montant total ${u}`; })()}
               </div>
             </div>
           </div>
           <button onClick={onClose} style={{
-            width:32, height:32, borderRadius:"50%", background:"#253D5E",
-            border:"none", color:"#8BA3C0", fontSize:16, cursor:"pointer",
+            width:32, height:32, borderRadius:"50%", background:"#3730A3",
+            border:"none", color:"#C7D2FE", fontSize:16, cursor:"pointer",
             display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
           }}>✕</button>
         </div>
@@ -18250,16 +18323,16 @@ ${freelanceName}`;
           {resumeCandidate && !resumeDismissed && standaloneEntryId !== resumeCandidate.id && (
             <div style={{
               background:"#EFF6FF", border:"1px solid #BFDBFE",
-              borderRadius:8, padding:"12px 14px", marginBottom:16,
+              borderRadius:10, padding:"12px 14px", marginBottom:16,
               fontFamily:T.body, fontSize:12.5, color:"#1E3A8A", lineHeight:1.6,
             }}>
               <div style={{ marginBottom:8 }}>
-                📎 Tu as une facture libre récente non terminée : <strong>{resumeCandidate.missionTitle || "Sans titre"}</strong>
+                <IcoI name="paperclip" />Tu as une facture libre récente non terminée : <strong>{resumeCandidate.missionTitle || "Sans titre"}</strong>
                 {resumeCandidate.price ? ` · ${Number(resumeCandidate.price).toLocaleString("fr-FR")} €` : ""}
               </div>
               <div style={{ display:"flex", gap:8 }}>
-                <button onClick={handleResumeInvoice} style={{ padding:"6px 12px", background:"#1E3A8A", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontSize:11.5, fontWeight:700, fontFamily:T.body }}>Reprendre celle-ci</button>
-                <button onClick={() => setResumeDismissed(true)} style={{ padding:"6px 12px", background:"#fff", color:"#1E3A8A", border:"1px solid #BFDBFE", borderRadius:6, cursor:"pointer", fontSize:11.5, fontWeight:600, fontFamily:T.body }}>Nouvelle facture</button>
+                <button onClick={handleResumeInvoice} style={{ padding:"6px 12px", background:"#1E3A8A", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:11.5, fontWeight:700, fontFamily:T.body }}>Reprendre celle-ci</button>
+                <button onClick={() => setResumeDismissed(true)} style={{ padding:"6px 12px", background:"#fff", color:"#1E3A8A", border:"1px solid #BFDBFE", borderRadius:8, cursor:"pointer", fontSize:11.5, fontWeight:600, fontFamily:T.body }}>Nouvelle facture</button>
               </div>
             </div>
           )}
@@ -18268,10 +18341,10 @@ ${freelanceName}`;
           {(!hasClient || !hasPrice) && (
             <div style={{
               background:"#FFFBEB", border:"1px solid #FDE68A",
-              borderRadius:8, padding:"10px 14px", marginBottom:16,
+              borderRadius:10, padding:"10px 14px", marginBottom:16,
               fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6,
             }}>
-              💡 <strong>Complète les champs client et montant ci-dessous</strong> pour voir ta facture complète.
+              <IcoI name="info" /><strong>Complète les champs client et montant ci-dessous</strong> pour voir ta facture complète.
             </div>
           )}
 
@@ -18279,12 +18352,12 @@ ${freelanceName}`;
           {missingMentions.length > 0 && (
             <div style={{
               background:"#FEF2F2", border:"1px solid #FECACA",
-              borderRadius:8, padding:"10px 14px", marginBottom:16,
+              borderRadius:10, padding:"10px 14px", marginBottom:16,
               fontFamily:T.body, fontSize:12, color:"#991B1B", lineHeight:1.6,
             }}>
-              ⚠️ <strong>Il manque {missingMentions.join(" et ")} sur cette facture.</strong> {missingMentions.length > 1 ? "Ce sont des mentions obligatoires." : "C'est une mention obligatoire."} Complète ton profil avant d'envoyer la facture à ton client.
+              <IcoI name="alert" /><strong>Il manque {missingMentions.join(" et ")} sur cette facture.</strong> {missingMentions.length > 1 ? "Ce sont des mentions obligatoires." : "C'est une mention obligatoire."} Complète ton profil avant d'envoyer la facture à ton client.
               {onGoToProfileTva && (
-                <button onClick={onGoToProfileTva} style={{ display:"block", marginTop:8, padding:"6px 12px", background:"#991B1B", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontSize:11.5, fontWeight:700, fontFamily:T.body }}>Compléter mon profil</button>
+                <button onClick={onGoToProfileTva} style={{ display:"block", marginTop:8, padding:"6px 12px", background:"#991B1B", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:11.5, fontWeight:700, fontFamily:T.body }}>Compléter mon profil</button>
               )}
             </div>
           )}
@@ -18293,11 +18366,11 @@ ${freelanceName}`;
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18 }}>
             <div>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.15em", color:C.textL, fontWeight:600, marginBottom:3 }}>FACTURE N°</div>
-              <div style={{ fontFamily:T.display, fontSize:18, color:C.navy, fontWeight:600 }}>{invoiceNum}</div>
+              <div style={{ fontFamily:T.display, fontSize:18, color:C.ink, fontWeight:600 }}>{invoiceNum}</div>
             </div>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.15em", color:C.textL, fontWeight:600, marginBottom:3 }}>DATE D'ÉMISSION</div>
-              <div style={{ fontFamily:T.body, fontSize:13, color:C.navy, fontWeight:500 }}>{today}</div>
+              <div style={{ fontFamily:T.body, fontSize:13, color:C.ink, fontWeight:500 }}>{today}</div>
               <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:4 }}>Échéance : {today} (à réception)</div>
             </div>
           </div>
@@ -18306,13 +18379,13 @@ ${freelanceName}`;
 
           {/* Prestataire / Client */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))", gap:12, marginBottom:18 }}>
-            <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
+            <div style={{ background:C.creamD, borderRadius:11, padding:"12px 14px" }}>
               <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:6 }}>PRESTATAIRE</div>
               <input
                 value={form.freelanceName}
                 onChange={e => setForm(f => ({ ...f, freelanceName: e.target.value }))}
                 placeholder="Ton nom / raison sociale"
-                style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:2, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.ink, marginBottom:2, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
                 onFocus={e=>e.target.style.borderBottomColor=C.navy}
                 onBlur={e=>e.target.style.borderBottomColor=C.border}
               />
@@ -18325,21 +18398,21 @@ ${freelanceName}`;
               {String(profile?.immatriculation || "").trim() && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:2 }}>{String(profile.immatriculation).trim()}</div>}
               {form.freelanceEmail && <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:2 }}>{form.freelanceEmail}</div>}
             </div>
-            <div style={{ background:C.creamD, borderRadius:9, padding:"12px 14px" }}>
+            <div style={{ background:C.creamD, borderRadius:11, padding:"12px 14px" }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
                 <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600 }}>CLIENT</div>
                 {!contractId && (
                   <button
                     onClick={() => setShowRadarPicker(true)}
                     style={{ fontFamily:T.body, fontSize:10, fontWeight:700, color:"#7C3AED", background:"none", border:"none", cursor:"pointer", padding:0 }}
-                  >🛡️ Chercher via Radar Client</button>
+                  ><IcoI name="shield" />Chercher via Radar Client</button>
                 )}
               </div>
               <input
                 value={form.clientName}
                 onChange={e => setForm(f => ({ ...f, clientName: e.target.value }))}
                 placeholder="Nom du client"
-                style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:2, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.ink, marginBottom:2, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
                 onFocus={e=>e.target.style.borderBottomColor=C.navy}
                 onBlur={e=>e.target.style.borderBottomColor=C.border}
               />
@@ -18380,7 +18453,7 @@ ${freelanceName}`;
                     key={o.key}
                     onClick={() => setForm(f => ({ ...f, typeClient: o.key }))}
                     style={{
-                      padding:"4px 9px", borderRadius:6, cursor:"pointer",
+                      padding:"4px 9px", borderRadius:8, cursor:"pointer",
                       fontFamily:T.body, fontSize:10, fontWeight:600,
                       background: form.typeClient === o.key ? C.navy : "transparent",
                       color: form.typeClient === o.key ? "#fff" : C.textM,
@@ -18414,11 +18487,11 @@ ${freelanceName}`;
                     flex:"1 1 30%", padding:"9px 0",
                     background: depositPct === pct ? C.navy : C.white,
                     border: `1.5px solid ${depositPct === pct ? C.navy : C.border}`,
-                    borderRadius:8, cursor:"pointer",
+                    borderRadius:10, cursor:"pointer",
                     fontFamily:T.body, fontSize:13, fontWeight:700,
                     color: depositPct === pct ? C.white : C.textM,
                     transition:"all 0.18s",
-                    boxShadow: depositPct === pct ? "0 4px 12px #1B2E4B25" : "none",
+                    boxShadow: depositPct === pct ? "0 4px 12px #4338CA25" : "none",
                   }}
                 >
                   {pct} %
@@ -18432,7 +18505,7 @@ ${freelanceName}`;
                     ? "linear-gradient(135deg, #15803D 0%, #16A34A 100%)"
                     : C.white,
                   border: `1.5px solid ${depositPct === 100 ? "#15803D" : C.border}`,
-                  borderRadius:8, cursor:"pointer",
+                  borderRadius:10, cursor:"pointer",
                   fontFamily:T.body, fontSize:13, fontWeight:700,
                   color: depositPct === 100 ? C.white : C.textM,
                   transition:"all 0.18s",
@@ -18449,10 +18522,10 @@ ${freelanceName}`;
           {/* Ligne prestation */}
           <div style={{ marginBottom:16 }}>
             <div style={{ fontFamily:T.body, fontSize:9, letterSpacing:"0.13em", color:C.textL, fontWeight:600, marginBottom:8 }}>DÉTAIL DE LA PRESTATION</div>
-            <div style={{ border:`1px solid ${C.border}`, borderRadius:9, overflow:"hidden" }}>
+            <div style={{ border:`1px solid ${C.border}`, borderRadius:11, overflow:"hidden" }}>
               <div style={{ display:"grid", gridTemplateColumns:"1fr auto", background:C.navy,
                 padding:"9px 14px", fontFamily:T.body, fontSize:10, fontWeight:700,
-                color:"#8BA3C0", letterSpacing:"0.08em",
+                color:"#C7D2FE", letterSpacing:"0.08em",
               }}>
                 <span>DESCRIPTION</span>
                 <span style={{ textAlign:"right" }}>MONTANT HT</span>
@@ -18465,7 +18538,7 @@ ${freelanceName}`;
                     value={form.missionTitle}
                     onChange={e => setForm(f => ({ ...f, missionTitle: e.target.value }))}
                     placeholder="Titre de la mission"
-                    style={{ fontFamily:T.body, fontSize:13, color:C.navy, fontWeight:500, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
+                    style={{ fontFamily:T.body, fontSize:13, color:C.ink, fontWeight:500, border:"none", borderBottom:`1px dashed ${C.border}`, background:"transparent", width:"100%", padding:"2px 0", outline:"none" }}
                     onFocus={e=>e.target.style.borderBottomColor=C.navy}
                     onBlur={e=>e.target.style.borderBottomColor=C.border}
                   />
@@ -18482,7 +18555,7 @@ ${freelanceName}`;
                     /> € HT
                   </div>
                 </div>
-                <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, textAlign:"right", whiteSpace:"nowrap" }}>
+                <div style={{ fontFamily:T.display, fontSize:16, color:C.ink, fontWeight:600, textAlign:"right", whiteSpace:"nowrap" }}>
                   {hasPrice ? `${fmt(acompte)} €` : "— €"}
                 </div>
               </div>
@@ -18498,9 +18571,9 @@ ${freelanceName}`;
               <>
                 <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", marginTop:6 }}>
                   <span>Prestation réalisée du</span>
-                  <input type="date" data-testid="invoice-service-start" value={form.startDate || ""} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} style={{ fontFamily:T.body, fontSize:11, color:C.navy, border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 6px", background:C.white }} />
+                  <input type="date" data-testid="invoice-service-start" value={form.startDate || ""} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} style={{ fontFamily:T.body, fontSize:11, color:C.ink, border:`1px solid ${C.border}`, borderRadius:8, padding:"3px 6px", background:C.white }} />
                   <span>au</span>
-                  <input type="date" data-testid="invoice-service-end" value={form.endDate || ""} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} style={{ fontFamily:T.body, fontSize:11, color:C.navy, border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 6px", background:C.white }} />
+                  <input type="date" data-testid="invoice-service-end" value={form.endDate || ""} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} style={{ fontFamily:T.body, fontSize:11, color:C.ink, border:`1px solid ${C.border}`, borderRadius:8, padding:"3px 6px", background:C.white }} />
                 </div>
                 <div style={{ fontSize:9.5, marginTop:2 }}>Écrites sur la facture. Tu peux les laisser vides si la prestation a eu lieu le jour de la facture.</div>
               </>
@@ -18508,7 +18581,7 @@ ${freelanceName}`;
           </div>
 
           {/* Totaux */}
-          <div style={{ background:C.creamD, borderRadius:9, padding:"14px 16px", marginBottom:18 }}>
+          <div style={{ background:C.creamD, borderRadius:11, padding:"14px 16px", marginBottom:18 }}>
             {[
               ["Sous-total HT", hasPrice ? `${fmt(acompte)} €` : "—"],
               ...(tvaApplicableUI ? [["TVA 20 %", hasPrice ? `${fmt(tva)} €` : "—"]] : []),
@@ -18517,7 +18590,7 @@ ${freelanceName}`;
                 fontFamily:T.body, fontSize:12, color:C.textM, marginBottom:7,
               }}>
                 <span>{label}</span>
-                <span style={{ fontWeight:500, color:C.navy }}>{val}</span>
+                <span style={{ fontWeight:500, color:C.ink }}>{val}</span>
               </div>
             ))}
             {!tvaApplicableUI && (
@@ -18535,8 +18608,8 @@ ${freelanceName}`;
             )}
             <div style={{ height:1, background:C.border, margin:"10px 0" }} />
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <span style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy }}>{tvaApplicableUI ? "TOTAL TTC" : "TOTAL À PAYER"}</span>
-              <span style={{ fontFamily:T.display, fontSize:22, fontWeight:700, color:C.navy }}>
+              <span style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.ink }}>{tvaApplicableUI ? "TOTAL TTC" : "TOTAL À PAYER"}</span>
+              <span style={{ fontFamily:T.display, fontSize:22, fontWeight:700, color:C.ink }}>
                 {hasPrice ? `${fmt(ttc)} €` : "—"}
               </span>
             </div>
@@ -18544,7 +18617,7 @@ ${freelanceName}`;
 
           {/* Conditions */}
           <div style={{
-            background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:8,
+            background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10,
             padding:"10px 14px", marginBottom:20,
             fontFamily:T.body, fontSize:11, color:"#15803D", lineHeight:1.6,
           }}>
@@ -18564,25 +18637,25 @@ ${freelanceName}`;
         {/* ── Zone Paiement ── Version 232 : le virement et la carte, présentés à égalité */}
         <div style={{ padding:"0 24px 20px" }}>
           <div style={{
-            background:"linear-gradient(135deg, #0F1C2D 0%, #1B2E4B 60%, #2A4167 100%)",
-            borderRadius:12, padding:"16px",
-            boxShadow:"0 6px 24px #1B2E4B28",
+            background:"linear-gradient(135deg, #312E81 0%, #4338CA 60%, #4F46E5 100%)",
+            borderRadius:14, padding:"16px",
+            boxShadow:"0 6px 24px #4338CA28",
             position:"relative", overflow:"hidden",
           }}>
             {/* Subtle shimmer accent */}
             <div style={{
               position:"absolute", top:-20, right:-20,
               width:80, height:80, borderRadius:"50%",
-              background:"radial-gradient(circle, #B8965A20 0%, transparent 70%)",
+              background:"radial-gradient(circle, #4F46E520 0%, transparent 70%)",
               pointerEvents:"none",
             }} />
 
-            <div style={{ fontFamily:T.body, fontSize:11, fontWeight:700, letterSpacing:"0.12em", color:"#8BA3C0", marginBottom:12 }}>COMMENT TON CLIENT PEUT PAYER</div>
+            <div style={{ fontFamily:T.body, fontSize:11, fontWeight:700, letterSpacing:"0.12em", color:"#C7D2FE", marginBottom:12 }}>COMMENT TON CLIENT PEUT PAYER</div>
 
             {/* Virement bancaire */}
-            <div data-testid="invoice-way-transfer" style={{ background:"#FFFFFF0D", border:"1px solid #FFFFFF1F", borderRadius:10, padding:"12px", marginBottom:10 }}>
+            <div data-testid="invoice-way-transfer" style={{ background:"#FFFFFF0D", border:"1px solid #FFFFFF1F", borderRadius:12, padding:"12px", marginBottom:10 }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:10 }}>
-                <span style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#fff" }}>🏦 Virement bancaire</span>
+                <span style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#fff" }}><IcoI name="bank" />Virement bancaire</span>
                 <span style={{ fontFamily:T.body, fontSize:10, fontWeight:800, padding:"3px 9px", borderRadius:20, background:"#DCFCE7", color:"#166534", whiteSpace:"nowrap" }}>Gratuit</span>
               </div>
               {/* IBAN éditable — se sauvegarde automatiquement dans le profil */}
@@ -18591,8 +18664,8 @@ ${freelanceName}`;
                   value={profile?.iban || ""}
                   onChange={e => setProfile && setProfile(p => ({ ...p, iban: e.target.value }))}
                   placeholder="IBAN (ex: FR76 3000 1007 9412 3456 7890 185)"
-                  style={{ fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", width:"100%", boxSizing:"border-box" }}
-                  onFocus={e=>e.target.style.borderColor="#B8965A"}
+                  style={{ fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:9, padding:"8px 10px", outline:"none", width:"100%", boxSizing:"border-box" }}
+                  onFocus={e=>e.target.style.borderColor="#4F46E5"}
                   onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
                 />
                 <div style={{ display:"flex", gap:8 }}>
@@ -18600,34 +18673,34 @@ ${freelanceName}`;
                     value={profile?.bic || ""}
                     onChange={e => setProfile && setProfile(p => ({ ...p, bic: e.target.value }))}
                     placeholder="BIC"
-                    style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
-                    onFocus={e=>e.target.style.borderColor="#B8965A"}
+                    style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:9, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                    onFocus={e=>e.target.style.borderColor="#4F46E5"}
                     onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
                   />
                   <input
                     value={profile?.bankName || ""}
                     onChange={e => setProfile && setProfile(p => ({ ...p, bankName: e.target.value }))}
                     placeholder="Banque"
-                    style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:7, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
-                    onFocus={e=>e.target.style.borderColor="#B8965A"}
+                    style={{ flex:1, minWidth:0, fontFamily:T.body, fontSize:12, color:"#fff", background:"#FFFFFF14", border:"1px solid #FFFFFF22", borderRadius:9, padding:"8px 10px", outline:"none", boxSizing:"border-box" }}
+                    onFocus={e=>e.target.style.borderColor="#4F46E5"}
                     onBlur={e=>e.target.style.borderColor="#FFFFFF22"}
                   />
                 </div>
                 {profile?.iban ? (
-                  <div style={{ fontFamily:T.body, fontSize:9.5, color:"#8BA3C0" }}>✓ Sauvegardé automatiquement dans ton profil. Ton IBAN et la référence du virement (le numéro de la facture) seront écrits sur la facture.</div>
+                  <div style={{ fontFamily:T.body, fontSize:9.5, color:"#C7D2FE" }}>✓ Sauvegardé automatiquement dans ton profil. Ton IBAN et la référence du virement (le numéro de la facture) seront écrits sur la facture.</div>
                 ) : (
-                  <div style={{ fontFamily:T.body, fontSize:10.5, color:C.goldL, lineHeight:1.5 }}>⚠️ Sans IBAN, la facture n'indiquera pas à ton client où faire le virement. Il est enregistré dans ton profil dès que tu le tapes.</div>
+                  <div style={{ fontFamily:T.body, fontSize:10.5, color:C.goldL, lineHeight:1.5 }}><IcoI name="alert" />Sans IBAN, la facture n'indiquera pas à ton client où faire le virement. Il est enregistré dans ton profil dès que tu le tapes.</div>
                 )}
               </div>
             </div>
 
             {/* Carte bancaire (Stripe) */}
-            <div data-testid="invoice-way-card" style={{ background:"#FFFFFF0D", border:"1px solid #FFFFFF1F", borderRadius:10, padding:"12px" }}>
+            <div data-testid="invoice-way-card" style={{ background:"#FFFFFF0D", border:"1px solid #FFFFFF1F", borderRadius:12, padding:"12px" }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:8 }}>
-                <span style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#fff" }}>💳 Carte bancaire</span>
+                <span style={{ fontFamily:T.body, fontSize:13, fontWeight:800, color:"#fff" }}><IcoI name="card" />Carte bancaire</span>
                 <span style={{ fontFamily:T.body, fontSize:10, fontWeight:800, padding:"3px 9px", borderRadius:20, background:"#EEF2FF", color:"#4338CA", whiteSpace:"nowrap" }}>Stripe</span>
               </div>
-              <div style={{ fontFamily:T.body, fontSize:10.5, color:"#8BA3C0", lineHeight:1.5, marginBottom:10 }}>Frais de Stripe : {STRIPE_FEES_SHORT}. Freeley ne prend aucune commission.</div>
+              <div style={{ fontFamily:T.body, fontSize:10.5, color:"#C7D2FE", lineHeight:1.5, marginBottom:10 }}>Frais de Stripe : {STRIPE_FEES_SHORT}. Freeley ne prend aucune commission.</div>
               {stripeConnectReady && stripeConnectAccountId ? (
                 <>
                   {/* Bouton lien Stripe */}
@@ -18636,26 +18709,26 @@ ${freelanceName}`;
                     disabled={stripeLinkGenerating}
                     style={{
                       width:"100%", padding:"11px 16px",
-                      background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.gold,
+                      background: stripeLinkCopied ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : C.goldBg,
                       color: stripeLinkCopied ? "#fff" : C.navyD,
-                      border:"none", borderRadius:9, cursor: stripeLinkGenerating ? "wait" : "pointer",
+                      border:"none", borderRadius:11, cursor: stripeLinkGenerating ? "wait" : "pointer",
                       fontFamily:T.body, fontSize:12.5, fontWeight:700,
                       display:"flex", alignItems:"center", justifyContent:"center", gap:8,
                       opacity: stripeLinkGenerating ? 0.7 : 1, transition:"all .2s",
                     }}
                   >
-                    {stripeLinkGenerating ? "⏳ Génération…" : stripeLinkCopied ? "✅ Lien copié !" : "💳 Copier le lien de paiement par carte"}
+                    {stripeLinkGenerating ? "Génération…" : stripeLinkCopied ? "✓ Lien copié !" : "Copier le lien de paiement par carte"}
                   </button>
                   {/* QR code réel — utile en présentiel, le client scanne pour payer */}
                   {stripeLinkUrl && qrDataUrl(stripeLinkUrl) && (
-                    <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:12, background:"#FFFFFF0A", border:"1px solid #FFFFFF18", borderRadius:9, padding:"10px 12px" }}>
+                    <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:12, background:"#FFFFFF0A", border:"1px solid #FFFFFF18", borderRadius:11, padding:"10px 12px" }}>
                       <img
                         src={qrDataUrl(stripeLinkUrl)}
                         alt="QR code de paiement"
                         width={120} height={120}
-                        style={{ borderRadius:6, background:"#fff", flexShrink:0 }}
+                        style={{ borderRadius:8, background:"#fff", flexShrink:0 }}
                       />
-                      <div style={{ fontFamily:T.body, fontSize:10.5, color:"#8BA3C0", lineHeight:1.5 }}>
+                      <div style={{ fontFamily:T.body, fontSize:10.5, color:"#C7D2FE", lineHeight:1.5 }}>
                         <strong style={{ color:C.goldL }}>Scannable ou partageable</strong> — en face à face ou à distance.{isPermanentPayLink(stripeLinkUrl) ? " Ce lien n'expire pas : il est aussi sur la facture." : ""}
                       </div>
                     </div>
@@ -18668,7 +18741,7 @@ ${freelanceName}`;
                     <button
                       onClick={onConnectStripe || onGoToProfileTva}
                       disabled={!!connectingStripe}
-                      style={{ padding:"9px 14px", background: connectingStripe ? "#D1D5DB" : "#635BFF", border:"none", borderRadius:8, cursor: connectingStripe ? "wait" : "pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff" }}
+                      style={{ padding:"9px 14px", background: connectingStripe ? "#D1D5DB" : "#635BFF", border:"none", borderRadius:10, cursor: connectingStripe ? "wait" : "pointer", fontFamily:T.body, fontSize:12, fontWeight:700, color:"#fff" }}
                     >{connectingStripe ? "Redirection…" : "Connecter maintenant"}</button>
                   )}
                 </>
@@ -18680,24 +18753,24 @@ ${freelanceName}`;
         {/* Bouton télécharger PDF — juste après le bloc paiement */}
         <div style={{ padding:"0 24px 20px" }}>
           {needClientAddress && !String(form.clientAddress || "").trim() && (
-            <div data-testid="invoice-need-address" style={{ fontFamily:T.body, fontSize:12, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"8px 12px", marginBottom:10, lineHeight:1.5 }}>Ajoute l'adresse du client, plus haut dans la facture : c'est une mention obligatoire.</div>
+            <div data-testid="invoice-need-address" style={{ fontFamily:T.body, fontSize:12, color:"#B91C1C", background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"8px 12px", marginBottom:10, lineHeight:1.5 }}>Ajoute l'adresse du client, plus haut dans la facture : c'est une mention obligatoire.</div>
           )}
           <button onClick={handleFakeDownload} disabled={pdfGenerating} style={{
             width:"100%", padding:"12px",
-            background: downloaded ? "#16A34A" : C.gold,
-            border:"none", borderRadius:8, cursor: pdfGenerating ? "wait" : "pointer",
+            background: downloaded ? "#16A34A" : C.goldBg,
+            border:"none", borderRadius:10, cursor: pdfGenerating ? "wait" : "pointer",
             fontSize:13, fontFamily:T.body, fontWeight:700,
             color: downloaded ? C.white : C.navyD,
             display:"flex", alignItems:"center", justifyContent:"center", gap:7,
             transition:"background 0.25s",
-            boxShadow: downloaded ? "none" : "0 4px 14px #B8965A35",
+            boxShadow: downloaded ? "none" : "0 4px 14px #4F46E535",
             opacity: pdfGenerating ? 0.7 : 1,
           }}>
             {pdfGenerating
-              ? <><span style={{fontSize:15}}>⏳</span> Préparation du PDF…</>
+              ? <><IcoI name="hourglass" />Préparation du PDF…</>
               : downloaded
               ? <><span style={{fontSize:15}}>✓</span> Facture générée !</>
-              : <><span style={{fontSize:15}}>⬇</span> Télécharger la facture PDF</>
+              : <><IcoI name="download" />Télécharger la facture PDF</>
             }
           </button>
         </div>
@@ -18734,12 +18807,12 @@ ${freelanceName}`;
             <span style={{
               fontFamily:T.body, fontSize:10, fontWeight:700, letterSpacing:"0.12em",
               color:C.textL, whiteSpace:"nowrap",
-            }}>📤 ENVOYER LA FACTURE AU CLIENT</span>
+            }}><IcoI name="send" size={13} />ENVOYER LA FACTURE AU CLIENT</span>
             <div style={{ flex:1, height:1, background:C.borderL }} />
           </div>
 
           <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:14 }}>
-            ⚠️ Pense d'abord à <strong>télécharger le PDF</strong> ci-dessus, pour pouvoir le joindre à ton message.
+            <IcoI name="alert" />Pense d'abord à <strong>télécharger le PDF</strong> ci-dessus, pour pouvoir le joindre à ton message.
           </div>
 
           {(() => {
@@ -18750,12 +18823,12 @@ ${freelanceName}`;
               <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
                 <a
                   href={`mailto:${form.clientEmail?.trim() || ""}?subject=${encodeURIComponent(sendSubject)}&body=${encodeURIComponent(sendBody)}`}
-                  style={{ flex:1, minWidth:160, padding:"12px 16px", background:"#EFF6FF", border:"1.5px solid #BFDBFE", borderRadius:10, textDecoration:"none", textAlign:"center", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#1E40AF", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
-                >✉️ Envoyer par email</a>
+                  style={{ flex:1, minWidth:160, padding:"12px 16px", background:"#EFF6FF", border:"1.5px solid #BFDBFE", borderRadius:12, textDecoration:"none", textAlign:"center", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#1E40AF", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
+                ><IcoI name="mail" />Envoyer par email</a>
                 <a
                   href={`sms:?body=${encodeURIComponent(sendSms)}`}
-                  style={{ flex:1, minWidth:160, padding:"12px 16px", background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:10, textDecoration:"none", textAlign:"center", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
-                >📱 Envoyer par SMS</a>
+                  style={{ flex:1, minWidth:160, padding:"12px 16px", background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:12, textDecoration:"none", textAlign:"center", fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
+                ><IcoI name="message" />Envoyer par SMS</a>
               </div>
             );
           })()}
@@ -18765,7 +18838,7 @@ ${freelanceName}`;
         <div style={{ padding:"0 24px 20px", display:"flex", gap:10 }}>
           <button onClick={onClose} style={{
             flex:1, padding:"12px", background:C.creamD, border:`1px solid ${C.border}`,
-            borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body,
+            borderRadius:10, cursor:"pointer", fontSize:13, fontFamily:T.body,
             color:C.textM, fontWeight:500,
           }}>Fermer</button>
         </div>
@@ -19105,11 +19178,11 @@ function CameraCapture({ onCapture, onClose }) {
     }}>
       {error ? (
         <div style={{ color:"#fff", textAlign:"center", padding:24, maxWidth:340 }}>
-          <div style={{ fontSize:32, marginBottom:12 }}>📷</div>
+          <div style={{ fontSize:32, marginBottom:12 }}><IcoI name="camera" size={32} stroke={1.8} gap={0} /></div>
           <div style={{ fontSize:15, marginBottom:20, lineHeight:1.5 }}>{error}</div>
           <button onClick={onClose} style={{
             padding:"12px 24px", background:"#fff", color:"#000",
-            border:"none", borderRadius:10, fontWeight:600, cursor:"pointer",
+            border:"none", borderRadius:12, fontWeight:600, cursor:"pointer",
           }}>Fermer</button>
         </div>
       ) : (
@@ -19122,7 +19195,7 @@ function CameraCapture({ onCapture, onClose }) {
             color:"#fff", fontSize:13, fontFamily:"sans-serif",
             textShadow:"0 1px 4px rgba(0,0,0,0.6)", padding:"0 20px",
           }}>
-            {capturing ? "📸 Capture en cours… ne bouge pas" : "Cadre bien le document et garde le téléphone stable"}
+            {capturing ? <><IcoI name="camera" />Capture en cours… ne bouge pas</> : "Cadre bien le document et garde le téléphone stable"}
           </div>
           <div style={{
             position:"absolute", bottom:0, left:0, right:0,
@@ -19337,7 +19410,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
       }}>
         <div style={{
           background:"#F2F2F7",
-          borderRadius:14,
+          borderRadius:16,
           width:"100%", maxWidth:290,
           boxShadow:"0 24px 64px rgba(0,0,0,0.35)",
           overflow:"hidden",
@@ -19346,13 +19419,13 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
         }}>
           <div style={{ padding:"24px 20px 20px", textAlign:"center" }}>
             <div style={{
-              width:56, height:56, borderRadius:14,
+              width:56, height:56, borderRadius:16,
               background:"linear-gradient(145deg, #1C1C1E 0%, #2C2C2E 100%)",
               display:"flex", alignItems:"center", justifyContent:"center",
               margin:"0 auto 14px",
               boxShadow:"0 4px 14px rgba(0,0,0,0.22)",
             }}>
-              <span style={{ fontSize:28 }}>📁</span>
+              <span style={{ display:"flex", color:"#6366F1" }}><Ico name="folder" size={28} /></span>
             </div>
             <div style={{ fontSize:17, fontWeight:600, color:"#1C1C1E", letterSpacing:"-0.02em", lineHeight:1.3, marginBottom:10 }}>
               « Freeley » souhaite accéder à vos fichiers
@@ -19413,11 +19486,11 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
         {/* ── Header ── */}
         <div style={{ background:C.navy, padding:"20px 24px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ width:36, height:36, background:"#EFF6FF", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17 }}>🔍</div>
+            <div style={{ width:36, height:36, background:"#EFF6FF", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, color:"#1D4ED8" }}><Ico name="search" size={18} /></div>
             <div>
               <div style={{ fontFamily:T.display, fontSize:17, color:C.white, fontWeight:600, display:"flex", alignItems:"center", gap:8 }}>
                 Scanner un contrat
-                <span style={{ fontSize:14 }}>✨📷</span>
+                <span style={{ display:"flex", alignItems:"center", gap:2 }}><Ico name="sparkle" size={12} stroke={2} /><Ico name="camera" size={15} /></span>
                 <div style={{ position:"relative", display:"inline-flex" }}>
                   <button
                     onClick={() => setShowPhotoTooltip(v => !v)}
@@ -19433,24 +19506,24 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                     <div style={{
                       position:"absolute", top:24, left:"50%", transform:"translateX(-50%)",
                       background:"#1A2F4A", border:"1px solid #3B5A82",
-                      borderRadius:10, padding:"12px 14px",
+                      borderRadius:12, padding:"12px 14px",
                       width:240, zIndex:999,
                       boxShadow:"0 8px 24px #00000040",
                     }}>
                       <div style={{ fontFamily:T.body, fontSize:11.5, color:"#CBD5E1", lineHeight:1.65 }}>
                         Pas de fichier ? Prends en photo chaque page du contrat papier, dans l'ordre ({SCAN_MAX_PAGES} pages au maximum). Freeley lit le texte et l'analyse.
                       </div>
-                      <div onClick={() => setShowPhotoTooltip(false)} style={{ position:"absolute", top:8, right:10, fontSize:12, color:"#8BA3C0", cursor:"pointer" }}>✕</div>
+                      <div onClick={() => setShowPhotoTooltip(false)} style={{ position:"absolute", top:8, right:10, fontSize:12, color:"#C7D2FE", cursor:"pointer" }}>✕</div>
                     </div>
                   )}
                 </div>
               </div>
-              <div style={{ fontFamily:T.body, fontSize:11, color:"#8BA3C0", marginTop:1 }}>Analyse automatique · Clauses risquées & points de négociation</div>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"#C7D2FE", marginTop:1 }}>Analyse automatique · Clauses risquées & points de négociation</div>
             </div>
           </div>
           <button onClick={onClose} style={{
-            width:32, height:32, borderRadius:"50%", background:"#253D5E",
-            border:"none", color:"#8BA3C0", fontSize:16, cursor:"pointer",
+            width:32, height:32, borderRadius:"50%", background:"#3730A3",
+            border:"none", color:"#C7D2FE", fontSize:16, cursor:"pointer",
             display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
           }}>✕</button>
         </div>
@@ -19467,7 +19540,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer?.files); }}
                 style={{
                   border:`2px dashed ${scanDoc ? "#86EFAC" : dragOver ? C.navy : C.border}`,
-                  borderRadius:12, padding:"30px 20px",
+                  borderRadius:14, padding:"30px 20px",
                   background: scanDoc ? "#F0FDF4" : C.creamD,
                   textAlign:"center", marginBottom:16,
                   transition:"all 0.2s",
@@ -19480,8 +19553,8 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                   </>
                 ) : !scanDoc ? (
                   <>
-                    <div style={{ fontSize:36, marginBottom:12 }}>📄</div>
-                    <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, marginBottom:6 }}>
+                    <div style={{ fontSize:36, marginBottom:12, color:"#A5B4FC" }}><IcoI name="invoice" size={36} stroke={1.5} gap={0} /></div>
+                    <div style={{ fontFamily:T.display, fontSize:16, color:C.ink, fontWeight:600, marginBottom:6 }}>
                       Choisis le contrat à analyser
                     </div>
                     <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, marginBottom:18, lineHeight:1.6 }}>
@@ -19491,15 +19564,15 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                       onClick={requestFilePermission}
                       style={{
                         padding:"11px 24px", background:C.navy, color:C.white,
-                        border:"none", borderRadius:8, cursor:"pointer", fontSize:13,
+                        border:"none", borderRadius:10, cursor:"pointer", fontSize:13,
                         fontFamily:T.body, fontWeight:600,
                         display:"inline-flex", alignItems:"center", gap:8,
-                        boxShadow:"0 4px 14px #1B2E4B28", transition:"all 0.18s",
+                        boxShadow:"0 4px 14px #4338CA28", transition:"all 0.18s",
                       }}
                       onMouseOver={e=>{ e.currentTarget.style.background="#152438"; e.currentTarget.style.transform="translateY(-1px)"; }}
                       onMouseOut={e=>{ e.currentTarget.style.background=C.navy; e.currentTarget.style.transform="translateY(0)"; }}
                     >
-                      <span style={{ fontSize:15 }}>📁</span>
+                      <span style={{ display:"flex" }}><Ico name="folder" size={16} /></span>
                       Choisir un fichier
                     </button>
                     <div style={{ marginTop:14 }}>
@@ -19507,25 +19580,25 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                         onClick={handlePhotoScan}
                         style={{
                           background:"none", border:"none", cursor:"pointer", fontFamily:T.body,
-                          fontSize:12, color:"#3B7DD8", display:"inline-flex", alignItems:"center", gap:5,
-                          padding:"4px 8px", borderRadius:6, transition:"background 0.15s",
+                          fontSize:12, color:"#6366F1", display:"inline-flex", alignItems:"center", gap:5,
+                          padding:"4px 8px", borderRadius:8, transition:"background 0.15s",
                         }}
                         onMouseOver={e=>{ e.currentTarget.style.background="#EFF6FF"; }}
                         onMouseOut={e=>{ e.currentTarget.style.background="none"; }}
                       >
-                        📷 Prendre les pages en photo
+                        <IcoI name="camera" />Prendre les pages en photo
                       </button>
                     </div>
                   </>
                 ) : scanDoc.kind === "images" ? (
                   <>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#15803D", marginBottom:10 }}>
-                      ✅ {scanDoc.pages.length === 1 ? "1 page photographiée" : `${scanDoc.pages.length} pages photographiées`}
+                      <IcoI name="checkCircle" />{scanDoc.pages.length === 1 ? "1 page photographiée" : `${scanDoc.pages.length} pages photographiées`}
                     </div>
                     <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginBottom:12 }}>
                       {scanDoc.pages.map((p, i) => (
                         <div key={i} style={{ position:"relative", textAlign:"center" }}>
-                          <img src={`data:image/jpeg;base64,${p}`} alt={`Page ${i + 1}`} style={{ width:54, height:70, objectFit:"cover", borderRadius:6, border:"1px solid #BBF7D0", display:"block" }} />
+                          <img src={`data:image/jpeg;base64,${p}`} alt={`Page ${i + 1}`} style={{ width:54, height:70, objectFit:"cover", borderRadius:8, border:"1px solid #BBF7D0", display:"block" }} />
                           <span onClick={() => removePage(i)} title="Retirer cette page" style={{ position:"absolute", top:-7, right:-7, width:18, height:18, borderRadius:"50%", background:C.white, border:`1px solid ${C.border}`, fontSize:10, lineHeight:"16px", color:C.textM, cursor:"pointer" }}>✕</span>
                           <div style={{ fontFamily:T.body, fontSize:10, color:C.textL, marginTop:3 }}>Page {i + 1}</div>
                         </div>
@@ -19534,8 +19607,8 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                     {scanDoc.pages.length < SCAN_MAX_PAGES ? (
                       <button onClick={handlePhotoScan} disabled={preparing} style={{
                         padding:"8px 16px", background:C.white, color:C.navy, border:`1.5px solid ${C.navy}`,
-                        borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:600,
-                      }}>📷 Ajouter une page</button>
+                        borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:600,
+                      }}><IcoI name="camera" />Ajouter une page</button>
                     ) : (
                       <div style={{ fontFamily:T.body, fontSize:12, color:C.textM }}>{SCAN_MAX_PAGES} pages au maximum.</div>
                     )}
@@ -19545,15 +19618,15 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                   </>
                 ) : (
                   <>
-                    <div style={{ fontSize:36, marginBottom:10 }}>✅</div>
+                    <div style={{ fontSize:36, marginBottom:10, color:"#059669" }}><IcoI name="checkCircle" size={36} stroke={1.6} gap={0} /></div>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:700, color:"#15803D", marginBottom:6 }}>Fichier prêt</div>
                     <div style={{
                       display:"inline-flex", alignItems:"center", gap:8, maxWidth:"100%",
                       background:C.white, border:"1px solid #BBF7D0",
-                      borderRadius:8, padding:"8px 16px",
-                      fontFamily:T.body, fontSize:13, color:C.navy, boxSizing:"border-box",
+                      borderRadius:10, padding:"8px 16px",
+                      fontFamily:T.body, fontSize:13, color:C.ink, boxSizing:"border-box",
                     }}>
-                      <span style={{ fontSize:16 }}>📄</span>
+                      <span style={{ display:"flex" }}><Ico name="invoice" size={16} /></span>
                       <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{scanDoc.name}</span>
                       <span onClick={() => setScanDoc(null)} style={{ fontSize:12, color:C.textL, cursor:"pointer", marginLeft:4 }} title="Retirer">✕</span>
                     </div>
@@ -19562,7 +19635,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
               </div>
 
               {uploadError && (
-                <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"10px 14px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.55 }}>
+                <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 14px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#991B1B", lineHeight:1.55 }}>
                   {uploadError}
                 </div>
               )}
@@ -19570,7 +19643,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
               {/* Info banner */}
               <div style={{
                 background:"#EFF6FF", border:"1px solid #BFDBFE",
-                borderRadius:8, padding:"10px 14px", marginBottom:20,
+                borderRadius:10, padding:"10px 14px", marginBottom:20,
                 fontFamily:T.body, fontSize:12, color:"#1E40AF", lineHeight:1.6,
                 display:"flex", gap:8, alignItems:"flex-start",
               }}>
@@ -19582,7 +19655,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
               <div style={{ display:"flex", gap:10 }}>
                 <button onClick={onClose} style={{
                   flex:1, padding:"12px", background:C.creamD, border:`1px solid ${C.border}`,
-                  borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
+                  borderRadius:10, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
                 }}>Annuler</button>
                 <button
                   onClick={handleAnalyse}
@@ -19591,11 +19664,11 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                     flex:2, padding:"12px",
                     background: ready ? C.navy : C.creamDD,
                     color: ready ? C.white : C.textL,
-                    border:"none", borderRadius:8,
+                    border:"none", borderRadius:10,
                     cursor: ready ? "pointer" : "not-allowed",
                     fontSize:13, fontFamily:T.body, fontWeight:700,
                     display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                    boxShadow: ready ? "0 4px 14px #1B2E4B28" : "none",
+                    boxShadow: ready ? "0 4px 14px #4338CA28" : "none",
                     transition:"all 0.18s",
                   }}
                   onMouseOver={e=>{ if(ready){ e.currentTarget.style.background="#152438"; }}}
@@ -19616,19 +19689,19 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 background:"#EFF6FF", margin:"0 auto 20px",
                 display:"flex", alignItems:"center", justifyContent:"center",
                 fontSize:28, animation:"shimmer 1.2s ease-in-out infinite",
-              }}>🔍</div>
-              <div style={{ fontFamily:T.display, fontSize:20, color:C.navy, fontWeight:600, marginBottom:6 }}>
+              }}><Ico name="search" size={18} style={{ color:"#1D4ED8" }} /></div>
+              <div style={{ fontFamily:T.display, fontSize:20, color:C.ink, fontWeight:600, marginBottom:6 }}>
                 Analyse en cours…
               </div>
-              <div key={animFrame} style={{ fontFamily:T.body, fontSize:13, color:"#3B7DD8", marginBottom:28, minHeight:20, animation:"fadeUp 0.3s ease both" }}>
+              <div key={animFrame} style={{ fontFamily:T.body, fontSize:13, color:"#6366F1", marginBottom:28, minHeight:20, animation:"fadeUp 0.3s ease both" }}>
                 {loadingMessages[animFrame]}
               </div>
-              <div style={{ background:C.creamDD, borderRadius:8, height:10, overflow:"hidden", marginBottom:10 }}>
+              <div style={{ background:C.creamDD, borderRadius:10, height:10, overflow:"hidden", marginBottom:10 }}>
                 <div style={{
-                  height:"100%", borderRadius:8,
-                  background:`linear-gradient(90deg, ${C.navy}, #3B7DD8)`,
+                  height:"100%", borderRadius:10,
+                  background:`linear-gradient(90deg, ${C.navy}, #6366F1)`,
                   width:`${progress}%`, transition:"width 0.2s linear",
-                  boxShadow:"0 0 8px #3B7DD840",
+                  boxShadow:"0 0 8px #6366F140",
                 }} />
               </div>
               <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>{progress}%</div>
@@ -19641,8 +19714,8 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
           {/* ════════════ PHASE ERREUR ════════════ */}
           {phase === "error" && (
             <div style={{ textAlign:"center", padding:"12px 4px 4px" }}>
-              <div style={{ fontSize:40, marginBottom:12 }}>⚠️</div>
-              <div style={{ fontFamily:T.display, fontSize:19, color:C.navy, fontWeight:600, marginBottom:10 }}>L'analyse n'a pas marché</div>
+              <div style={{ fontSize:40, marginBottom:12, color:"#DC2626" }}><IcoI name="alert" size={40} stroke={1.6} gap={0} /></div>
+              <div style={{ fontFamily:T.display, fontSize:19, color:C.ink, fontWeight:600, marginBottom:10 }}>L'analyse n'a pas marché</div>
               <p style={{ fontFamily:T.body, fontSize:13.5, color:C.textM, lineHeight:1.6, margin:"0 0 10px" }}>{errorMsg}</p>
               <p style={{ fontFamily:T.body, fontSize:12, color:C.textL, lineHeight:1.6, margin:"0 0 22px" }}>
                 Aucun résultat n'est affiché : Freeley ne montre jamais un résultat qui ne vient pas de ton contrat.
@@ -19650,11 +19723,11 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
               <div style={{ display:"flex", gap:10 }}>
                 <button onClick={onClose} style={{
                   flex:1, padding:"12px", background:C.creamD, border:`1px solid ${C.border}`,
-                  borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
+                  borderRadius:10, cursor:"pointer", fontSize:13, fontFamily:T.body, color:C.textM,
                 }}>Fermer</button>
                 <button onClick={() => setPhase("upload")} style={{
                   flex:2, padding:"12px", background:C.navy, color:C.white, border:"none",
-                  borderRadius:8, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:700,
+                  borderRadius:10, cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:700,
                 }}>Réessayer</button>
               </div>
             </div>
@@ -19667,10 +19740,10 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
               <div style={{
                 display:"flex", alignItems:"center", gap:16,
                 background:vTone.bg, border:`1px solid ${vTone.border}`,
-                borderRadius:12, padding:"16px 20px", marginBottom:extracted?.mission || extracted?.client ? 10 : 20,
+                borderRadius:14, padding:"16px 20px", marginBottom:extracted?.mission || extracted?.client ? 10 : 20,
               }}>
                 <div style={{
-                  width:56, height:56, borderRadius:12, flexShrink:0,
+                  width:56, height:56, borderRadius:14, flexShrink:0,
                   background:C.white, border:`2px solid ${vTone.border}`,
                   display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
                   boxShadow:"0 2px 8px #00000010",
@@ -19679,7 +19752,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                   <div style={{ fontFamily:T.body, fontSize:8, color:vTone.color, fontWeight:600, letterSpacing:"0.05em" }}>/10</div>
                 </div>
                 <div>
-                  <div style={{ fontFamily:T.display, fontSize:16, color:C.navy, fontWeight:600, marginBottom:3 }}>{verdict.title}</div>
+                  <div style={{ fontFamily:T.display, fontSize:16, color:C.ink, fontWeight:600, marginBottom:3 }}>{verdict.title}</div>
                   <div style={{ fontFamily:T.body, fontSize:12, color:vTone.labelColor, lineHeight:1.5, fontWeight:600 }}>{scanSummaryText(findings)}</div>
                   <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:3 }}>Note indicative, calculée à partir des points trouvés.</div>
                 </div>
@@ -19695,11 +19768,11 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 {findings.map((f, i) => {
                   const tone = SCAN_TONES[f.level] || SCAN_TONES.ok;
                   const isOpen = !!openFix[i];
-                  const fixLabel = f.level === "danger" ? "💡 Voir la clause à proposer" : "✉️ Message de négociation pour le client";
+                  const fixLabel = f.level === "danger" ? "Voir la clause à proposer" : "Message de négociation pour le client";
                   return (
                     <div key={i} className="fade-up" style={{
                       background:tone.bg, border:`1.5px solid ${tone.border}`,
-                      borderRadius:10, padding:"14px 16px",
+                      borderRadius:12, padding:"14px 16px",
                       animation:`fadeUp 0.4s ${i * 0.08}s both cubic-bezier(.22,.68,0,1.2)`,
                     }}>
                       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6, flexWrap:"wrap" }}>
@@ -19715,20 +19788,20 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                             style={{
                               display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px",
                               background: isOpen ? tone.labelBg : C.white, border:`1.5px solid ${tone.border}`,
-                              borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:600, color:tone.labelColor,
+                              borderRadius:9, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:600, color:tone.labelColor,
                             }}
                           >{fixLabel}</button>
                           {isOpen && (
-                            <div style={{ marginTop:10, background:"#F3F4F6", border:"1.5px solid #E5E7EB", borderRadius:8, padding:"12px 14px", animation:"fadeUp 0.25s ease both" }}>
+                            <div style={{ marginTop:10, background:"#F3F4F6", border:"1.5px solid #E5E7EB", borderRadius:10, padding:"12px 14px", animation:"fadeUp 0.25s ease both" }}>
                               <p style={{ fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.65, margin:"0 0 10px", fontStyle:"italic", whiteSpace:"pre-wrap" }}>« {f.fix} »</p>
                               <button
                                 onClick={() => copyFix(i, f.fix)}
                                 style={{
                                   display:"inline-flex", alignItems:"center", gap:6, padding:"7px 14px",
                                   background: copiedFix === i ? "#16A34A" : C.navy, color:C.white, border:"none",
-                                  borderRadius:7, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:600, transition:"background 0.2s",
+                                  borderRadius:9, cursor:"pointer", fontFamily:T.body, fontSize:11.5, fontWeight:600, transition:"background 0.2s",
                                 }}
-                              >{copiedFix === i ? "✓ Copié !" : "📋 Copier"}</button>
+                              >{copiedFix === i ? "✓ Copié !" : <><IcoI name="copy" />Copier</>}</button>
                             </div>
                           )}
                         </div>
@@ -19742,26 +19815,26 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
                 onClick={() => downloadScanReport(findings, { label: extracted?.mission || "" })}
                 style={{
                   width:"100%", padding:"12px 16px", marginBottom:20,
-                  background:C.gold, color:C.navyD, border:"none", borderRadius:8,
+                  background:C.goldBg, color:C.navyD, border:"none", borderRadius:10,
                   cursor:"pointer", fontSize:13, fontFamily:T.body, fontWeight:700,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:8,
                 }}
-              >⬇ Télécharger le rapport PDF</button>
+              ><IcoI name="download" />Télécharger le rapport PDF</button>
 
               <div style={{
-                background:C.creamD, border:`1px solid ${C.border}`, borderRadius:8,
+                background:C.creamD, border:`1px solid ${C.border}`, borderRadius:10,
                 padding:"10px 14px", marginBottom:20,
                 fontFamily:T.body, fontSize:11, color:C.textL, lineHeight:1.6, textAlign:"center",
               }}>
-                ⚖ Analyse à titre indicatif. Pour un contrat à fort enjeu, consulte un juriste spécialisé.
+                <IcoI name="info" />Analyse à titre indicatif. Pour un contrat à fort enjeu, consulte un juriste spécialisé.
               </div>
 
               <button onClick={onClose} style={{
                 width:"100%", padding:"13px",
-                background:C.navy, color:C.white, border:"none", borderRadius:8, cursor:"pointer",
+                background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer",
                 fontSize:14, fontFamily:T.body, fontWeight:700,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                boxShadow:"0 4px 14px #1B2E4B28",
+                boxShadow:"0 4px 14px #4338CA28",
               }}>
                 ← Fermer et revenir au tableau de bord
               </button>
@@ -19907,7 +19980,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
     const canvas = ref.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    ctx.strokeStyle = "#1B2E4B";
+    ctx.strokeStyle = "#4338CA";
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -19953,7 +20026,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   const handleGetTactilePaymentLink = async () => {
     if (tactilePaymentLoading) return;
     if (!stripeConnectReady) {
-      alert("⚠️ Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
+      alert("Connecte d'abord ton compte Stripe (dans ton Profil → Facturation) pour que l'argent de ton client arrive bien chez toi. Sans ça, ce lien ne t'appartiendrait pas.");
       if (onGoToProfileTva) onGoToProfileTva();
       return;
     }
@@ -20072,7 +20145,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
 
         {/* ── Header ── */}
         <div style={{
-          background:"linear-gradient(135deg, #1B2E4B 0%, #2A3F6A 100%)",
+          background:"linear-gradient(135deg, #4338CA 0%, #2A3F6A 100%)",
           padding:"24px 28px 20px",
           position:"relative",
         }}>
@@ -20091,13 +20164,13 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
 
           <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
             <div style={{
-              width:44, height:44, borderRadius:12,
+              width:44, height:44, borderRadius:14,
               background:"rgba(255,255,255,0.12)",
               display:"flex", alignItems:"center", justifyContent:"center", fontSize:20,
-            }}>🔐</div>
+            }}><IcoI name="lock" size={20} stroke={1.8} gap={0} /></div>
             <div>
               <div style={{ fontFamily:T.display, fontSize:19, color:C.white, fontWeight:600 }}>Signature électronique sécurisée</div>
-              <div style={{ fontFamily:T.body, fontSize:12, color:"#8BA3C0", marginTop:2 }}>
+              <div style={{ fontFamily:T.body, fontSize:12, color:"#C7D2FE", marginTop:2 }}>
                 {form.missionTitle} · {Number(form.price||0).toLocaleString("fr-FR")} € {contractPricing(form, profile).enteredUnit}
               </div>
             </div>
@@ -20108,14 +20181,14 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
             {/* Prestataire */}
             <div style={{
               flex:1, background:"rgba(255,255,255,0.08)",
-              borderRadius:12, padding:"12px 14px",
+              borderRadius:14, padding:"12px 14px",
               border: freelanceSigned
                 ? "1.5px solid #22C55E"
                 : "1.5px solid rgba(255,255,255,0.12)",
               transition:"all 0.4s",
             }}>
               <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
-                <span style={{ fontSize:14 }}>{freelanceSigned ? "🟢" : "🟡"}</span>
+                <span style={{ fontSize:14 }}>{freelanceSigned ? "" : ""}</span>
                 <span style={{ fontFamily:T.body, fontSize:10, fontWeight:700, letterSpacing:"0.1em",
                   color: freelanceSigned ? "#22C55E" : "#FCD34D" }}>
                   {freelanceSigned ? "SIGNÉ" : "EN ATTENTE"}
@@ -20126,12 +20199,12 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
             </div>
 
             {/* Arrow */}
-            <div style={{ display:"flex", alignItems:"center", color:"#354F6E", fontSize:18 }}>→</div>
+            <div style={{ display:"flex", alignItems:"center", color:"#6366F1", fontSize:18 }}>→</div>
 
             {/* Client */}
             <div style={{
               flex:1, background:"rgba(255,255,255,0.08)",
-              borderRadius:12, padding:"12px 14px",
+              borderRadius:14, padding:"12px 14px",
               border: clientSigned
                 ? "1.5px solid #22C55E"
                 : freelanceSigned
@@ -20141,7 +20214,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               opacity: freelanceSigned ? 1 : 0.5,
             }}>
               <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
-                <span style={{ fontSize:14 }}>{clientSigned ? "🟢" : freelanceSigned ? "🔵" : "⏳"}</span>
+                <span style={{ fontSize:14 }}>{clientSigned ? "" : freelanceSigned ? "" : <IcoI name="hourglass" gap={0} />}</span>
                 <span style={{ fontFamily:T.body, fontSize:10, fontWeight:700, letterSpacing:"0.1em",
                   color: clientSigned ? "#22C55E" : freelanceSigned ? "#60A5FA" : "#6A8AB0" }}>
                   {clientSigned ? "SIGNÉ" : freelanceSigned ? "PRÊT" : "BLOQUÉ"}
@@ -20161,7 +20234,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
             <div style={{ animation:"fadeUp 0.35s ease both" }}>
               {/* Version 222 : le lieu est demandé pour tous les clients (particulier ou professionnel) */}
               <div style={{ marginBottom:20 }}>
-                <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:6 }}>Où signes-tu ce contrat ?</div>
+                <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.ink, marginBottom:6 }}>Où signes-tu ce contrat ?</div>
                 <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:10 }}>
                   {isParticulier
                     ? "Ton client est un particulier. La loi ne fixe pas les mêmes règles de paiement selon l'endroit où le contrat est signé. Choisis la réponse qui correspond à la réalité : elle sera enregistrée dans le contrat, avec la date et l'heure, et elle engage ta responsabilité."
@@ -20175,7 +20248,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   { key:"locaux", title:"Dans mes locaux", sub:"Ton bureau, ton atelier ou ta boutique, là où tu travailles habituellement. Si tu es allé voir ton client ailleurs pour lui proposer tes services, et qu'il signe juste après dans tes locaux, choisis plutôt « Chez le client ou ailleurs ».", rule: payAfterDelivery ? "Rien n'est à payer à la signature : le client paiera après la mission." : isComptant ? "Le client peut payer tout de suite." : "Le client peut payer l'acompte tout de suite." },
                   { key:"hors_etablissement", title:"Chez le client ou ailleurs", sub:"Dans les locaux du client, dans un café, sur un chantier…", rule:"Une question de plus juste en dessous : une petite entreprise peut avoir les mêmes droits qu'un particulier." },
                 ]).map(opt => (
-                  <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor:"pointer", background: signLocation === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${signLocation === opt.key ? "#6366F1" : C.border}` }}>
+                  <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:12, cursor:"pointer", background: signLocation === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${signLocation === opt.key ? "#6366F1" : C.border}` }}>
                     <input type="radio" name="signLocation" checked={signLocation === opt.key} onChange={() => chooseSignLocation(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
                     <span style={{ fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.55 }}>
                       <strong>{opt.title}</strong><br />
@@ -20186,8 +20259,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 ))}
                 {/* Client professionnel signé hors des locaux : petite entreprise ? (art. L221-3 C. conso, version 222) */}
                 {!isParticulier && signLocation === "hors_etablissement" && (
-                  <div data-testid="petit-pro" style={{ marginTop:6, padding:"12px 12px 4px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:10 }}>
-                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.navy, marginBottom:6 }}>Ton client est-il une petite entreprise ?</div>
+                  <div data-testid="petit-pro" style={{ marginTop:6, padding:"12px 12px 4px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:12 }}>
+                    <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:C.ink, marginBottom:6 }}>Ton client est-il une petite entreprise ?</div>
                     <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, lineHeight:1.6, marginBottom:10 }}>
                       Un professionnel a les mêmes droits qu'un particulier quand deux conditions sont réunies : il emploie cinq salariés ou moins, et ce que tu lui vends n'entre pas dans son activité principale. Par exemple, un site internet pour une boulangerie (article L221-3 du Code de la consommation).
                     </div>
@@ -20195,7 +20268,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       { key:"oui", title:"Oui, ou je ne suis pas sûr", sub:"Il emploie cinq salariés ou moins, et ce contrat n'entre pas dans son activité principale.", rule:"Il aura 14 jours pour se rétracter, et tu ne pourras rien encaisser pendant 7 jours (article L221-10 du Code de la consommation). Freeley lui présente ses droits avant qu'il signe, comme à un particulier. Dans le doute, c'est le choix le plus sûr pour toi." },
                       { key:"non", title:"Non", sub:"Il emploie plus de cinq salariés, ou ce contrat fait partie de son activité principale.", rule:"Les règles habituelles entre professionnels s'appliquent : pas de délai de rétractation, et le paiement est possible tout de suite." },
                     ].map(opt => (
-                      <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor:"pointer", background: petitPro === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${petitPro === opt.key ? "#6366F1" : C.border}` }}>
+                      <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:12, cursor:"pointer", background: petitPro === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${petitPro === opt.key ? "#6366F1" : C.border}` }}>
                         <input type="radio" name="petitPro" checked={petitPro === opt.key} onChange={() => choosePetitPro(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
                         <span style={{ fontFamily:T.body, fontSize:12, color:C.text, lineHeight:1.55 }}>
                           <strong>{opt.title}</strong><br />
@@ -20208,8 +20281,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 )}
                 {/* Dates de la mission incompatibles avec les 7 jours sans paiement */}
                 {startsBeforePayment && (
-                  <div style={{ marginTop:4, padding:"10px 12px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:10, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
-                    📅 <strong>Attention aux dates.</strong> La mission doit démarrer le {frDate(form.startDate)}. Avec une signature chez le client, {isComptant ? "le paiement" : "l'acompte"} ne pourra être demandé qu'à partir du {frDate(paymentNotBefore)}. Comme ce paiement conditionne le démarrage, la mission ne pourra pas commencer avant.{" "}
+                  <div style={{ marginTop:4, padding:"10px 12px", background:"#FFFBEB", border:"1px solid #FCD34D", borderRadius:12, fontFamily:T.body, fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>
+                    <IcoI name="calendar" size={14} stroke={1.8} gap={0} /> <strong>Attention aux dates.</strong> La mission doit démarrer le {frDate(form.startDate)}. Avec une signature chez le client, {isComptant ? "le paiement" : "l'acompte"} ne pourra être demandé qu'à partir du {frDate(paymentNotBefore)}. Comme ce paiement conditionne le démarrage, la mission ne pourra pas commencer avant.{" "}
                     {contractPostponesStart
                       ? "Le contrat le prévoit : le démarrage est reporté au jour du paiement, et la date de fin est décalée d'autant. Préviens ton client."
                       : "Préviens ton client, et adapte les dates si besoin."}
@@ -20217,7 +20290,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 )}
               </div>
               <div style={{
-                fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy,
+                fontFamily:T.body, fontSize:13, fontWeight:600, color:C.ink,
                 marginBottom:14, display:"flex", alignItems:"center", gap:8,
               }}>
                 <span style={{
@@ -20231,9 +20304,9 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
 
               {/* Canvas zone */}
               <div style={{
-                background:"#F8F7F4",
-                border:`2px dashed ${freelanceHasStrokes ? "#1B2E4B" : C.border}`,
-                borderRadius:14, overflow:"hidden",
+                background:"#F7F7FB",
+                border:`2px dashed ${freelanceHasStrokes ? "#4338CA" : C.border}`,
+                borderRadius:16, overflow:"hidden",
                 transition:"border-color 0.25s",
                 position:"relative",
               }}>
@@ -20255,7 +20328,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
                     pointerEvents:"none",
                   }}>
-                    <div style={{ fontSize:28, marginBottom:8, opacity:0.25 }}>✍️</div>
+                    <div style={{ fontSize:28, marginBottom:8, opacity:0.25 }}><IcoI name="pen" size={28} stroke={1.8} gap={0} /></div>
                     <div style={{ fontFamily:T.body, fontSize:12, color:C.textL, textAlign:"center", lineHeight:1.5 }}>
                       Signe avec ton doigt<br/>directement sur l'écran
                     </div>
@@ -20270,13 +20343,13 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   style={{
                     flex:1, padding:"11px",
                     background:C.creamD, border:`1.5px solid ${C.border}`,
-                    borderRadius:9, cursor:"pointer",
+                    borderRadius:11, cursor:"pointer",
                     fontFamily:T.body, fontSize:13, color:C.textM, fontWeight:500,
                     transition:"all 0.18s",
                   }}
                   onMouseOver={e=>e.currentTarget.style.background=C.creamDD}
                   onMouseOut={e=>e.currentTarget.style.background=C.creamD}
-                >🗑 Effacer</button>
+                ><IcoI name="trash" />Effacer</button>
                 <button
                   onClick={handleValidateFreelance}
                   disabled={!canValidateFreelance}
@@ -20285,7 +20358,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     background: canValidateFreelance
                       ? "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)"
                       : C.creamDD,
-                    border:"none", borderRadius:9,
+                    border:"none", borderRadius:11,
                     cursor: canValidateFreelance ? "pointer" : "not-allowed",
                     fontFamily:T.body, fontSize:13, fontWeight:700,
                     color: canValidateFreelance ? C.white : C.textL,
@@ -20294,7 +20367,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   }}
                   onMouseOver={e=>{ if (canValidateFreelance) { e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 8px 20px #6366F160"; }}}
                   onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow= canValidateFreelance ? "0 4px 14px #6366F140" : "none"; }}
-                >✅ Valider ma signature</button>
+                ><IcoI name="checkCircle" />Valider ma signature</button>
               </div>
               {!signLocation && freelanceHasStrokes && (
                 <div style={{ fontFamily:T.body, fontSize:11.5, color:"#92400E", marginTop:8, textAlign:"center" }}>Choisis d'abord où tu signes ce contrat, juste au-dessus.</div>
@@ -20311,10 +20384,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               {/* Success banner freelance */}
               <div style={{
                 background:"#F0FDF4", border:"1.5px solid #86EFAC",
-                borderRadius:10, padding:"12px 16px", marginBottom:18,
+                borderRadius:12, padding:"12px 16px", marginBottom:18,
                 display:"flex", alignItems:"center", gap:10,
               }}>
-                <span style={{ fontSize:20 }}>✅</span>
+                <span style={{ fontSize:20 }}><IcoI name="checkCircle" size={20} stroke={1.8} gap={0} /></span>
                 <div>
                   <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#15803D" }}>Ta signature a bien été enregistrée !</div>
                   <div style={{ fontFamily:T.body, fontSize:11, color:"#166534", marginTop:1 }}>
@@ -20327,7 +20400,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               <div style={{
                 background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)",
                 border:"1.5px solid #BFDBFE",
-                borderRadius:14, padding:"18px 18px 16px",
+                borderRadius:16, padding:"18px 18px 16px",
                 position:"relative", overflow:"hidden",
               }}>
                 {/* "Écran client" badge — dans le flux du texte : en position absolue, il recouvrait « Bonjour … » sur téléphone */}
@@ -20341,16 +20414,16 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 <div style={{
                   fontFamily:T.body, fontSize:12, color:"#1D4ED8", fontWeight:600, marginBottom:12,
                 }}>
-                  👋 Bonjour {clientName}, voici votre contrat à signer
+                  Bonjour {clientName}, voici votre contrat à signer
                 </div>
 
                 {/* Le client doit pouvoir lire tout le contrat avant de signer */}
                 <button
                   onClick={() => setShowContractText(v => !v)}
-                  style={{ width:"100%", marginBottom:12, padding:"10px 14px", background:C.white, border:"1.5px solid #93C5FD", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#1D4ED8" }}
-                >{showContractText ? "Masquer le contrat" : "📄 Lire le contrat complet"}</button>
+                  style={{ width:"100%", marginBottom:12, padding:"10px 14px", background:C.white, border:"1.5px solid #93C5FD", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12.5, fontWeight:700, color:"#1D4ED8" }}
+                >{showContractText ? "Masquer le contrat" : <><IcoI name="invoice" />Lire le contrat complet</>}</button>
                 {showContractText && (
-                  <div style={{ maxHeight:300, overflowY:"auto", whiteSpace:"pre-wrap", fontFamily:T.body, fontSize:11.5, color:"#2C3E50", lineHeight:1.65, background:C.white, border:"1px solid #DBEAFE", borderRadius:10, padding:"12px 14px", marginBottom:12, textAlign:"left" }}>
+                  <div style={{ maxHeight:300, overflowY:"auto", whiteSpace:"pre-wrap", fontFamily:T.body, fontSize:11.5, color:"#2C3E50", lineHeight:1.65, background:C.white, border:"1px solid #DBEAFE", borderRadius:12, padding:"12px 14px", marginBottom:12, textAlign:"left" }}>
                     {contractText ? normalizeContractText(contractText) : "Le texte du contrat n'est pas disponible sur cet écran. Ouvre-le depuis « Mes contrats » pour le montrer au client."}
                   </div>
                 )}
@@ -20365,23 +20438,23 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       { key:"email", title:"Par email", text: clientEmailOk ? COPY_MEDIUM_TEXT.email(String(form.clientEmail).trim()) : "Pas d'adresse email dans le contrat : choisissez le papier, ou demandez au prestataire d'ajouter votre adresse au contrat.", disabled: !clientEmailOk },
                       { key:"papier", title:"Sur papier", text: COPY_MEDIUM_TEXT.papier() },
                     ].map(opt => (
-                      <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:10, cursor: opt.disabled ? "not-allowed" : "pointer", opacity: opt.disabled ? 0.6 : 1, background: copyChoice === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${copyChoice === opt.key ? "#6366F1" : "#DBEAFE"}` }}>
+                      <label key={opt.key} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"11px 12px", marginBottom:8, borderRadius:12, cursor: opt.disabled ? "not-allowed" : "pointer", opacity: opt.disabled ? 0.6 : 1, background: copyChoice === opt.key ? "#EEF2FF" : C.white, border:`1.5px solid ${copyChoice === opt.key ? "#6366F1" : "#DBEAFE"}` }}>
                         <input type="radio" name="copyMedium" value={opt.key} disabled={!!opt.disabled} checked={copyChoice === opt.key} onChange={() => chooseCopy(opt.key)} style={{ marginTop:3, flexShrink:0 }} />
                         <span style={{ fontSize:11.5, color:"#1F2937", lineHeight:1.55 }}><strong>{opt.title}</strong><br />{opt.text}</span>
                       </label>
                     ))}
                     {copyChoice === "papier" && (
-                      <div style={{ fontSize:11.5, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"10px 12px", marginBottom:8, lineHeight:1.55 }}>
+                      <div style={{ fontSize:11.5, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:12, padding:"10px 12px", marginBottom:8, lineHeight:1.55 }}>
                         Le prestataire doit vous remettre {hasRight ? "le contrat et le formulaire de rétractation" : "le contrat"} sur papier avant que vous signiez. Ensuite, vous signerez tous les deux, à la main, l'exemplaire papier qu'il vous remettra.
                       </div>
                     )}
                     {copyError && (
-                      <div role="alert" style={{ fontSize:11.5, color:"#991B1B", background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:10, padding:"10px 12px", marginBottom:8, lineHeight:1.5 }}>{copyError}</div>
+                      <div role="alert" style={{ fontSize:11.5, color:"#991B1B", background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:12, padding:"10px 12px", marginBottom:8, lineHeight:1.5 }}>{copyError}</div>
                     )}
                     <button
                       onClick={handleCopyContinue}
                       disabled={!copyChoice || copySending}
-                      style={{ width:"100%", marginTop:4, padding:"11px 16px", background: copyChoice && !copySending ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:8, cursor: copyChoice && !copySending ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
+                      style={{ width:"100%", marginTop:4, padding:"11px 16px", background: copyChoice && !copySending ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:10, cursor: copyChoice && !copySending ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
                     >{copySending ? "Envoi…" : copyChoice === "email" ? "Recevoir les informations par email et continuer" : "Continuer"}</button>
                   </div>
                 ) : hasRight && !tactileRetractationDone ? (
@@ -20396,14 +20469,14 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                         : "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si la prestation peut commencer avant la fin de ce délai."}
                     </div>
                     <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(noticeForm, contractText))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(noticeForm, contractText))}</div>
-                    <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
+                    <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"12px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:12, cursor:"pointer" }}>
                       <input type="checkbox" checked={tactileRetractationChecked} onChange={e => setTactileRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
                       <span style={{ fontSize:11.5, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(isDigital, form.missionTitle)}</span>
                     </label>
                     <button
                       onClick={handleTactileRetractationContinue}
                       disabled={tactileRetractationWaiving}
-                      style={{ width:"100%", marginTop:12, padding:"11px 16px", background: !tactileRetractationWaiving ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:8, cursor: !tactileRetractationWaiving ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
+                      style={{ width:"100%", marginTop:12, padding:"11px 16px", background: !tactileRetractationWaiving ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)" : "#DBEAFE", border:"none", borderRadius:10, cursor: !tactileRetractationWaiving ? "pointer" : "not-allowed", fontSize:12.5, fontWeight:700, color:"#fff" }}
                     >{tactileRetractationWaiving ? "Enregistrement…" : (tactileRetractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
                     <div style={{ fontSize:10, color:"#6B7280", marginTop:10, lineHeight:1.5, textAlign:"center" }}>
                       Que vous cochiez ou non, vous accédez ensuite à la signature. Si vous cochez, {isDigital ? "votre accord est daté et conservé" : "votre demande est datée et conservée"}.
@@ -20413,7 +20486,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 <>
                 {/* Version 249 : pas de droit de rétractation (locaux du freelance, ou réparation urgente) */}
                 {retractExcludedKey && (
-                  <div data-testid="no-retract-info" style={{ background:C.white, border:"1.5px solid #CBD5E1", borderRadius:10, padding:"10px 13px", marginBottom:12, fontFamily:T.body, fontSize:11, color:"#334155", lineHeight:1.55 }}>
+                  <div data-testid="no-retract-info" style={{ background:C.white, border:"1.5px solid #CBD5E1", borderRadius:12, padding:"10px 13px", marginBottom:12, fontFamily:T.body, fontSize:11, color:"#334155", lineHeight:1.55 }}>
                     ℹ️ <strong>Pas de droit de rétractation.</strong> {RETRACTATION_EXCLUDED_TEXT[retractExcludedKey]}
                   </div>
                 )}
@@ -20421,10 +20494,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 <div style={{
                   background:"linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)",
                   border:"1.5px solid #C7D2FE",
-                  borderRadius:10, padding:"10px 13px", marginBottom:12,
+                  borderRadius:12, padding:"10px 13px", marginBottom:12,
                   display:"flex", alignItems:"center", gap:8,
                 }}>
-                  <span style={{ fontSize:16, flexShrink:0 }}>🛡️</span>
+                  <span style={{ fontSize:16, flexShrink:0 }}><IcoI name="shield" size={16} stroke={1.8} gap={0} /></span>
                   <div style={{ fontFamily:T.body, fontSize:10.5, color:"#4338CA", lineHeight:1.55, fontWeight:500 }}>
                     Signature horodatée par le serveur de Freeley et enregistrée avec l'adresse IP et le navigateur de cet appareil, comme preuve.{offPremises && copyChoice === "papier" ? ` Le prestataire vous remet votre exemplaire sur papier.${form.clientEmail ? " Vous recevrez aussi par email le lien vers votre contrat." : ""}` : form.clientEmail ? " Vous recevrez une copie du contrat par email." : ""}
                   </div>
@@ -20432,16 +20505,16 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
 
                 {/* Recap card */}
                 <div style={{
-                  background:C.white, borderRadius:10, padding:"12px 14px", marginBottom:14,
+                  background:C.white, borderRadius:12, padding:"12px 14px", marginBottom:14,
                   border:"1px solid #DBEAFE",
                 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:6 }}>
                     <span style={{ fontFamily:T.body, fontSize:11, color:C.textL, flexShrink:0 }}>Mission</span>
-                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.navy, textAlign:"right" }}>{form.missionTitle || "Mission freelance"}</span>
+                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.ink, textAlign:"right" }}>{form.missionTitle || "Mission freelance"}</span>
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:6 }}>
                     <span style={{ fontFamily:T.body, fontSize:11, color:C.textL, flexShrink:0 }}>Montant</span>
-                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.navy, textAlign:"right" }}>{Number(form.price||0).toLocaleString("fr-FR")} € {contractPricing(form, profile).enteredUnit}</span>
+                    <span style={{ fontFamily:T.body, fontSize:11, fontWeight:600, color:C.ink, textAlign:"right" }}>{Number(form.price||0).toLocaleString("fr-FR")} € {contractPricing(form, profile).enteredUnit}</span>
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between", gap:12 }}>
                     <span style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>
@@ -20464,7 +20537,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 <div style={{
                   background:C.white,
                   border:`2px dashed ${clientHasStrokes ? "#3B82F6" : "#BFDBFE"}`,
-                  borderRadius:12, overflow:"hidden",
+                  borderRadius:14, overflow:"hidden",
                   transition:"border-color 0.25s",
                   position:"relative",
                 }}>
@@ -20487,7 +20560,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       pointerEvents:"none",
                     }}>
                       <div style={{ fontFamily:T.body, fontSize:12, color:"#93C5FD", textAlign:"center" }}>
-                        ✍️ Zone de signature du client
+                        <IcoI name="pen" />Zone de signature du client
                       </div>
                     </div>
                   )}
@@ -20500,10 +20573,10 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                     style={{
                       flex:1, padding:"10px",
                       background:"#EFF6FF", border:"1.5px solid #BFDBFE",
-                      borderRadius:8, cursor:"pointer",
+                      borderRadius:10, cursor:"pointer",
                       fontFamily:T.body, fontSize:12, color:"#1D4ED8", fontWeight:500,
                     }}
-                  >🗑 Effacer</button>
+                  ><IcoI name="trash" />Effacer</button>
                   <button
                     onClick={handleSimulateClient}
                     disabled={!clientHasStrokes || isSimulating}
@@ -20512,7 +20585,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       background: clientHasStrokes && !isSimulating
                         ? "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)"
                         : "#DBEAFE",
-                      border:"none", borderRadius:8,
+                      border:"none", borderRadius:10,
                       cursor: clientHasStrokes && !isSimulating ? "pointer" : "not-allowed",
                       fontFamily:T.body, fontSize:12, fontWeight:700,
                       color: clientHasStrokes && !isSimulating ? C.white : "#93C5FD",
@@ -20522,7 +20595,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   >
                     {isSimulating ? (
                       <><span style={{ width:12, height:12, border:"2px solid #93C5FD", borderTopColor:"transparent", borderRadius:"50%", display:"inline-block", animation:"spin 0.7s linear infinite" }}/> Validation…</>
-                    ) : "✅ Valider la signature du client"}
+                    ) : <><IcoI name="checkCircle" />Valider la signature du client</>}
                   </button>
                 </div>
                 </>
@@ -20535,19 +20608,19 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
           {step === 2 && (
             <div style={{ animation:"fadeUp 0.4s cubic-bezier(.22,.68,0,1.2) both", textAlign:"center" }}>
               {saveSignatureError && (
-                <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#B91C1C", textAlign:"left" }}>
-                  ⚠️ Les signatures n'ont pas pu être sauvegardées sur le serveur (elles resteront visibles ici, mais pas dans le PDF téléchargé ni sur un autre appareil). Réessaie, ou contacte le support si ça persiste.
+                <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:12, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#B91C1C", textAlign:"left" }}>
+                  <IcoI name="alert" />Les signatures n'ont pas pu être sauvegardées sur le serveur (elles resteront visibles ici, mais pas dans le PDF téléchargé ni sur un autre appareil). Réessaie, ou contacte le support si ça persiste.
                 </div>
               )}
               {!saveSignatureError && (
-                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#1D4ED8", textAlign:"left", lineHeight:1.5 }}>
-                  📧 Un email de confirmation avec le contrat vient d'être envoyé à ton client. S'il ne le voit pas d'ici quelques minutes, dis-lui de regarder dans ses spams.
+                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:12, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#1D4ED8", textAlign:"left", lineHeight:1.5 }}>
+                  <IcoI name="mail" />Un email de confirmation avec le contrat vient d'être envoyé à ton client. S'il ne le voit pas d'ici quelques minutes, dis-lui de regarder dans ses spams.
                 </div>
               )}
               {/* Version 249 : le client a choisi le papier */}
               {offPremises && copyChoice === "papier" && (
-                <div data-testid="paper-copy-final" style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#92400E", textAlign:"left", lineHeight:1.55 }}>
-                  📄 <strong>Ton client a choisi le papier.</strong> Imprime le contrat avec le bouton « Télécharger PDF » de « Mes contrats »{hasRight ? " : le formulaire de rétractation est à la fin" : ""}. Signez-le tous les deux à la main, dans le cadre prévu, datez-le, puis remets-le-lui.
+                <div data-testid="paper-copy-final" style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#92400E", textAlign:"left", lineHeight:1.55 }}>
+                  <IcoI name="invoice" size={14} stroke={1.8} gap={0} /> <strong>Ton client a choisi le papier.</strong> Imprime le contrat avec le bouton « Télécharger PDF » de « Mes contrats »{hasRight ? " : le formulaire de rétractation est à la fin" : ""}. Signez-le tous les deux à la main, dans le cadre prévu, datez-le, puis remets-le-lui.
                 </div>
               )}
               {/* Big success badge */}
@@ -20560,7 +20633,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 <div style={{ position:"absolute", top:-20, right:-20, width:100, height:100, borderRadius:"50%", background:"rgba(34,197,94,0.12)" }} />
                 <div style={{ position:"absolute", bottom:-30, left:-10, width:80, height:80, borderRadius:"50%", background:"rgba(34,197,94,0.08)" }} />
 
-                <div style={{ fontSize:48, marginBottom:12, animation:"fadeUp 0.4s ease 0.1s both" }}>🔒</div>
+                <div style={{ fontSize:48, marginBottom:12, animation:"fadeUp 0.4s ease 0.1s both" }}><IcoI name="lock" size={48} stroke={1.8} gap={0} /></div>
                 <div style={{
                   fontFamily:T.display, fontSize:22, color:"#4ADE80", fontWeight:700, marginBottom:6,
                   animation:"fadeUp 0.4s ease 0.2s both",
@@ -20583,8 +20656,8 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
 
               {/* Contrat signé hors établissement : rappel de la loi des 7 jours (version 247 : boutons de paiement bloqués) */}
               {paymentEarly && (
-                <div style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:12, padding:"14px 16px", marginBottom:20, textAlign:"left", fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
-                  ⏳ <strong>Pas de paiement avant le {frDate(paymentNotBefore)}, d'après la loi.</strong> Tu as signé chez le client ou ailleurs que dans tes locaux. La loi interdit d'exiger ou de recevoir un paiement pendant 7 jours après la signature (article L221-10 du Code de la consommation).{" "}
+                <div style={{ background:"#FFFBEB", border:"1.5px solid #FCD34D", borderRadius:14, padding:"14px 16px", marginBottom:20, textAlign:"left", fontFamily:T.body, fontSize:12.5, color:"#92400E", lineHeight:1.6 }}>
+                  <IcoI name="hourglass" size={14} stroke={1.8} gap={0} /> <strong>Pas de paiement avant le {frDate(paymentNotBefore)}, d'après la loi.</strong> Tu as signé chez le client ou ailleurs que dans tes locaux. La loi interdit d'exiger ou de recevoir un paiement pendant 7 jours après la signature (article L221-10 du Code de la consommation).{" "}
                   Pour te protéger, Freeley bloque les boutons de paiement ci-dessous jusqu'à cette date.
                 </div>
               )}
@@ -20592,7 +20665,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               {/* Acompte card (version 232 : les façons de payer sont présentées juste en dessous, à égalité) */}
               <div style={{
                 background:"#F0FDF4", border:"1.5px solid #86EFAC",
-                borderRadius:12, padding:"16px 20px", marginBottom:20,
+                borderRadius:14, padding:"16px 20px", marginBottom:20,
                 display:"flex", alignItems:"center", justifyContent:"space-between",
               }}>
                 <div style={{ textAlign:"left" }}>
@@ -20622,7 +20695,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   padding:"11px 16px",
                   background:"linear-gradient(135deg, #FFFBEB 0%, #FEF9EE 100%)",
                   border:"1.5px solid #FCD34D",
-                  borderRadius:10, cursor:"pointer",
+                  borderRadius:12, cursor:"pointer",
                   fontFamily:T.body, fontSize:13, fontWeight:700,
                   color:"#92400E",
                   boxShadow:"0 2px 8px #F59E0B18",
@@ -20631,7 +20704,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                 onMouseOver={e=>{ e.currentTarget.style.background="linear-gradient(135deg,#FEF3C7 0%,#FEF9EE 100%)"; e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 5px 16px #F59E0B25"; }}
                 onMouseOut={e=>{ e.currentTarget.style.background="linear-gradient(135deg,#FFFBEB 0%,#FEF9EE 100%)"; e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 2px 8px #F59E0B18"; }}
               >
-                <span style={{ fontSize:15 }}>📄</span>
+                <span style={{ fontSize:15 }}><IcoI name="invoice" size={15} stroke={1.8} gap={0} /></span>
                 {isComptant ? "Télécharger la facture (PDF)" : "Télécharger la facture d'acompte (PDF)"}
               </button>}
 
@@ -20650,18 +20723,18 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                       onClick={early.guard("lien-carte", handleGetTactilePaymentLink)}
                       disabled={tactilePaymentLoading}
                       style={{
-                        width:"100%", padding:"12px", borderRadius:10, border:"none",
+                        width:"100%", padding:"12px", borderRadius:12, border:"none",
                         background: tactilePaymentLoading ? C.creamDD : "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
                         color: tactilePaymentLoading ? C.textL : "#fff",
                         cursor: tactilePaymentLoading ? "wait" : "pointer",
                         fontFamily:T.body, fontSize:13, fontWeight:700,
                       }}
-                    >{tactilePaymentLoading ? "Génération du lien…" : "💳 Générer le lien de paiement par carte"}</button>
+                    >{tactilePaymentLoading ? "Génération du lien…" : <><IcoI name="card" />Générer le lien de paiement par carte</>}</button>
                   ) : (
                     <>
                       <div style={{ display:"flex", gap:8 }}>
-                        <input readOnly value={tactilePaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, minWidth:0, padding:"9px 10px", border:"1px solid #86EFAC", borderRadius:8, fontFamily:T.body, fontSize:11, color:"#166534", background:"#F0FDF4" }} />
-                        <button onClick={() => { navigator.clipboard.writeText(tactilePaymentLink); setTactilePaymentCopied(true); setTimeout(()=>setTactilePaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{tactilePaymentCopied ? "Copié !" : "Copier"}</button>
+                        <input readOnly value={tactilePaymentLink} onFocus={e=>e.target.select()} style={{ flex:1, minWidth:0, padding:"9px 10px", border:"1px solid #86EFAC", borderRadius:10, fontFamily:T.body, fontSize:11, color:"#166534", background:"#F0FDF4" }} />
+                        <button onClick={() => { navigator.clipboard.writeText(tactilePaymentLink); setTactilePaymentCopied(true); setTimeout(()=>setTactilePaymentCopied(false),2200); }} style={{ flexShrink:0, padding:"9px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12, fontWeight:700 }}>{tactilePaymentCopied ? "Copié !" : "Copier"}</button>
                       </div>
                       <PayLinkQr url={tactilePaymentLink} />
                     </>
@@ -20678,23 +20751,23 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   <div style={{
                     background: amber ? "#FFFBEB" : "#F0FDF4",
                     border: `1px solid ${amber ? "#FCD34D" : "#86EFAC"}`,
-                    borderRadius:10, padding:"12px 16px", marginBottom:20,
+                    borderRadius:12, padding:"12px 16px", marginBottom:20,
                     fontFamily:T.body, fontSize:12, color: amber ? "#92400E" : "#166534", lineHeight:1.6,
                     textAlign:"left",
                   }}>
                     {notWaived
-                      ? <>⏳ <strong>Le client n'a pas coché la case de démarrage anticipé.</strong> Pour être sûr d'être payé de ton travail, attends la fin du délai de rétractation (après le {frDate(retractLastDay)}){payAfterDelivery ? null : <> et la réception {isComptant ? "du paiement" : "de l'acompte"}</>} avant de commencer.{startsBeforeRetractationEnd ? <> <strong>La mission était prévue à partir du {frDate(form.startDate)}</strong> : préviens ton client de ce nouveau calendrier.</> : null}</>
+                      ? <><IcoI name="hourglass" size={14} stroke={1.8} gap={0} /> <strong>Le client n'a pas coché la case de démarrage anticipé.</strong> Pour être sûr d'être payé de ton travail, attends la fin du délai de rétractation (après le {frDate(retractLastDay)}){payAfterDelivery ? null : <> et la réception {isComptant ? "du paiement" : "de l'acompte"}</>} avant de commencer.{startsBeforeRetractationEnd ? <> <strong>La mission était prévue à partir du {frDate(form.startDate)}</strong> : préviens ton client de ce nouveau calendrier.</> : null}</>
                       : payAfterDelivery
-                        ? <>🗓️ <strong>La mission peut commencer.</strong> Le paiement de la totalité est dû {form.paymentTerms} jours après réception de ta facture de fin de mission.</>
-                        : <>🗓️ <strong>La mission pourra commencer dès réception {isComptant ? "du paiement" : "de l'acompte"}</strong>{paymentEarly ? <>, que la loi permet de demander à partir du {frDate(paymentNotBefore)}</> : null}.{startsBeforePayment ? <> <strong>Elle était prévue le {frDate(form.startDate)}</strong> : {contractPostponesStart ? "comme le contrat le prévoit, le démarrage est reporté au jour du paiement, et la date de fin est décalée d'autant. Préviens ton client." : "préviens ton client, et adapte les dates si besoin."}</> : null}</>}
+                        ? <><IcoI name="calendar" size={14} stroke={1.8} gap={0} /> <strong>La mission peut commencer.</strong> Le paiement de la totalité est dû {form.paymentTerms} jours après réception de ta facture de fin de mission.</>
+                        : <><IcoI name="calendar" size={14} stroke={1.8} gap={0} /> <strong>La mission pourra commencer dès réception {isComptant ? "du paiement" : "de l'acompte"}</strong>{paymentEarly ? <>, que la loi permet de demander à partir du {frDate(paymentNotBefore)}</> : null}.{startsBeforePayment ? <> <strong>Elle était prévue le {frDate(form.startDate)}</strong> : {contractPostponesStart ? "comme le contrat le prévoit, le démarrage est reporté au jour du paiement, et la date de fin est décalée d'autant. Préviens ton client." : "préviens ton client, et adapte les dates si besoin."}</> : null}</>}
                   </div>
                 );
               })()}
 
               {/* Contenu numérique accepté par le client : indiquer dans Mes contrats le moment de la fourniture (version 221) */}
               {isParticulier && form.contenuNumeriquePret && tactileRetractationChecked && (
-                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px", marginBottom:20, fontFamily:T.body, fontSize:12, color:"#1E3A8A", lineHeight:1.6, textAlign:"left" }}>
-                  📦 <strong>Au moment où tu fournis le contenu à ton client</strong>, touche « J'ai fourni le contenu au client » sur la fiche de ce contrat, dans Mes contrats. Son droit de rétractation prend fin à ce moment-là, comme il l'a accepté. Avant, il peut encore se rétracter.
+                <div style={{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:12, padding:"12px 16px", marginBottom:20, fontFamily:T.body, fontSize:12, color:"#1E3A8A", lineHeight:1.6, textAlign:"left" }}>
+                  <IcoI name="package" size={14} stroke={1.8} gap={0} /> <strong>Au moment où tu fournis le contenu à ton client</strong>, touche « J'ai fourni le contenu au client » sur la fiche de ce contrat, dans Mes contrats. Son droit de rétractation prend fin à ce moment-là, comme il l'a accepté. Avant, il peut encore se rétracter.
                 </div>
               )}
 
@@ -20703,13 +20776,13 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               <div style={{
                 background:"linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)",
                 border:"1.5px solid #FCD34D",
-                borderRadius:14, padding:"18px 18px 16px",
+                borderRadius:16, padding:"18px 18px 16px",
                 marginBottom:14, position:"relative", overflow:"hidden",
               }}>
                 {/* Decorative dot */}
                 <div style={{ position:"absolute", top:-16, right:-16, width:64, height:64, borderRadius:"50%", background:"rgba(251,191,36,0.15)", pointerEvents:"none" }} />
                 <div style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:12 }}>
-                  <span style={{ fontSize:18, flexShrink:0 }}>🎯</span>
+                  <span style={{ fontSize:18, flexShrink:0 }}></span>
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:11, fontWeight:800, color:"#92400E", letterSpacing:"0.12em", marginBottom:5 }}>CONSEIL PRO FREELEY</div>
                     <div style={{ fontFamily:T.body, fontSize:12.5, color:"#78350F", lineHeight:1.65 }}>
@@ -20722,7 +20795,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   style={{
                     width:"100%", padding:"11px",
                     background:"linear-gradient(135deg, #92400E 0%, #B45309 100%)",
-                    color:"#FEF3C7", border:"none", borderRadius:9, cursor:"pointer",
+                    color:"#FEF3C7", border:"none", borderRadius:11, cursor:"pointer",
                     fontSize:13, fontFamily:T.body, fontWeight:700,
                     display:"flex", alignItems:"center", justifyContent:"center", gap:8,
                     transition:"all 0.2s",
@@ -20732,7 +20805,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
                   onMouseOver={e=>{ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 7px 20px rgba(146,64,14,0.35)"; }}
                   onMouseOut={e=>{ e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 4px 14px rgba(146,64,14,0.25)"; }}
                 >
-                  💾 Compléter mon profil <span style={{ fontWeight:400, opacity:0.75, fontSize:11 }}>(optionnel)</span>
+                  <IcoI name="save" />Compléter mon profil <span style={{ fontWeight:400, opacity:0.75, fontSize:11 }}>(optionnel)</span>
                 </button>
               </div>
               )}
@@ -20740,21 +20813,21 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
               <div style={{ display:"flex", gap:10 }}>
                 <button onClick={onClose} style={{
                   flex:1, padding:"13px",
-                  background:C.white, color:C.navy,
-                  border:`1.5px solid ${C.border}`, borderRadius:10, cursor:"pointer",
+                  background:C.white, color:C.ink,
+                  border:`1.5px solid ${C.border}`, borderRadius:12, cursor:"pointer",
                   fontSize:13, fontFamily:T.body, fontWeight:600,
                 }}>Fermer</button>
                 <button onClick={() => { if (onGoToHistory) onGoToHistory(); onClose(); }} style={{
                   flex:2, padding:"13px",
                   background:C.navy, color:C.white,
-                  border:"none", borderRadius:10, cursor:"pointer",
+                  border:"none", borderRadius:12, cursor:"pointer",
                   fontSize:14, fontFamily:T.body, fontWeight:700,
-                  boxShadow:"0 4px 14px #1B2E4B28",
+                  boxShadow:"0 4px 14px #4338CA28",
                   transition:"all 0.2s",
                 }}
                   onMouseOver={e=>{ e.currentTarget.style.background="#152438"; e.currentTarget.style.transform="translateY(-1px)"; }}
                   onMouseOut={e=>{ e.currentTarget.style.background=C.navy; e.currentTarget.style.transform="translateY(0)"; }}
-                >📁 Voir dans Mes contrats</button>
+                ><IcoI name="folder" />Voir dans Mes contrats</button>
               </div>
             </div>
           )}
@@ -20798,11 +20871,11 @@ function SubscriptionModal({ onClose, onSubscribe }) {
     }}>
       <div style={{
         maxWidth:440, width:"100%", background:C.white, borderRadius:24,
-        padding:"40px 36px 32px", boxShadow:"0 32px 80px #1B2E4B30",
+        padding:"40px 36px 32px", boxShadow:"0 32px 80px #4338CA30",
         position:"relative", overflow:"hidden",
       }}>
         {/* Decorative blob */}
-        <div style={{ position:"absolute", top:-40, right:-40, width:160, height:160, borderRadius:"50%", background:"linear-gradient(135deg, #B8965A18 0%, #1B2E4B10 100%)", pointerEvents:"none" }} />
+        <div style={{ position:"absolute", top:-40, right:-40, width:160, height:160, borderRadius:"50%", background:"linear-gradient(135deg, #4F46E518 0%, #4338CA10 100%)", pointerEvents:"none" }} />
 
         {/* Header */}
         <div style={{ textAlign:"center", marginBottom:28, position:"relative" }}>
@@ -20811,13 +20884,13 @@ function SubscriptionModal({ onClose, onSubscribe }) {
             background:`linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`,
             display:"flex", alignItems:"center", justifyContent:"center",
             margin:"0 auto 16px", fontSize:26,
-            boxShadow:"0 8px 24px #1B2E4B30",
-          }}>💎</div>
-          <h2 style={{ fontFamily:T.display, fontSize:24, color:C.navy, fontWeight:700, marginBottom:8, lineHeight:1.2 }}>
+            boxShadow:"0 8px 24px #4338CA30",
+          }}></div>
+          <h2 style={{ fontFamily:T.display, fontSize:24, color:C.ink, fontWeight:700, marginBottom:8, lineHeight:1.2 }}>
             Devenez membre Freeley
           </h2>
           <p style={{ fontFamily:T.body, fontSize:14, color:C.textM, lineHeight:1.65, maxWidth:320, margin:"0 auto" }}>
-            Vos <strong style={{color:C.navy}}>2 essais gratuits</strong> ont été utilisés.<br/>
+            Vos <strong style={{color:C.ink}}>2 essais gratuits</strong> ont été utilisés.<br/>
             Continuez à générer des contrats pro en illimité.
           </p>
         </div>
@@ -20832,17 +20905,17 @@ function SubscriptionModal({ onClose, onSubscribe }) {
             style={{
               background: hovered==="mensuel" ? C.navy : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`,
               border:`2px solid ${C.navy}`,
-              borderRadius:14, padding:"16px 20px", cursor:"pointer",
-              transition:"all 0.2s", boxShadow: hovered==="mensuel" ? "0 10px 30px #1B2E4B40" : "0 4px 16px #1B2E4B20",
+              borderRadius:16, padding:"16px 20px", cursor:"pointer",
+              transition:"all 0.2s", boxShadow: hovered==="mensuel" ? "0 10px 30px #4338CA40" : "0 4px 16px #4338CA20",
               transform: hovered==="mensuel" ? "translateY(-2px)" : "none",
               position:"relative", overflow:"hidden",
             }}
           >
-            <div style={{ position:"absolute", top:8, right:12, background:C.gold, color:C.navyD, fontFamily:T.body, fontSize:9, fontWeight:800, letterSpacing:"0.1em", padding:"3px 10px", borderRadius:20 }}>⭐ RECOMMANDÉ</div>
+            <div style={{ position:"absolute", top:8, right:12, background:C.goldBg, color:C.navyD, fontFamily:T.body, fontSize:9, fontWeight:800, letterSpacing:"0.1em", padding:"3px 10px", borderRadius:20 }}><IcoI name="award" />RECOMMANDÉ</div>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <div>
                 <div style={{ fontFamily:T.body, fontSize:15, fontWeight:700, color:C.white, marginBottom:2 }}>Abonnement mensuel</div>
-                <div style={{ fontFamily:T.body, fontSize:12, color:"#8BA3C0" }}>Contrats illimités · Annulez quand vous voulez</div>
+                <div style={{ fontFamily:T.body, fontSize:12, color:"#C7D2FE" }}>Contrats illimités · Annulez quand vous voulez</div>
               </div>
               <div style={{ textAlign:"right", flexShrink:0 }}>
                 <div style={{ fontFamily:T.display, fontSize:24, fontWeight:700, color:C.goldL }}>17€</div>
@@ -20859,18 +20932,18 @@ function SubscriptionModal({ onClose, onSubscribe }) {
             style={{
               background: hovered==="unite" ? C.creamD : C.white,
               border:`1.5px solid ${hovered==="unite" ? C.navy : C.border}`,
-              borderRadius:14, padding:"14px 20px", cursor:"pointer",
+              borderRadius:16, padding:"14px 20px", cursor:"pointer",
               transition:"all 0.2s",
               transform: hovered==="unite" ? "translateY(-1px)" : "none",
             }}
           >
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <div>
-                <div style={{ fontFamily:T.body, fontSize:14, fontWeight:600, color:C.navy, marginBottom:2 }}>📦 À l'unité</div>
+                <div style={{ fontFamily:T.body, fontSize:14, fontWeight:600, color:C.ink, marginBottom:2 }}><IcoI name="package" />À l'unité</div>
                 <div style={{ fontFamily:T.body, fontSize:12, color:C.textL }}>Un seul contrat, sans engagement</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:T.display, fontSize:20, fontWeight:600, color:C.navy }}>4€</div>
+                <div style={{ fontFamily:T.display, fontSize:20, fontWeight:600, color:C.ink }}>4€</div>
                 <div style={{ fontFamily:T.body, fontSize:10, color:C.textL }}>par contrat</div>
               </div>
             </div>
@@ -20884,14 +20957,14 @@ function SubscriptionModal({ onClose, onSubscribe }) {
             style={{
               background: hovered==="annuel" ? "#F5F3FF" : "#FAF9FF",
               border:`1.5px solid ${hovered==="annuel" ? "#7C4DFF" : "#E8E4FF"}`,
-              borderRadius:14, padding:"14px 20px", cursor:"pointer",
+              borderRadius:16, padding:"14px 20px", cursor:"pointer",
               transition:"all 0.2s",
               transform: hovered==="annuel" ? "translateY(-1px)" : "none",
             }}
           >
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <div>
-                <div style={{ fontFamily:T.body, fontSize:14, fontWeight:600, color:"#5B21B6", marginBottom:2 }}>☀️ Abonnement annuel</div>
+                <div style={{ fontFamily:T.body, fontSize:14, fontWeight:600, color:"#5B21B6", marginBottom:2 }}>Abonnement annuel</div>
                 <div style={{ fontFamily:T.body, fontSize:12, color:"#7C4DFF" }}>Illimité · <strong>~12,40€/mois</strong></div>
               </div>
               <div style={{ textAlign:"right" }}>
@@ -20903,9 +20976,9 @@ function SubscriptionModal({ onClose, onSubscribe }) {
         </div>
 
         {/* Features */}
-        <div style={{ background:C.creamD, borderRadius:12, padding:"14px 18px", marginBottom:20 }}>
-          {["✅ Contrats illimités", "✅ Téléchargement PDF inclus", "✅ Historique des contrats", "✅ Support prioritaire"].map(f => (
-            <div key={f} style={{ fontFamily:T.body, fontSize:12, color:C.navy, lineHeight:2 }}>{f}</div>
+        <div style={{ background:C.creamD, borderRadius:14, padding:"14px 18px", marginBottom:20 }}>
+          {["Contrats illimités", "Téléchargement PDF inclus", "Historique des contrats", "Support prioritaire"].map(f => (
+            <div key={f} style={{ fontFamily:T.body, fontSize:12, color:C.ink, lineHeight:2 }}>{f}</div>
           ))}
         </div>
 
@@ -20926,15 +20999,15 @@ function MiniPlanCard({ icon, title, price, sub, color, recommended, onSelect })
       display:"flex", alignItems:"center", justifyContent:"space-between",
       background: recommended ? C.navy : C.white,
       border: recommended ? `2px solid ${C.navy}` : `1.5px solid ${C.border}`,
-      borderRadius:10, padding:"14px 18px", cursor:"pointer",
-      boxShadow: recommended ? "0 4px 20px #1B2E4B20" : "none",
+      borderRadius:12, padding:"14px 18px", cursor:"pointer",
+      boxShadow: recommended ? "0 4px 20px #4338CA20" : "none",
       transition:"all .18s",
     }} onClick={onSelect}>
       <div style={{ display:"flex", alignItems:"center", gap:12 }}>
         <span style={{ fontSize:18 }}>{icon}</span>
         <div>
           <div style={{ fontFamily:T.body, fontSize:14, fontWeight:600, color: recommended ? C.white : C.navy }}>{title}</div>
-          <div style={{ fontFamily:T.body, fontSize:11, color: recommended ? "#8BA3C0" : C.textL }}>{sub}</div>
+          <div style={{ fontFamily:T.body, fontSize:11, color: recommended ? "#C7D2FE" : C.textL }}>{sub}</div>
         </div>
       </div>
       <div style={{ textAlign:"right" }}>
@@ -21069,9 +21142,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
   };
 
   const sections = [
-    { id:"identity", label:"Identité", icon:"👤" },
-    { id:"metier", label:"Métier", icon:"💼" },
-    { id:"facturation", label:"Facturation", icon:"🧾" },
+    { id:"identity", label:"Identité", icon:"user" },
+    { id:"metier", label:"Métier", icon:"briefcase" },
+    { id:"facturation", label:"Facturation", icon:"receipt" },
   ];
 
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "Mon Profil";
@@ -21079,7 +21152,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
 
   const inputStyle = {
     width:"100%", padding:"12px 14px",
-    border:`1.5px solid ${C.border}`, borderRadius:10,
+    border:`1.5px solid ${C.border}`, borderRadius:12,
     fontSize:14, fontFamily:T.body, color:C.text, outline:"none",
     background:C.white, boxSizing:"border-box", transition:"border-color 0.15s",
   };
@@ -21096,9 +21169,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
         background:`linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`,
         borderRadius:20, padding:"24px 16px", marginBottom:28,
         position:"relative", overflow:"hidden",
-        boxShadow:"0 16px 48px #1B2E4B28",
+        boxShadow:"0 16px 48px #4338CA28",
       }}>
-        <div style={{ position:"absolute", top:-30, right:-30, width:130, height:130, borderRadius:"50%", background:"rgba(184,150,90,0.15)", pointerEvents:"none" }} />
+        <div style={{ position:"absolute", top:-30, right:-30, width:130, height:130, borderRadius:"50%", background:"rgba(79,70,229,0.15)", pointerEvents:"none" }} />
         <div style={{ position:"absolute", bottom:-40, left:-20, width:100, height:100, borderRadius:"50%", background:"rgba(255,255,255,0.05)", pointerEvents:"none" }} />
 
         <div style={{ display:"flex", alignItems:"center", gap:20, position:"relative" }}>
@@ -21107,7 +21180,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
               onClick={() => fileInputRef.current?.click()}
               style={{
                 width:80, height:80, borderRadius:"50%",
-                background: profile.photo ? "transparent" : `linear-gradient(135deg, ${C.gold} 0%, ${C.goldL} 100%)`,
+                background: profile.photo ? "transparent" : `linear-gradient(135deg, ${C.goldBg} 0%, ${C.goldL} 100%)`,
                 border:"3px solid rgba(255,255,255,0.3)",
                 display:"flex", alignItems:"center", justifyContent:"center",
                 cursor:"pointer", overflow:"hidden",
@@ -21131,7 +21204,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 cursor:"pointer", fontSize:11,
                 boxShadow:"0 2px 8px rgba(0,0,0,0.2)",
               }}
-            >📷</div>
+            ><IcoI name="camera" size={16} gap={0} /></div>
             <input ref={fileInputRef} type="file" accept="image/*" style={{ display:"none" }} onChange={handlePhotoUpload} />
           </div>
 
@@ -21147,7 +21220,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             {profile.tjm && (
               <div style={{
                 display:"inline-flex", alignItems:"center", gap:6,
-                background:"rgba(255,255,255,0.1)", borderRadius:8, padding:"5px 12px",
+                background:"rgba(255,255,255,0.1)", borderRadius:10, padding:"5px 12px",
               }}>
                 <span style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.7)", letterSpacing:"0.08em" }}>TJM</span>
                 <span style={{ fontFamily:T.display, fontSize:15, color:C.white, fontWeight:600 }}>{profile.tjm} €</span>
@@ -21158,7 +21231,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           <button onClick={onBack} style={{
             position:"absolute", top:0, right:0,
             background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)",
-            borderRadius:8, padding:"6px 12px", cursor:"pointer",
+            borderRadius:10, padding:"6px 12px", cursor:"pointer",
             fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,0.8)", fontWeight:500,
           }}>← Retour</button>
         </div>
@@ -21180,16 +21253,16 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
       </div>
 
       {uploadError && (
-        <div className="fade-up" style={{ display:"flex", alignItems:"center", gap:10, background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#B91C1C" }}>
-          <span style={{ fontSize:15 }}>⚠️</span> {uploadError}
+        <div className="fade-up" style={{ display:"flex", alignItems:"center", gap:10, background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:12, padding:"12px 16px", marginBottom:16, fontFamily:T.body, fontSize:12.5, color:"#B91C1C" }}>
+          <IcoI name="alert" />{uploadError}
         </div>
       )}
 
       {/* Section nav tabs */}
       <div className="fade-up fade-up-1" style={{
         display:"flex", gap:8, marginBottom:24,
-        background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:6,
-        boxShadow:"0 2px 8px #1B2E4B06",
+        background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:6,
+        boxShadow:"0 2px 8px #4338CA06",
       }}>
         {sections.map(sec => (
           <button
@@ -21198,14 +21271,14 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             style={{
               flex:1, padding:"10px 8px",
               background: activeSection === sec.id ? C.navy : "transparent",
-              border:"none", borderRadius:8, cursor:"pointer",
+              border:"none", borderRadius:10, cursor:"pointer",
               fontFamily:T.body, fontSize:12, fontWeight:600,
               color: activeSection === sec.id ? C.white : C.textM,
               display:"flex", alignItems:"center", justifyContent:"center", gap:6,
               transition:"all 0.18s",
             }}
           >
-            <span>{sec.icon}</span>{sec.label}
+            <IcoI name={sec.icon} />{sec.label}
           </button>
         ))}
       </div>
@@ -21213,7 +21286,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
       {/* IDENTITY */}
       {activeSection === "identity" && (
         <div className="fade-up" style={{ display:"flex", flexDirection:"column", gap:20 }}>
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #4338CA06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:20 }}>PHOTO & IDENTITÉ</div>
 
             <div
@@ -21221,17 +21294,17 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
               style={{
                 display:"flex", alignItems:"center", gap:16,
                 background:C.creamD, border:`2px dashed ${C.border}`,
-                borderRadius:12, padding:"16px 20px", cursor:"pointer", marginBottom:20,
+                borderRadius:14, padding:"16px 20px", cursor:"pointer", marginBottom:20,
                 transition:"all 0.18s",
               }}
               onMouseOver={e=>{ e.currentTarget.style.borderColor=C.navy; e.currentTarget.style.background=C.creamDD; }}
               onMouseOut={e=>{ e.currentTarget.style.borderColor=C.border; e.currentTarget.style.background=C.creamD; }}
             >
               <div style={{ width:52, height:52, borderRadius:"50%", background: profile.photo ? "transparent" : C.navy, border:`2px solid ${C.border}`, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                {profile.photo ? <img src={profile.photo} alt="profil" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : <span style={{ fontSize:22 }}>📷</span>}
+                {profile.photo ? <img src={profile.photo} alt="profil" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : <span style={{ display:"flex", color:"#6366F1" }}><Ico name="camera" size={22} /></span>}
               </div>
               <div>
-                <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color:C.navy, marginBottom:3 }}>
+                <div style={{ fontFamily:T.body, fontSize:13, fontWeight:600, color:C.ink, marginBottom:3 }}>
                   {profile.photo ? "Changer la photo de profil" : "Ajouter une photo de profil"}
                 </div>
                 <div style={{ fontFamily:T.body, fontSize:11, color:C.textL }}>JPG, PNG — max 5 Mo</div>
@@ -21255,7 +21328,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
       {/* METIER */}
       {activeSection === "metier" && (
         <div className="fade-up" style={{ display:"flex", flexDirection:"column", gap:16 }}>
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #4338CA06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:20 }}>PRÉSENTATION MÉTIER</div>
             <div style={{ marginBottom:14 }}>
               <label style={labelStyle}>TITRE DU MÉTIER</label>
@@ -21274,18 +21347,18 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             </div>
           </div>
 
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #4338CA06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:16 }}>COMPÉTENCES</div>
             <div style={{ display:"flex", gap:8, marginBottom:16 }}>
               <input style={{ ...inputStyle, flex:1 }} value={newSkill} placeholder="React, Node.js, Figma…" onChange={e => setNewSkill(e.target.value)} onKeyDown={e => e.key === "Enter" && addSkill()} onFocus={e => e.target.style.borderColor=C.navy} onBlur={e => e.target.style.borderColor=C.border} />
-              <button onClick={addSkill} style={{ padding:"12px 18px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600, flexShrink:0 }}>+ Ajouter</button>
+              <button onClick={addSkill} style={{ padding:"12px 18px", background:C.navy, color:C.white, border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600, flexShrink:0 }}>+ Ajouter</button>
             </div>
             {profile.skills.length === 0 ? (
-              <div style={{ textAlign:"center", padding:"24px 16px", fontFamily:T.body, fontSize:12, color:C.textL, background:C.creamD, borderRadius:10 }}>Ajoute tes compétences pour qu'elles apparaissent sur ton profil</div>
+              <div style={{ textAlign:"center", padding:"24px 16px", fontFamily:T.body, fontSize:12, color:C.textL, background:C.creamD, borderRadius:12 }}>Ajoute tes compétences pour qu'elles apparaissent sur ton profil</div>
             ) : (
               <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
                 {profile.skills.map(skill => (
-                  <div key={skill} style={{ display:"flex", alignItems:"center", gap:6, background:C.creamD, border:`1.5px solid ${C.border}`, borderRadius:20, padding:"6px 12px", fontFamily:T.body, fontSize:12, fontWeight:500, color:C.navy }}>
+                  <div key={skill} style={{ display:"flex", alignItems:"center", gap:6, background:C.creamD, border:`1.5px solid ${C.border}`, borderRadius:20, padding:"6px 12px", fontFamily:T.body, fontSize:12, fontWeight:500, color:C.ink }}>
                     {skill}
                     <span onClick={() => removeSkill(skill)} style={{ cursor:"pointer", fontSize:14, lineHeight:1, color:C.textL }}>×</span>
                   </div>
@@ -21301,7 +21374,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
         <div className="fade-up" style={{ display:"flex", flexDirection:"column", gap:16 }}>
 
           {/* Version 232 : comment les clients paient — le virement et la carte, présentés à égalité */}
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"20px 24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"20px 24px", boxShadow:"0 2px 12px #4338CA06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>PAIEMENTS DE TES CLIENTS</div>
             <p style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.6, margin:0 }}>
               Tes clients peuvent te payer de deux façons : par virement bancaire, gratuit, ou par carte bancaire, avec ton compte Stripe. Tu peux proposer les deux, ou une seule.
@@ -21309,8 +21382,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           </div>
 
           {/* Virement bancaire */}
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
-            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>🏦 VIREMENT BANCAIRE · GRATUIT</div>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #4338CA06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}><IcoI name="bank" size={13} />VIREMENT BANCAIRE · GRATUIT</div>
             <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:14 }}>Ton IBAN apparaît sur tes factures et dans tes relances : ton client sait où te payer. Le virement ne coûte rien.</div>
 
             {onProfileScan && (
@@ -21318,22 +21391,22 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 <button
                   onClick={onProfileScan}
                   disabled={profileScanLoading}
-                  style={{ width:"100%", padding:"12px 16px", background: profileScanSuccess ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : C.creamD, border:`1.5px dashed ${profileScanSuccess ? "transparent" : C.border}`, borderRadius:10, cursor: profileScanLoading ? "default" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:600, color: profileScanSuccess ? "#fff" : C.navy, display:"flex", alignItems:"center", justifyContent:"center", gap:8, transition:"all 0.2s" }}
+                  style={{ width:"100%", padding:"12px 16px", background: profileScanSuccess ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : C.creamD, border:`1.5px dashed ${profileScanSuccess ? "transparent" : C.border}`, borderRadius:12, cursor: profileScanLoading ? "default" : "pointer", fontFamily:T.body, fontSize:12.5, fontWeight:600, color: profileScanSuccess ? "#fff" : C.navy, display:"flex", alignItems:"center", justifyContent:"center", gap:8, transition:"all 0.2s" }}
                 >
                   {profileScanLoading ? (
                     <><span style={{ width:14, height:14, border:"2px solid rgba(0,0,0,0.15)", borderTopColor:C.navy, borderRadius:"50%", animation:"spin 0.8s linear infinite", display:"inline-block" }} /> Lecture du document…</>
                   ) : profileScanSuccess ? (
                     <>✓ Informations détectées et remplies</>
                   ) : (
-                    <>📷 Scanner un RIB ou justificatif SIRET (au lieu de tout retaper)</>
+                    <><IcoI name="camera" />Scanner un RIB ou justificatif SIRET (au lieu de tout retaper)</>
                   )}
                 </button>
                 {profileScanError && (
-                  <div style={{ marginTop:8, fontFamily:T.body, fontSize:11, color:"#B91C1C", lineHeight:1.5 }}>⚠️ {profileScanError}</div>
+                  <div style={{ marginTop:8, fontFamily:T.body, fontSize:11, color:"#B91C1C", lineHeight:1.5 }}><IcoI name="alert" />{profileScanError}</div>
                 )}
                 {profileScanNote && (
-                  <div data-testid="profile-scan-note" style={{ marginTop:8, fontFamily:T.body, fontSize:11.5, lineHeight:1.5, color: profileScanNote.warn ? "#92400E" : "#166534" }}>{profileScanNote.warn ? "⚠️ " : "✓ "}{profileScanNote.text}
-                    {onDismissScanNote && <button data-testid="profile-scan-note-ok" onClick={onDismissScanNote} style={{ marginLeft:8, padding:"2px 10px", background:"none", border:`1px solid ${C.border}`, borderRadius:6, cursor:"pointer", fontFamily:T.body, fontSize:11, color:C.textM }}>OK</button>}
+                  <div data-testid="profile-scan-note" style={{ marginTop:8, fontFamily:T.body, fontSize:11.5, lineHeight:1.5, color: profileScanNote.warn ? "#92400E" : "#166534" }}>{profileScanNote.warn ? <IcoI name="alert" /> : "✓ "}{profileScanNote.text}
+                    {onDismissScanNote && <button data-testid="profile-scan-note-ok" onClick={onDismissScanNote} style={{ marginLeft:8, padding:"2px 10px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer", fontFamily:T.body, fontSize:11, color:C.textM }}>OK</button>}
                   </div>
                 )}
               </div>
@@ -21356,8 +21429,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           </div>
 
           {/* Carte bancaire — Stripe Connect */}
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
-            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>💳 CARTE BANCAIRE · AVEC STRIPE</div>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #4338CA06" }}>
+            <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}><IcoI name="card" size={13} />CARTE BANCAIRE · AVEC STRIPE</div>
             <p style={{ fontFamily:T.body, fontSize:12, color:C.textM, lineHeight:1.6, marginBottom:16 }}>
               Connecte ton propre compte Stripe pour que l'argent que tes clients paient par carte (acompte, solde, avenants) arrive directement sur ton compte à toi — jamais sur celui de Freeley.
             </p>
@@ -21365,7 +21438,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
               Les frais de Stripe sont prélevés par Stripe sur chaque paiement, directement sur ton compte : {STRIPE_FEES_LONG}. Freeley ne prend aucune commission. Tes paiements, remboursements et virements se retrouvent sur ton tableau de bord Stripe (dashboard.stripe.com).
             </p>
             {stripeConnectReady ? (
-              <div style={{ display:"flex", alignItems:"center", gap:10, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 16px" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10, background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, padding:"12px 16px" }}>
                 <span style={{ fontSize:18 }}>✓</span>
                 <div>
                   <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#166534" }}>Compte Stripe connecté</div>
@@ -21379,16 +21452,16 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 style={{
                   width:"100%", padding:"13px 18px",
                   background: connectingStripe ? C.creamDD : "#635BFF",
-                  border:"none", borderRadius:10, cursor: connectingStripe ? "wait" : "pointer",
+                  border:"none", borderRadius:12, cursor: connectingStripe ? "wait" : "pointer",
                   display:"flex", alignItems:"center", justifyContent:"center", gap:10,
                   fontFamily:T.body, fontSize:13.5, fontWeight:700, color:"#fff",
                 }}
-              >{connectingStripe ? "Redirection vers Stripe…" : "💳 Connecter mon compte Stripe"}</button>
+              >{connectingStripe ? "Redirection vers Stripe…" : <><IcoI name="card" />Connecter mon compte Stripe</>}</button>
             )}
           </div>
 
           {/* Mentions légales */}
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #4338CA06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>MENTIONS LÉGALES</div>
             <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Obligatoires sur tes contrats et factures en France.</div>
             <div style={{ marginBottom:14 }}>
@@ -21430,7 +21503,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
               <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:6, lineHeight:1.5 }}>
                 <strong>Es-tu redevable de la TVA ?</strong> Renseigne ton numéro ici pour que tes factures calculent et affichent automatiquement la TVA à 20%.<br/>
                 <strong>En franchise de TVA</strong> (micro-entreprise sous les seuils) ? Laisse ce champ vide : la mention « TVA non applicable, art. 293 B du CGI » sera ajoutée automatiquement, sans TVA calculée.<br/>
-                ⚠️ C'est à toi de vérifier ton statut réel et de tenir ce champ à jour — Freeley ne peut pas le déterminer à ta place.
+                <IcoI name="alert" />C'est à toi de vérifier ton statut réel et de tenir ce champ à jour — Freeley ne peut pas le déterminer à ta place.
               </div>
             </div>
             {/* Version 253 : plus de case « Médiateur de la consommation » : Freeley ne s'en occupe pas. */}
@@ -21444,7 +21517,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           </div>
 
           {/* Facturation électronique — connexion Super PDP */}
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #4338CA06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>FACTURATION ÉLECTRONIQUE</div>
             {profile.superPdpConnected ? (
               <div>
@@ -21452,9 +21525,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                   // Version 229 : « enregistrés », puis le résultat de la vraie vérification auprès de Super PDP
                   const res = superPdpCheck && typeof superPdpCheck === "object" ? superPdpCheck : null;
                   const ok = !!(res && res.verified), refused = !!(res && !res.verified);
-                  const tone = ok ? { bg:"#F0FDF4", bd:"#86EFAC", fg:"#166534", icon:"✅" }
-                    : refused ? { bg:"#FEF2F2", bd:"#FECACA", fg:"#991B1B", icon:"⚠️" }
-                    : { bg:"#F8FAFC", bd:C.border, fg:C.textM, icon:"🔑" };
+                  const tone = ok ? { bg:"#F0FDF4", bd:"#86EFAC", fg:"#166534", icon:"checkCircle" }
+                    : refused ? { bg:"#FEF2F2", bd:"#FECACA", fg:"#991B1B", icon:"alert" }
+                    : { bg:"#F8FAFC", bd:C.border, fg:C.textM, icon:"key" };
                   const detail = superPdpCheck === "checking" ? "Vérification auprès de Super PDP…"
                     : ok ? `Super PDP les accepte${res.companyName ? ` : entreprise « ${res.companyName} »` : ""}. Tu peux envoyer tes factures électroniques.`
                     : refused && res.reason === "refused" ? "Mais Super PDP les refuse. Vérifie-les dans ton espace Super PDP, puis clique sur « Déconnecter » et entre les bons identifiants."
@@ -21462,8 +21535,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                     : superPdpCheck === "unavailable" ? "La vérification auprès de Super PDP n'a pas pu se faire pour le moment. Réessaie un peu plus tard."
                     : "";
                   return (
-                    <div data-testid="superpdp-status" style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"12px 14px", background:tone.bg, border:`1px solid ${tone.bd}`, borderRadius:10, marginBottom:12 }}>
-                      <span style={{ fontSize:18, lineHeight:1.2 }}>{tone.icon}</span>
+                    <div data-testid="superpdp-status" style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"12px 14px", background:tone.bg, border:`1px solid ${tone.bd}`, borderRadius:12, marginBottom:12 }}>
+                      <span style={{ display:"flex", paddingTop:1 }}><Ico name={tone.icon} size={18} /></span>
                       <div style={{ fontFamily:T.body, fontSize:12.5, color:tone.fg, lineHeight:1.55 }}>
                         <div style={{ fontWeight:600 }}>Tes identifiants de facturation électronique sont enregistrés.</div>
                         {detail && <div>{detail}</div>}
@@ -21471,8 +21544,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                     </div>
                   );
                 })()}
-                <button data-testid="superpdp-recheck" onClick={runSuperPdpCheck} disabled={superPdpCheck === "checking"} style={{ padding:"9px 14px", marginRight:8, background:"none", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontFamily:T.body, cursor: superPdpCheck === "checking" ? "wait" : "pointer" }}>Vérifier la connexion</button>
-                <button onClick={onDisconnectSuperPdp} style={{ padding:"9px 14px", background:"none", border:`1px solid ${C.border}`, borderRadius:8, color:C.textM, fontSize:12, fontFamily:T.body, cursor:"pointer" }}>Déconnecter</button>
+                <button data-testid="superpdp-recheck" onClick={runSuperPdpCheck} disabled={superPdpCheck === "checking"} style={{ padding:"9px 14px", marginRight:8, background:"none", border:`1px solid ${C.border}`, borderRadius:10, color:C.textM, fontSize:12, fontFamily:T.body, cursor: superPdpCheck === "checking" ? "wait" : "pointer" }}>Vérifier la connexion</button>
+                <button onClick={onDisconnectSuperPdp} style={{ padding:"9px 14px", background:"none", border:`1px solid ${C.border}`, borderRadius:10, color:C.textM, fontSize:12, fontFamily:T.body, cursor:"pointer" }}>Déconnecter</button>
               </div>
             ) : (
               <div>
@@ -21484,9 +21557,9 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                     <li>Choisis le type <strong>Confidentielle</strong>, puis copie l'identifiant et le secret générés ci-dessous</li>
                   </ol>
                 </div>
-                <div style={{ padding:"12px 14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, marginBottom:14 }}>
+                <div style={{ padding:"12px 14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:12, marginBottom:14 }}>
                   <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6 }}>
-                    <strong>⚠️ Ne rate pas cette étape :</strong> quand tu ajoutes ton entreprise sur Super PDP (étape 1), on te propose 3 choix pour la réception des factures. Prends bien <strong>"inscrire mon adresse"</strong> — pas "je ne souhaite pas inscrire pour le moment". Depuis le <strong>1er septembre 2026</strong>, tout assujetti à la TVA doit pouvoir <strong>recevoir</strong> des factures électroniques, même les auto-entrepreneurs en franchise. Sans ce choix, tu restes invisible dans l'annuaire officiel, même une fois connecté à Freeley.
+                    <strong><IcoI name="alert" />Ne rate pas cette étape :</strong> quand tu ajoutes ton entreprise sur Super PDP (étape 1), on te propose 3 choix pour la réception des factures. Prends bien <strong>"inscrire mon adresse"</strong> — pas "je ne souhaite pas inscrire pour le moment". Depuis le <strong>1er septembre 2026</strong>, tout assujetti à la TVA doit pouvoir <strong>recevoir</strong> des factures électroniques, même les auto-entrepreneurs en franchise. Sans ce choix, tu restes invisible dans l'annuaire officiel, même une fois connecté à Freeley.
                   </div>
                 </div>
                 <div style={{ marginBottom:10 }}>
@@ -21500,29 +21573,29 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                 <button
                   onClick={() => onConnectSuperPdp(superPdpClientIdInput, superPdpClientSecretInput)}
                   disabled={connectingSuperPdp}
-                  style={{ padding:"10px 18px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor: connectingSuperPdp ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:600, opacity: connectingSuperPdp ? 0.7 : 1 }}
+                  style={{ padding:"10px 18px", background:C.navy, color:C.white, border:"none", borderRadius:12, cursor: connectingSuperPdp ? "wait" : "pointer", fontFamily:T.body, fontSize:13, fontWeight:600, opacity: connectingSuperPdp ? 0.7 : 1 }}
                 >{connectingSuperPdp ? "Connexion…" : "Connecter mon entreprise"}</button>
               </div>
             )}
           </div>
 
           {/* Logo entreprise */}
-          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #1B2E4B06" }}>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:16, padding:"24px", boxShadow:"0 2px 12px #4338CA06" }}>
             <div style={{ fontFamily:T.body, fontSize:10, letterSpacing:"0.18em", color:C.gold, fontWeight:700, marginBottom:6 }}>LOGO PROFESSIONNEL</div>
             <div style={{ fontFamily:T.body, fontSize:11.5, color:C.textL, lineHeight:1.5, marginBottom:18 }}>Ton logo apparaîtra en haut de tes factures et des contrats que tu crées ensuite.</div>
             <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-              <div data-testid="logo-preview-box" style={{ width:72, height:72, borderRadius:12, border:`1.5px dashed ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", background: profile.logo && logoLight ? "#1a365d" : C.creamD, flexShrink:0 }}>
-                {profile.logo ? <img src={profile.logo} alt="logo" style={{ width:"100%", height:"100%", objectFit:"contain" }} /> : <span style={{ fontSize:26 }}>🏢</span>}
+              <div data-testid="logo-preview-box" style={{ width:72, height:72, borderRadius:14, border:`1.5px dashed ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", background: profile.logo && logoLight ? "#312E81" : C.creamD, flexShrink:0 }}>
+                {profile.logo ? <img src={profile.logo} alt="logo" style={{ width:"100%", height:"100%", objectFit:"contain" }} /> : <span style={{ display:"flex", color:"#A5B4FC" }}><Ico name="briefcase" size={26} /></span>}
               </div>
               <div style={{ flex:1 }}>
                 <input ref={logoInputRef} type="file" accept="image/*" style={{ display:"none" }} onChange={handleLogoUpload} />
-                <button onClick={() => logoInputRef.current?.click()} style={{ padding:"10px 18px", background:C.navy, color:C.white, border:"none", borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600 }}>
+                <button onClick={() => logoInputRef.current?.click()} style={{ padding:"10px 18px", background:C.navy, color:C.white, border:"none", borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:13, fontWeight:600 }}>
                   {profile.logo ? "Changer le logo" : "Ajouter un logo"}
                 </button>
-                {profile.logo && <button onClick={() => { updateProfile("logo", null); setLogoError(""); }} style={{ marginLeft:8, padding:"10px 14px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:10, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Retirer</button>}
+                {profile.logo && <button onClick={() => { updateProfile("logo", null); setLogoError(""); }} style={{ marginLeft:8, padding:"10px 14px", background:"none", color:C.textM, border:`1px solid ${C.border}`, borderRadius:12, cursor:"pointer", fontFamily:T.body, fontSize:12 }}>Retirer</button>}
                 <div style={{ fontFamily:T.body, fontSize:10.5, color:C.textL, marginTop:8 }}>PNG, JPG — max 2 Mo</div>
                 {profile.logo && logoLight && <div data-testid="logo-light-note" style={{ fontFamily:T.body, fontSize:11.5, color:C.textM, marginTop:8, lineHeight:1.5 }}>Ton logo est clair : dans tes documents, il sera posé sur un fond bleu foncé pour rester visible.</div>}
-                {logoError && <div data-testid="logo-error" style={{ fontFamily:T.body, fontSize:11.5, color:C.error, marginTop:8, lineHeight:1.5 }}>⚠️ {logoError}</div>}
+                {logoError && <div data-testid="logo-error" style={{ fontFamily:T.body, fontSize:11.5, color:C.error, marginTop:8, lineHeight:1.5 }}><IcoI name="alert" />{logoError}</div>}
               </div>
             </div>
           </div>
@@ -21531,8 +21604,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
 
       {/* LIENS */}
       {/* Liaison magique */}
-      <div className="fade-up fade-up-2" style={{ display:"flex", alignItems:"flex-start", gap:12, background:"linear-gradient(135deg, #FFFBEB 0%, #FFF7E6 100%)", border:"1px solid #FDE68A", borderRadius:12, padding:"16px 18px", marginTop:20 }}>
-        <span style={{ fontSize:20, flexShrink:0 }}>✨</span>
+      <div className="fade-up fade-up-2" style={{ display:"flex", alignItems:"flex-start", gap:12, background:"linear-gradient(135deg, #FFFBEB 0%, #FFF7E6 100%)", border:"1px solid #FDE68A", borderRadius:14, padding:"16px 18px", marginTop:20 }}>
+        <span style={{ display:"flex", flexShrink:0, color:"#4338CA" }}><Ico name="sparkle" size={20} /></span>
         <div>
           <div style={{ fontFamily:T.body, fontSize:13, fontWeight:700, color:"#92400E", marginBottom:4 }}>Liaison magique activée</div>
           <div style={{ fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6, opacity:0.85 }}>
@@ -21574,14 +21647,14 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             style={{
               display:"flex", alignItems:"center", gap:8,
               background:"transparent", border:"1.5px solid #EF4444",
-              borderRadius:10, padding:"10px 18px", cursor:"pointer",
+              borderRadius:12, padding:"10px 18px", cursor:"pointer",
               fontFamily:T.body, fontSize:13, fontWeight:600, color:"#EF4444",
               transition:"all 0.18s",
             }}
             onMouseOver={e=>{ e.currentTarget.style.background="#EF4444"; e.currentTarget.style.color="#fff"; }}
             onMouseOut={e=>{ e.currentTarget.style.background="transparent"; e.currentTarget.style.color="#EF4444"; }}
           >
-            <span>🗑️</span> Supprimer définitivement mon compte
+            <IcoI name="trash" />Supprimer définitivement mon compte
           </button>
         </div>
       </div>
@@ -21605,8 +21678,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           }}>
             {deleteConfirming ? (
               <div style={{ textAlign:"center", padding:"16px 0" }}>
-                <div style={{ fontSize:40, marginBottom:16 }}>🗑️</div>
-                <div style={{ fontFamily:T.display, fontSize:18, fontWeight:700, color:C.navy, marginBottom:10 }}>
+                <div style={{ fontSize:40, marginBottom:16, color:"#DC2626" }}><IcoI name="trash" size={40} stroke={1.6} gap={0} /></div>
+                <div style={{ fontFamily:T.display, fontSize:18, fontWeight:700, color:C.ink, marginBottom:10 }}>
                   Suppression en cours…
                 </div>
                 <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.6 }}>
@@ -21619,8 +21692,8 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
             ) : (
               <>
                 <div style={{ textAlign:"center", marginBottom:20 }}>
-                  <div style={{ fontSize:44, marginBottom:12 }}>⚠️</div>
-                  <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:C.navy, marginBottom:10 }}>
+                  <div style={{ fontSize:44, marginBottom:12, color:"#DC2626" }}><IcoI name="alert" size={44} stroke={1.6} gap={0} /></div>
+                  <div style={{ fontFamily:T.display, fontSize:20, fontWeight:700, color:C.ink, marginBottom:10 }}>
                     Supprimer ton compte ?
                   </div>
                   <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.7 }}>
@@ -21633,13 +21706,13 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                     )}
                   </div>
                   {deleteError && (
-                    <div style={{ marginTop:14, background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 14px", fontFamily:T.body, fontSize:12, color:"#B91C1C", lineHeight:1.5 }}>
+                    <div style={{ marginTop:14, background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:12, padding:"10px 14px", fontFamily:T.body, fontSize:12, color:"#B91C1C", lineHeight:1.5 }}>
                       {deleteError}
                     </div>
                   )}
                 </div>
                 {/* Version 233 : garder ses documents avant de tout effacer */}
-                <div data-testid="delete-download-all" style={{ marginBottom:14, padding:"12px 14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6 }}>
+                <div data-testid="delete-download-all" style={{ marginBottom:14, padding:"12px 14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:12, fontFamily:T.body, fontSize:12, color:"#92400E", lineHeight:1.6 }}>
                   Avant de supprimer ton compte, télécharge tous tes documents. La loi t'oblige à garder tes factures pendant 10 ans.
                   <div style={{ marginTop:10 }}><DownloadAllDocumentsButton profile={profile} /></div>
                 </div>
@@ -21648,7 +21721,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                     onClick={() => setShowDeleteModal(false)}
                     style={{
                       flex:1, padding:"13px 16px",
-                      background:"#F3F4F6", border:"none", borderRadius:12,
+                      background:"#F3F4F6", border:"none", borderRadius:14,
                       cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:600,
                       color:C.textM, transition:"background 0.18s",
                     }}
@@ -21662,7 +21735,7 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
                     style={{
                       flex:1, padding:"13px 16px",
                       background:"linear-gradient(135deg, #EF4444 0%, #DC2626 100%)",
-                      border:"none", borderRadius:12,
+                      border:"none", borderRadius:14,
                       cursor:"pointer", fontFamily:T.body, fontSize:14, fontWeight:700,
                       color:"#fff", boxShadow:"0 4px 16px #EF444440",
                       transition:"opacity 0.18s",
@@ -21686,11 +21759,11 @@ function ProfilePage({ profile, updateProfile, setProfile, onBack, authUser, pre
           background: saved ? "linear-gradient(135deg, #2D6A4F 0%, #40916C 100%)" : `linear-gradient(135deg, ${C.navy} 0%, ${C.navyL} 100%)`,
           color:C.white, border:"none", borderRadius:50, cursor:"pointer",
           fontFamily:T.body, fontSize:14, fontWeight:700,
-          boxShadow:"0 8px 32px #1B2E4B40",
+          boxShadow:"0 8px 32px #4338CA40",
           transition:"all 0.25s",
           display:"flex", alignItems:"center", gap:10, whiteSpace:"nowrap",
         }}>
-          {saved ? <><span>✓</span> Profil enregistré !</> : <><span>💾</span> Enregistrer le profil</>}
+          {saved ? <><span>✓</span> Profil enregistré !</> : <><IcoI name="save" />Enregistrer le profil</>}
         </button>
       </div>
     </div>
@@ -21704,9 +21777,9 @@ function FreeleyRoleBox({ name, kind = "contrat" }) {
   const who = String(name || "").trim() || "votre prestataire";
   const ce = kind === "avenant" ? "cet avenant" : "ce contrat";
   return (
-    <div data-testid="freeley-role" style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:12, padding:"12px 14px", marginBottom:16, fontSize:12, color:"#475569", lineHeight:1.55, textAlign:"left" }}>
-      <div style={{ fontWeight:700, color:"#1B2E4B", marginBottom:4 }}>Qui est votre prestataire ?</div>
-      {kind === "avenant" ? "Cet avenant" : "Ce contrat"} est conclu entre vous et {who}, professionnel indépendant, qui réalise la prestation et en est seul responsable. Freeley est l'outil en ligne que {who} utilise pour préparer, signer et gérer ses contrats. Freeley n'est pas partie à {ce}, ne référence ni ne classe aucun prestataire et ne perçoit aucune commission sur {ce}. Pour toute question sur la prestation, adressez-vous directement à {who}.{" "}<a href="/?legal=clients" target="_blank" rel="noopener noreferrer" style={{ color:"#B8965A" }}>En savoir plus</a>
+    <div data-testid="freeley-role" style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:14, padding:"12px 14px", marginBottom:16, fontSize:12, color:"#475569", lineHeight:1.55, textAlign:"left" }}>
+      <div style={{ fontWeight:700, color:"#1E1B4B", marginBottom:4 }}>Qui est votre prestataire ?</div>
+      {kind === "avenant" ? "Cet avenant" : "Ce contrat"} est conclu entre vous et {who}, professionnel indépendant, qui réalise la prestation et en est seul responsable. Freeley est l'outil en ligne que {who} utilise pour préparer, signer et gérer ses contrats. Freeley n'est pas partie à {ce}, ne référence ni ne classe aucun prestataire et ne perçoit aucune commission sur {ce}. Pour toute question sur la prestation, adressez-vous directement à {who}.{" "}<a href="/?legal=clients" target="_blank" rel="noopener noreferrer" style={{ color:"#4F46E5" }}>En savoir plus</a>
     </div>
   );
 }
@@ -21722,15 +21795,15 @@ function ClientDataNotice({ name, email, kind = "contrat" }) {
   const mail = String(email || "").trim();
   const p = { margin:"8px 0 0" };
   return (
-    <details data-testid="client-data-notice" style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:12, padding:"10px 14px", marginBottom:16, fontSize:12, color:"#475569", lineHeight:1.55, textAlign:"left" }}>
-      <summary style={{ fontWeight:700, color:"#1B2E4B", cursor:"pointer" }}>Vos données personnelles</summary>
+    <details data-testid="client-data-notice" style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:14, padding:"10px 14px", marginBottom:16, fontSize:12, color:"#475569", lineHeight:1.55, textAlign:"left" }}>
+      <summary style={{ fontWeight:700, color:"#1E1B4B", cursor:"pointer" }}>Vos données personnelles</summary>
       <p style={p}>Le responsable du traitement de vos données est {who}{mail ? `, joignable à ${mail}` : ""}. Freeley les traite pour son compte, comme sous-traitant.</p>
       <p style={p}>Données concernées : votre identité, vos coordonnées, les informations de la mission et du paiement, votre signature, ainsi que l'adresse IP et le navigateur de votre appareil au moment de la signature. Elles viennent de vous ou {ofWho}.</p>
       <p style={p}>Pourquoi : établir, signer et exécuter {doc}, le facturer s'il y a lieu, et garder la preuve de la signature. Bases légales : l'exécution du contrat (article 6.1.b du RGPD) et les obligations légales du professionnel, comme la conservation des factures (article 6.1.c du RGPD).</p>
       <p style={p}>Qui les reçoit : {who}, Freeley et ses prestataires techniques (hébergement, base de données, envoi des emails, rédaction automatique). Certains sont établis hors de l'Union européenne, avec les garanties prévues par le RGPD.</p>
       <p style={p}>Durée : tant que {who} conserve ces documents dans Freeley, en général pendant la relation puis pendant les délais légaux, par exemple dix ans pour les factures.</p>
       <p style={p}>Vos droits : accès, rectification, effacement, limitation, opposition et portabilité. Exercez-les auprès {ofWho}. Vous pouvez aussi écrire à Freeley, qui lui transmettra votre demande, et adresser une réclamation à la CNIL (www.cnil.fr).</p>
-      <p style={p}>Freeley est lui-même responsable des données nécessaires à la sécurité du service et à l'outil « Retrouver mon contrat ».{" "}<a href="/?legal=confidentialite" target="_blank" rel="noopener noreferrer" style={{ color:"#B8965A" }}>Politique de confidentialité</a></p>
+      <p style={p}>Freeley est lui-même responsable des données nécessaires à la sécurité du service et à l'outil « Retrouver mon contrat ».{" "}<a href="/?legal=confidentialite" target="_blank" rel="noopener noreferrer" style={{ color:"#4F46E5" }}>Politique de confidentialité</a></p>
     </details>
   );
 }
@@ -21772,8 +21845,8 @@ function ClientSignaturePage({ contractId }) {
     <button
       onClick={handleDownloadSignedPdf}
       disabled={pdfDownloading}
-      style={{ width:"100%", padding:"13px 18px", background: pdfDownloading ? "#D1D5DB" : "#1B2E4B", border:"none", borderRadius:10, cursor: pdfDownloading ? "wait" : "pointer", fontSize:13, fontWeight:700, color:"#fff", marginBottom:12 }}
-    >{pdfDownloading ? "Création du PDF…" : "📄 Télécharger mon contrat signé (PDF)"}</button>
+      style={{ width:"100%", padding:"13px 18px", background: pdfDownloading ? "#D1D5DB" : "#4338CA", border:"none", borderRadius:12, cursor: pdfDownloading ? "wait" : "pointer", fontSize:13, fontWeight:700, color:"#fff", marginBottom:12 }}
+    >{pdfDownloading ? "Création du PDF…" : "Télécharger mon contrat signé (PDF)"}</button>
   );
 
   const handleContinueFromRetractationScreen = async () => {
@@ -21863,7 +21936,7 @@ function ClientSignaturePage({ contractId }) {
     e.preventDefault();
     const ctx = canvasRef.current.getContext("2d");
     const p = getPos(e);
-    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#4338CA"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
     setHasStrokes(true);
   };
   const endDraw = () => { drawing.current = false; };
@@ -21891,15 +21964,15 @@ function ClientSignaturePage({ contractId }) {
     setError("Votre signature n'a pas pu être enregistrée. Réessayez dans quelques instants.");
   };
 
-  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+  const wrap = { minHeight:"100vh", background:"#F7F7FB", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
 
-  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1B2E4B", fontSize:15 }}>Chargement du contrat…</div></div>;
+  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1E1B4B", fontSize:15 }}>Chargement du contrat…</div></div>;
 
   if (error) return (
     <div style={{ ...wrap, justifyContent:"center" }}>
       <div style={{ background:"#fff", borderRadius:16, padding:32, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
-        <div style={{ fontSize:38, marginBottom:12 }}>{error.includes("déjà") ? "✅" : "⚠️"}</div>
-        <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>{error}</div>
+        <div style={{ fontSize:38, marginBottom:12 }}><IcoI name={error.includes("déjà") ? "checkCircle" : "alert"} size={38} stroke={1.6} gap={0} style={{ color: error.includes("déjà") ? "#059669" : "#DC2626" }} /></div>
+        <div style={{ fontSize:15, color:"#1E1B4B", lineHeight:1.5 }}>{error}</div>
       </div>
     </div>
   );
@@ -21907,12 +21980,12 @@ function ClientSignaturePage({ contractId }) {
   if (done) return (
     <div style={{ ...wrap, justifyContent:"center" }}>
       <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
-        <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
-        <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Contrat signé !</div>
-        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. Le prestataire en est informé.</div>
+        <div style={{ fontSize:48, marginBottom:16, color:"#059669" }}><IcoI name="checkCircle" size={48} stroke={1.5} gap={0} /></div>
+        <div style={{ fontSize:20, fontWeight:700, color:"#1E1B4B", marginBottom:10 }}>Contrat signé !</div>
+        <div style={{ fontSize:14, color:"#5B5A6E", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. Le prestataire en est informé.</div>
         {contractData?.content?.form?.clientEmail && (
-          <div style={{ fontSize:13, color:"#1D4ED8", background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"10px 12px", marginTop:14, lineHeight:1.5 }}>
-            📧 Un email de confirmation avec votre contrat vient de vous être envoyé. Si vous ne le voyez pas d'ici quelques minutes, regardez dans vos spams.
+          <div style={{ fontSize:13, color:"#1D4ED8", background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:12, padding:"10px 12px", marginTop:14, lineHeight:1.5 }}>
+            <IcoI name="mail" />Un email de confirmation avec votre contrat vient de vous être envoyé. Si vous ne le voyez pas d'ici quelques minutes, regardez dans vos spams.
           </div>
         )}
         <div style={{ marginTop:16 }}>{signedPdfButton}</div>
@@ -21971,8 +22044,8 @@ function ClientSignaturePage({ contractId }) {
       setRetractError("");
       setRetractConfirming(true);
     };
-    const retractInput = { width:"100%", padding:"11px 12px", border:"1.5px solid #E8E0D0", borderRadius:10, fontSize:16, fontFamily:"'DM Sans', sans-serif", color:"#1B2E4B", background:"#fff", boxSizing:"border-box", marginBottom:12 };
-    const retractLabel = { display:"block", fontSize:12, fontWeight:600, color:"#5A6B80", marginBottom:5 };
+    const retractInput = { width:"100%", padding:"11px 12px", border:"1.5px solid #E2E2EC", borderRadius:12, fontSize:16, fontFamily:"'DM Sans', sans-serif", color:"#1E1B4B", background:"#fff", boxSizing:"border-box", marginBottom:12 };
+    const retractLabel = { display:"block", fontSize:12, fontWeight:600, color:"#5B5A6E", marginBottom:5 };
     const ackNote = retractAckFailed
       ? "L'accusé de réception n'a pas pu vous être envoyé par email : gardez une capture de cet écran comme preuve de votre demande."
       : ackEmailC ? `Un accusé de réception vous a été envoyé à ${ackEmailC}.` : "Gardez une capture de cet écran comme preuve de votre demande.";
@@ -21982,14 +22055,14 @@ function ClientSignaturePage({ contractId }) {
         <div style={{ width:"100%", maxWidth:560 }}>
           <div style={{ textAlign:"center", marginBottom:20 }}>
             <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
-            <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Votre contrat signé</div>
+            <div style={{ fontSize:13, color:"#5B5A6E", marginTop:4 }}>Votre contrat signé</div>
           </div>
 
           {retractationExercised && (
-            <div style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
+            <div style={{ background:"#fff", borderRadius:16, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)", textAlign:"center" }}>
               <div style={{ fontSize:30, marginBottom:8 }}>✓</div>
-              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Rétractation enregistrée</div>
-              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1E1B4B", marginBottom:6 }}>Rétractation enregistrée</div>
+              <div style={{ fontSize:12, color:"#5B5A6E", lineHeight:1.6 }}>
                 Votre rétractation a été reçue le {fmtLong(content.retractationExercisedAtServer || content.retractationExercisedAt)} (heure de Paris).{" "}{ackNote}
               </div>
             </div>
@@ -21997,14 +22070,14 @@ function ClientSignaturePage({ contractId }) {
 
           {/* Version 248 : demande envoyée après la fourniture du contenu numérique, transmise au prestataire qui décide */}
           {lateRequestAtC && !retractationExercised && (
-            <div data-testid="retract-late-done" style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
-              <div style={{ fontSize:30, marginBottom:8 }}>📨</div>
-              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Demande de rétractation transmise</div>
-              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6 }}>
+            <div data-testid="retract-late-done" style={{ background:"#fff", borderRadius:16, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)", textAlign:"center" }}>
+              <div style={{ fontSize:30, marginBottom:8, color:"#4338CA" }}><IcoI name="mail" size={30} stroke={1.6} gap={0} /></div>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1E1B4B", marginBottom:6 }}>Demande de rétractation transmise</div>
+              <div style={{ fontSize:12, color:"#5B5A6E", lineHeight:1.6 }}>
                 Votre demande du {fmtLong(lateRequestAtC)} (heure de Paris) a été transmise au prestataire{deliveredAtC ? <>, qui a indiqué vous avoir fourni le contenu numérique le {fmtLong(deliveredAtC)}</> : null}. Cette demande ne vaut pas résiliation du contrat. C'est lui qui vous répondra.{" "}{ackNote}
               </div>
               {content.form?.freelanceEmail && (
-                <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginTop:8 }}>Pour le contacter : {content.form.freelanceEmail}</div>
+                <div style={{ fontSize:12, color:"#5B5A6E", lineHeight:1.6, marginTop:8 }}>Pour le contacter : {content.form.freelanceEmail}</div>
               )}
             </div>
           )}
@@ -22012,12 +22085,12 @@ function ClientSignaturePage({ contractId }) {
           {/* Contenu numérique fourni, avec l'accord du client : le droit de rétractation a pris fin (version 221).
               Version 248 : le bouton reste affiché, la demande est transmise au prestataire. */}
           {rightEndedByDelivery && !retractationExercised && !lateRequestAtC && (
-            <div style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", border:"1px solid #BFDBFE" }}>
-              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:8 }}>📦 Contenu numérique fourni</div>
+            <div style={{ background:"#fff", borderRadius:16, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)", border:"1px solid #BFDBFE" }}>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1E1B4B", marginBottom:8 }}><IcoI name="package" />Contenu numérique fourni</div>
               <div style={{ fontSize:12.5, color:"#2C3E50", lineHeight:1.6 }}>
                 Le prestataire a indiqué vous avoir fourni le contenu numérique le {fmtLong(deliveredAtC)}. Comme vous l'aviez accepté le {fmtLong(waivedAtC)}, votre droit de rétractation a pris fin au début de cette fourniture (article L221-28, 13°, du Code de la consommation).
               </div>
-              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginTop:8 }}>
+              <div style={{ fontSize:12, color:"#5B5A6E", lineHeight:1.6, marginTop:8 }}>
                 {canRetract
                   ? <>Si vous n'avez rien reçu, ou si vous souhaitez quand même vous rétracter, vous pouvez envoyer une demande avec le bouton « Renoncer au contrat ici », plus bas. Elle sera transmise au prestataire, qui vous répondra.{content.form?.freelanceEmail ? ` Vous pouvez aussi le contacter : ${content.form.freelanceEmail}.` : ""}</>
                   : <>Si vous n'avez rien reçu, contactez le prestataire{content.form?.freelanceEmail ? ` : ${content.form.freelanceEmail}` : ""}.</>}
@@ -22027,17 +22100,17 @@ function ClientSignaturePage({ contractId }) {
 
           {/* Version 249 : pas de droit de rétractation (locaux du prestataire, ou réparation urgente) */}
           {retractExcludedC && (
-            <div data-testid="no-retract-notice" style={{ background:"#fff", borderRadius:14, padding:"16px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", border:"1px solid #E8E0D0" }}>
-              <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Pas de droit de rétractation</div>
+            <div data-testid="no-retract-notice" style={{ background:"#fff", borderRadius:16, padding:"16px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)", border:"1px solid #E2E2EC" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#1E1B4B", marginBottom:6 }}>Pas de droit de rétractation</div>
               <div style={{ fontSize:12.5, color:"#2C3E50", lineHeight:1.6 }}>{RETRACTATION_EXCLUDED_TEXT[retractExcludedC]}</div>
             </div>
           )}
 
           <FreeleyRoleBox name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} />
           <ClientDataNotice name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} email={content.form?.freelanceEmail} />
-          <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-            <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>CONTRAT SIGNÉ</div>
-            <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
+          <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
+            <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#4F46E5", fontWeight:700, marginBottom:12 }}>CONTRAT SIGNÉ</div>
+            <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#F7F7FB", padding:"16px", borderRadius:10, border:"1px solid #E2E2EC" }}>
               {contractText || "Contenu du contrat indisponible."}
             </div>
             {content.signatureProof && <SignatureProofBlock proof={content.signatureProof} />}
@@ -22047,7 +22120,7 @@ function ClientSignaturePage({ contractId }) {
 
           {/* Contenu numérique accepté mais pas encore fourni : le client peut encore se rétracter (version 221) */}
           {canRetract && !retractConfirming && isDigital && !!waivedAtC && !!content.retractationConfirmationSentAt && !rightEndedByDelivery && (
-            <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, background:"#fff", border:"1px solid #E8E0D0", borderRadius:10, padding:"12px 14px", marginBottom:10 }}>
+            <div style={{ fontSize:12, color:"#5B5A6E", lineHeight:1.6, background:"#fff", border:"1px solid #E2E2EC", borderRadius:12, padding:"12px 14px", marginBottom:10 }}>
               Vous avez accepté, le {fmtLong(waivedAtC)}, que le contenu numérique vous soit fourni avant la fin du délai de rétractation. Votre droit de rétractation prendra fin dès le début de cette fourniture. Tant que le contenu ne vous a pas été fourni, vous pouvez encore vous rétracter.
             </div>
           )}
@@ -22055,20 +22128,20 @@ function ClientSignaturePage({ contractId }) {
           {canRetract && !retractConfirming && (
             <button
               onClick={openRetractDeclaration}
-              style={{ width:"100%", padding:"13px 18px", background:"#fff", border:"1.5px solid #DC2626", borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:700, color:"#DC2626" }}
+              style={{ width:"100%", padding:"13px 18px", background:"#fff", border:"1.5px solid #DC2626", borderRadius:12, cursor:"pointer", fontSize:13, fontWeight:700, color:"#DC2626" }}
             >Renoncer au contrat ici</button>
           )}
 
           {/* Version 248 : déclaration de rétractation (art. L221-21 et D221-5 C. conso), à la place du bouton. Nom et email
               déjà remplis et modifiables, contrat identifié, puis « Confirmer la rétractation ». */}
           {canRetract && retractConfirming && (
-            <div data-testid="retract-declaration" style={{ background:"#fff", borderRadius:14, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)", border:"1.5px solid #FCA5A5" }}>
-              <div style={{ fontSize:13.5, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Déclaration de rétractation</div>
-              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginBottom:14 }}>Vérifiez ces informations et corrigez-les si besoin, puis confirmez.</div>
+            <div data-testid="retract-declaration" style={{ background:"#fff", borderRadius:16, padding:"20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)", border:"1.5px solid #FCA5A5" }}>
+              <div style={{ fontSize:13.5, fontWeight:700, color:"#1E1B4B", marginBottom:6 }}>Déclaration de rétractation</div>
+              <div style={{ fontSize:12, color:"#5B5A6E", lineHeight:1.6, marginBottom:14 }}>Vérifiez ces informations et corrigez-les si besoin, puis confirmez.</div>
               <label htmlFor="retract-name" style={retractLabel}>Votre nom</label>
               <input id="retract-name" value={retractName} onChange={e => setRetractName(e.target.value)} maxLength={120} autoComplete="name" style={retractInput} />
               <div style={retractLabel}>Contrat concerné</div>
-              <div data-testid="retract-contract-id" style={{ fontSize:12.5, color:"#2C3E50", lineHeight:1.6, background:"#FAF8F3", border:"1px solid #E8E0D0", borderRadius:10, padding:"10px 12px", marginBottom:12 }}>
+              <div data-testid="retract-contract-id" style={{ fontSize:12.5, color:"#2C3E50", lineHeight:1.6, background:"#F7F7FB", border:"1px solid #E2E2EC", borderRadius:12, padding:"10px 12px", marginBottom:12 }}>
                 « {retractMission} »{retractNum ? <> · n° {retractNum}</> : null}<br />
                 {retractSignedAt
                   ? <>Signé le {new Date(retractSignedAt).toLocaleDateString("fr-FR", { day:"numeric", month:"long", year:"numeric", timeZone:"Europe/Paris" })} avec {retractFreelance}</>
@@ -22080,20 +22153,20 @@ function ClientSignaturePage({ contractId }) {
               {retractEmail.trim() && !retractEmailOk && (
                 <div style={{ fontSize:11.5, color:"#B91C1C", marginTop:-6, marginBottom:10 }}>Cette adresse email ne semble pas valide.</div>
               )}
-              <div style={{ fontSize:12, color:"#5A6B80", lineHeight:1.6, marginBottom:14 }}>
+              <div style={{ fontSize:12, color:"#5B5A6E", lineHeight:1.6, marginBottom:14 }}>
                 {rightEndedByDelivery
                   ? "Le prestataire a indiqué vous avoir déjà fourni le contenu numérique : votre demande lui sera transmise, et c'est lui qui vous répondra. Vous recevrez un accusé de réception par email, avec la date et l'heure de votre demande."
                   : "En confirmant, vous informez le prestataire que vous exercez votre droit de rétractation pour ce contrat. Vous recevrez un accusé de réception par email, avec la date et l'heure de votre demande."}
               </div>
               {retractError && (
-                <div role="alert" style={{ fontSize:12, color:"#991B1B", background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:8, padding:"10px 12px", marginBottom:12, lineHeight:1.5 }}>{retractError}</div>
+                <div role="alert" style={{ fontSize:12, color:"#991B1B", background:"#FEF2F2", border:"1px solid #FCA5A5", borderRadius:10, padding:"10px 12px", marginBottom:12, lineHeight:1.5 }}>{retractError}</div>
               )}
               <div style={{ display:"flex", gap:10 }}>
-                <button onClick={() => { setRetractConfirming(false); setRetractError(""); }} style={{ flex:"0 0 auto", padding:"11px 16px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:12.5, color:"#5A6B80", fontWeight:500 }}>Annuler</button>
+                <button onClick={() => { setRetractConfirming(false); setRetractError(""); }} style={{ flex:"0 0 auto", padding:"11px 16px", background:"#F7F7FB", border:"1.5px solid #E2E2EC", borderRadius:12, cursor:"pointer", fontSize:12.5, color:"#5B5A6E", fontWeight:500 }}>Annuler</button>
                 <button
                   onClick={handleConfirmRetractationExercise}
                   disabled={!retractCanSend}
-                  style={{ flex:1, padding:"11px 16px", background: retractCanSend ? "#DC2626" : "#D1D5DB", border:"none", borderRadius:10, cursor: retractCanSend ? "pointer" : "not-allowed", fontSize:13, fontWeight:700, color:"#fff" }}
+                  style={{ flex:1, padding:"11px 16px", background: retractCanSend ? "#DC2626" : "#D1D5DB", border:"none", borderRadius:12, cursor: retractCanSend ? "pointer" : "not-allowed", fontSize:13, fontWeight:700, color:"#fff" }}
                 >{retractSubmitting ? "Envoi…" : "Confirmer la rétractation"}</button>
               </div>
             </div>
@@ -22110,29 +22183,29 @@ function ClientSignaturePage({ contractId }) {
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
 
-          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Avant de signer le contrat</div>
+          <div style={{ fontSize:13, color:"#5B5A6E", marginTop:4 }}>Avant de signer le contrat</div>
         </div>
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:12.5, color:"#5A6B80", lineHeight:1.6, marginBottom:16 }}>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
+          <div style={{ fontSize:12.5, color:"#5B5A6E", lineHeight:1.6, marginBottom:16 }}>
             {/* Version 221 : pour un contenu numérique, la conséquence de la case est dite dès cette phrase */}
             {content.form?.contenuNumeriquePret
               ? "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Signer le contrat ne vous fait pas perdre ce droit. En cochant la case ci-dessous, vous acceptez que le contenu numérique vous soit fourni avant la fin de ce délai : vous perdrez alors votre droit de rétractation dès le début de cette fourniture."
               : "En tant que particulier, vous disposez d'un délai de 14 jours pour vous rétracter, sans avoir à vous justifier. Vous pouvez signer le contrat dès maintenant : ce droit reste valable. La case ci-dessous sert seulement à indiquer si la prestation peut commencer avant la fin de ce délai."}
           </div>
           <div style={RETRACTATION_BOX_STYLE}>{buildRetractationNotice(resolveLegalStatus(content.form || {}, content.contract))}{"\n\n"}{buildRetractationForm(resolveLegalStatus(content.form || {}, content.contract))}</div>
-          <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, cursor:"pointer" }}>
+          <label style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"14px", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:12, cursor:"pointer" }}>
             <input type="checkbox" checked={retractationChecked} onChange={e => setRetractationChecked(e.target.checked)} style={{ marginTop:3, width:16, height:16, flexShrink:0 }} />
             <span style={{ fontSize:12, color:"#92400E", lineHeight:1.55 }}>{getRetractationWaiverText(!!content.form?.contenuNumeriquePret, content.missionTitle || content.form?.missionTitle)}</span>
           </label>
           <button
             onClick={handleContinueFromRetractationScreen}
             disabled={retractationWaiving}
-            style={{ width:"100%", marginTop:16, padding:"12px 18px", background: !retractationWaiving ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: !retractationWaiving ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+            style={{ width:"100%", marginTop:16, padding:"12px 18px", background: !retractationWaiving ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:12, cursor: !retractationWaiving ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
           >{retractationWaiving ? "Enregistrement…" : (retractationChecked ? "Continuer et démarrer immédiatement" : "Continuer vers la signature")}</button>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:12, lineHeight:1.5, textAlign:"center" }}>
             Que vous cochiez ou non, vous pouvez ensuite signer le contrat. Si vous cochez, {content.form?.contenuNumeriquePret ? "votre accord est daté et conservé" : "votre demande est datée et conservée"}.
           </div>
-          <button onClick={() => { setContractReadForGate(false); window.scrollTo(0, 0); }} style={{ display:"block", margin:"10px auto 0", background:"none", border:"none", color:"#1B2E4B", fontSize:12, textDecoration:"underline", cursor:"pointer" }}>← Relire le contrat</button>
+          <button onClick={() => { setContractReadForGate(false); window.scrollTo(0, 0); }} style={{ display:"block", margin:"10px auto 0", background:"none", border:"none", color:"#1E1B4B", fontSize:12, textDecoration:"underline", cursor:"pointer" }}>← Relire le contrat</button>
         </div>
         <ClientLegalNote who="prestataire" />
       </div>
@@ -22144,45 +22217,45 @@ function ClientSignaturePage({ contractId }) {
       <div style={{ width:"100%", maxWidth:560 }}>
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
-          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique du contrat</div>
+          <div style={{ fontSize:13, color:"#5B5A6E", marginTop:4 }}>Signature électronique du contrat</div>
         </div>
         <FreeleyRoleBox name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} />
         <ClientDataNotice name={contractFreelanceName(resolveLegalStatus(content.form || {}, content.contract))} email={content.form?.freelanceEmail} />
 
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
           {textChangedNotice && (
-            <div data-testid="text-changed-notice" style={{ fontSize:12.5, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"10px 12px", marginBottom:12, lineHeight:1.5 }}>
+            <div data-testid="text-changed-notice" style={{ fontSize:12.5, color:"#92400E", background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:12, padding:"10px 12px", marginBottom:12, lineHeight:1.5 }}>
               Le prestataire vient de modifier le contrat. Voici la nouvelle version : relisez-la, puis signez de nouveau.
             </div>
           )}
-          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>CONTRAT À SIGNER</div>
-          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
+          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#4F46E5", fontWeight:700, marginBottom:12 }}>CONTRAT À SIGNER</div>
+          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#F7F7FB", padding:"16px", borderRadius:10, border:"1px solid #E2E2EC" }}>
             {contractText || "Contenu du contrat indisponible."}
           </div>
         </div>
 
         {retractationPending ? (
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
-          <div style={{ fontSize:12.5, color:"#5A6B80", marginBottom:14, lineHeight:1.5 }}>Lisez bien le contrat ci-dessus. L'étape suivante vous informe de votre droit de rétractation, avant la signature.</div>
-          <button onClick={() => { setContractReadForGate(true); window.scrollTo(0, 0); }} style={{ width:"100%", padding:"13px 18px", background:"#1B2E4B", border:"none", borderRadius:10, cursor:"pointer", fontSize:14, fontWeight:700, color:"#fff" }}>J'ai lu le contrat, continuer</button>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", boxShadow:"0 4px 24px rgba(30,27,75,0.08)", textAlign:"center" }}>
+          <div style={{ fontSize:12.5, color:"#5B5A6E", marginBottom:14, lineHeight:1.5 }}>Lisez bien le contrat ci-dessus. L'étape suivante vous informe de votre droit de rétractation, avant la signature.</div>
+          <button onClick={() => { setContractReadForGate(true); window.scrollTo(0, 0); }} style={{ width:"100%", padding:"13px 18px", background:"#4338CA", border:"none", borderRadius:12, cursor:"pointer", fontSize:14, fontWeight:700, color:"#fff" }}>J'ai lu le contrat, continuer</button>
         </div>
         ) : (
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Votre signature</div>
-          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de ce contrat.</div>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1E1B4B", marginBottom:6 }}>Votre signature</div>
+          <div style={{ fontSize:12, color:"#5B5A6E", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de ce contrat.</div>
           <canvas
             ref={canvasRef}
             width={520} height={180}
             onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
             onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
-            style={{ width:"100%", height:180, border:"2px dashed #C9A961", borderRadius:10, background:"#FFFDF9", touchAction:"none", cursor:"crosshair" }}
+            style={{ width:"100%", height:180, border:"2px dashed #6366F1", borderRadius:12, background:"#FFFFFF", touchAction:"none", cursor:"crosshair" }}
           />
           <div style={{ display:"flex", gap:10, marginTop:14 }}>
-            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:13, color:"#5A6B80", fontWeight:500 }}>Effacer</button>
+            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F7F7FB", border:"1.5px solid #E2E2EC", borderRadius:12, cursor:"pointer", fontSize:13, color:"#5B5A6E", fontWeight:500 }}>Effacer</button>
             <button
               onClick={handleSign}
               disabled={!hasStrokes || signing}
-              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:12, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
             >{signing ? "Enregistrement…" : (isParticulier ? "✓ Signer le contrat avec obligation de paiement" : "✓ Signer le contrat")}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
@@ -22202,17 +22275,17 @@ function ClientSignaturePage({ contractId }) {
 // Page affichée au client après un paiement par carte (retour de Stripe) : ?paiement=succes ou ?paiement=annule
 function PaymentReturnPage({ status }) {
   const ok = status === "succes";
-  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+  const wrap = { minHeight:"100vh", background:"#F7F7FB", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
   return (
     <div style={wrap}>
       <div style={{ width:"100%", maxWidth:440 }}>
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
         </div>
-        <div style={{ background:"#fff", borderRadius:14, padding:"26px 22px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)", textAlign:"center" }}>
-          <div style={{ fontSize:34, marginBottom:10 }}>{ok ? "✅" : "↩️"}</div>
-          <div style={{ fontSize:17, fontWeight:700, color:"#1B2E4B", marginBottom:8 }}>{ok ? "Paiement effectué" : "Paiement annulé"}</div>
-          <div style={{ fontSize:13.5, color:"#5A6B80", lineHeight:1.6 }}>
+        <div style={{ background:"#fff", borderRadius:16, padding:"26px 22px", boxShadow:"0 4px 24px rgba(30,27,75,0.08)", textAlign:"center" }}>
+          <div style={{ fontSize:34, marginBottom:10 }}>{ok ? <IcoI name="checkCircle" gap={0} /> : "↩️"}</div>
+          <div style={{ fontSize:17, fontWeight:700, color:"#1E1B4B", marginBottom:8 }}>{ok ? "Paiement effectué" : "Paiement annulé"}</div>
+          <div style={{ fontSize:13.5, color:"#5B5A6E", lineHeight:1.6 }}>
             {ok
               ? "Merci. Votre paiement par carte a bien été effectué. Vous pouvez fermer cette page."
               : "Aucun montant n'a été débité. Pour payer plus tard, utilisez à nouveau le lien de paiement envoyé par votre prestataire."}
@@ -22245,26 +22318,26 @@ function FindMyContractPage() {
     setSubmitted(true);
   };
 
-  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+  const wrap = { minHeight:"100vh", background:"#F7F7FB", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
 
   return (
     <div style={wrap}>
       <div style={{ width:"100%", maxWidth:440 }}>
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
-          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Retrouver mon contrat</div>
+          <div style={{ fontSize:13, color:"#5B5A6E", marginTop:4 }}>Retrouver mon contrat</div>
         </div>
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
           {submitted ? (
             <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:30, marginBottom:10 }}>✉️</div>
-              <div style={{ fontSize:13, color:"#1B2E4B", lineHeight:1.6 }}>
+              <div style={{ fontSize:30, marginBottom:10 }}><IcoI name="mail" size={30} stroke={1.8} gap={0} /></div>
+              <div style={{ fontSize:13, color:"#1E1B4B", lineHeight:1.6 }}>
                 Si un contrat actif correspond à cette adresse, un email vient de vous être envoyé avec le lien pour y accéder.
               </div>
             </div>
           ) : (
             <>
-              <div style={{ fontSize:12.5, color:"#5A6B80", marginBottom:14, lineHeight:1.5 }}>
+              <div style={{ fontSize:12.5, color:"#5B5A6E", marginBottom:14, lineHeight:1.5 }}>
                 Entrez l'adresse email que le freelance a utilisée pour vous envoyer votre contrat. Si un contrat existe, vous recevrez un lien par email.
               </div>
               <input
@@ -22272,12 +22345,12 @@ function FindMyContractPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="votre@email.com"
-                style={{ width:"100%", padding:"12px 14px", border:"1.5px solid #E8E0D0", borderRadius:10, fontSize:14, fontFamily:"'DM Sans', sans-serif", boxSizing:"border-box", marginBottom:14 }}
+                style={{ width:"100%", padding:"12px 14px", border:"1.5px solid #E2E2EC", borderRadius:12, fontSize:14, fontFamily:"'DM Sans', sans-serif", boxSizing:"border-box", marginBottom:14 }}
               />
               <button
                 onClick={handleSubmit}
                 disabled={!email.trim() || submitting}
-                style={{ width:"100%", padding:"12px 18px", background: (email.trim() && !submitting) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (email.trim() && !submitting) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+                style={{ width:"100%", padding:"12px 18px", background: (email.trim() && !submitting) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:12, cursor: (email.trim() && !submitting) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
               >{submitting ? "Envoi…" : "Retrouver mon contrat"}</button>
             </>
           )}
@@ -22325,7 +22398,7 @@ function NdaSignaturePage({ ndaId }) {
     e.preventDefault();
     const ctx = canvasRef.current.getContext("2d");
     const p = getPos(e);
-    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#4338CA"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
     setHasStrokes(true);
   };
   const endDraw = () => { drawing.current = false; };
@@ -22341,7 +22414,7 @@ function NdaSignaturePage({ ndaId }) {
     else setError("Votre signature n'a pas pu être enregistrée. Réessayez dans quelques instants.");
   };
 
-  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+  const wrap = { minHeight:"100vh", background:"#F7F7FB", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
 
   // Version 223 : la Partie B garde son exemplaire signé (PDF), comme le client d'un contrat
   const handleDownloadCopy = async () => {
@@ -22352,18 +22425,18 @@ function NdaSignaturePage({ ndaId }) {
   };
   const copyButton = (
     <div style={{ marginTop:18 }}>
-      <button onClick={handleDownloadCopy} disabled={copyBusy} style={{ width:"100%", padding:"12px 18px", background:"#1B2E4B", color:"#fff", border:"none", borderRadius:10, cursor: copyBusy ? "default" : "pointer", fontSize:13.5, fontWeight:700 }}>{copyBusy ? "Préparation du PDF…" : "📄 Télécharger mon exemplaire signé (PDF)"}</button>
+      <button onClick={handleDownloadCopy} disabled={copyBusy} style={{ width:"100%", padding:"12px 18px", background:"#4338CA", color:"#fff", border:"none", borderRadius:12, cursor: copyBusy ? "default" : "pointer", fontSize:13.5, fontWeight:700 }}>{copyBusy ? "Préparation du PDF…" : "Télécharger mon exemplaire signé (PDF)"}</button>
       {copyError && <div style={{ fontSize:12, color:"#B91C1C", marginTop:8, lineHeight:1.5 }}>{copyError}</div>}
     </div>
   );
 
-  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1B2E4B", fontSize:15 }}>Chargement du NDA…</div></div>;
+  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1E1B4B", fontSize:15 }}>Chargement du NDA…</div></div>;
 
   if (alreadySigned) return (
     <div style={{ ...wrap, justifyContent:"center" }}>
       <div style={{ background:"#fff", borderRadius:16, padding:32, maxWidth:420, width:"100%", textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
-        <div style={{ fontSize:38, marginBottom:12 }}>✅</div>
-        <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>Ce NDA a déjà été signé. Merci !</div>
+        <div style={{ fontSize:38, marginBottom:12, color:"#059669" }}><IcoI name="checkCircle" size={38} stroke={1.6} gap={0} /></div>
+        <div style={{ fontSize:15, color:"#1E1B4B", lineHeight:1.5 }}>Ce NDA a déjà été signé. Merci !</div>
         {copyButton}
       </div>
       <ClientLegalNote who="partie" />
@@ -22373,8 +22446,8 @@ function NdaSignaturePage({ ndaId }) {
   if (error) return (
     <div style={{ ...wrap, justifyContent:"center" }}>
       <div style={{ background:"#fff", borderRadius:16, padding:32, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
-        <div style={{ fontSize:38, marginBottom:12 }}>{error.includes("déjà") ? "✅" : "⚠️"}</div>
-        <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>{error}</div>
+        <div style={{ fontSize:38, marginBottom:12 }}><IcoI name={error.includes("déjà") ? "checkCircle" : "alert"} size={38} stroke={1.6} gap={0} style={{ color: error.includes("déjà") ? "#059669" : "#DC2626" }} /></div>
+        <div style={{ fontSize:15, color:"#1E1B4B", lineHeight:1.5 }}>{error}</div>
       </div>
     </div>
   );
@@ -22382,9 +22455,9 @@ function NdaSignaturePage({ ndaId }) {
   if (done) return (
     <div style={{ ...wrap, justifyContent:"center" }}>
       <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
-        <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
-        <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>NDA signé !</div>
-        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
+        <div style={{ fontSize:48, marginBottom:16, color:"#059669" }}><IcoI name="checkCircle" size={48} stroke={1.5} gap={0} /></div>
+        <div style={{ fontSize:20, fontWeight:700, color:"#1E1B4B", marginBottom:10 }}>NDA signé !</div>
+        <div style={{ fontSize:14, color:"#5B5A6E", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
         {copyButton}
       </div>
       <ClientLegalNote who="partie" />
@@ -22398,33 +22471,33 @@ function NdaSignaturePage({ ndaId }) {
       <div style={{ width:"100%", maxWidth:560 }}>
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
-          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique — Accord de confidentialité (NDA)</div>
+          <div style={{ fontSize:13, color:"#5B5A6E", marginTop:4 }}>Signature électronique — Accord de confidentialité (NDA)</div>
         </div>
         <ClientDataNotice kind="accord" />
 
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>NDA À SIGNER</div>
-          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
+          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#4F46E5", fontWeight:700, marginBottom:12 }}>NDA À SIGNER</div>
+          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#F7F7FB", padding:"16px", borderRadius:10, border:"1px solid #E2E2EC" }}>
             {cleanNdaText(ndaText) || "Contenu du NDA indisponible."}
           </div>
         </div>
 
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Votre signature</div>
-          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de ce NDA.</div>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1E1B4B", marginBottom:6 }}>Votre signature</div>
+          <div style={{ fontSize:12, color:"#5B5A6E", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de ce NDA.</div>
           <canvas
             ref={canvasRef}
             width={520} height={180}
             onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
             onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
-            style={{ width:"100%", height:180, border:"2px dashed #C9A961", borderRadius:10, background:"#FFFDF9", touchAction:"none", cursor:"crosshair" }}
+            style={{ width:"100%", height:180, border:"2px dashed #6366F1", borderRadius:12, background:"#FFFFFF", touchAction:"none", cursor:"crosshair" }}
           />
           <div style={{ display:"flex", gap:10, marginTop:14 }}>
-            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:13, color:"#5A6B80", fontWeight:500 }}>Effacer</button>
+            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F7F7FB", border:"1.5px solid #E2E2EC", borderRadius:12, cursor:"pointer", fontSize:13, color:"#5B5A6E", fontWeight:500 }}>Effacer</button>
             <button
               onClick={handleSign}
               disabled={!hasStrokes || signing}
-              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:12, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
             >{signing ? "Enregistrement…" : "✓ Signer le NDA"}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
@@ -22479,7 +22552,7 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
     e.preventDefault();
     const ctx = canvasRef.current.getContext("2d");
     const p = getPos(e);
-    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#1B2E4B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
+    ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#4338CA"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke();
     setHasStrokes(true);
   };
   const endDraw = () => { drawing.current = false; };
@@ -22495,15 +22568,15 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
     else setError("Votre signature n'a pas pu être enregistrée. Réessayez dans quelques instants.");
   };
 
-  const wrap = { minHeight:"100vh", background:"#F5F1E8", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
+  const wrap = { minHeight:"100vh", background:"#F7F7FB", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 16px", fontFamily:"'DM Sans', sans-serif" };
 
-  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1B2E4B", fontSize:15 }}>Chargement de l'avenant…</div></div>;
+  if (loading) return <div style={{ ...wrap, justifyContent:"center" }}><div style={{ color:"#1E1B4B", fontSize:15 }}>Chargement de l'avenant…</div></div>;
 
   if (error) return (
     <div style={{ ...wrap, justifyContent:"center" }}>
       <div style={{ background:"#fff", borderRadius:16, padding:32, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
-        <div style={{ fontSize:38, marginBottom:12 }}>{error.includes("déjà") ? "✅" : "⚠️"}</div>
-        <div style={{ fontSize:15, color:"#1B2E4B", lineHeight:1.5 }}>{error}</div>
+        <div style={{ fontSize:38, marginBottom:12 }}><IcoI name={error.includes("déjà") ? "checkCircle" : "alert"} size={38} stroke={1.6} gap={0} style={{ color: error.includes("déjà") ? "#059669" : "#DC2626" }} /></div>
+        <div style={{ fontSize:15, color:"#1E1B4B", lineHeight:1.5 }}>{error}</div>
       </div>
     </div>
   );
@@ -22511,9 +22584,9 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
   if (done) return (
     <div style={{ ...wrap, justifyContent:"center" }}>
       <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:420, textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.1)" }}>
-        <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
-        <div style={{ fontSize:20, fontWeight:700, color:"#1B2E4B", marginBottom:10 }}>Avenant signé !</div>
-        <div style={{ fontSize:14, color:"#5A6B80", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
+        <div style={{ fontSize:48, marginBottom:16, color:"#059669" }}><IcoI name="checkCircle" size={48} stroke={1.5} gap={0} /></div>
+        <div style={{ fontSize:20, fontWeight:700, color:"#1E1B4B", marginBottom:10 }}>Avenant signé !</div>
+        <div style={{ fontSize:14, color:"#5B5A6E", lineHeight:1.6 }}>Merci. Votre signature a bien été enregistrée. L'autre partie en est informée.</div>
       </div>
       <ClientLegalNote who="prestataire" />
     </div>
@@ -22526,41 +22599,41 @@ function AvenantSignaturePage({ contractId, avenantNum }) {
       <div style={{ width:"100%", maxWidth:560 }}>
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:22, fontWeight:700, color:"#1B2E4B", fontFamily:"'Playfair Display', serif" }}>Freeley</div>
-          <div style={{ fontSize:13, color:"#5A6B80", marginTop:4 }}>Signature électronique — Avenant n°{avenantNum}</div>
+          <div style={{ fontSize:13, color:"#5B5A6E", marginTop:4 }}>Signature électronique — Avenant n°{avenantNum}</div>
         </div>
         <FreeleyRoleBox kind="avenant" name={contractInfo?.form ? contractFreelanceName(resolveLegalStatus(contractInfo.form, contractInfo.contract)) : ""} />
         <ClientDataNotice kind="avenant" name={contractInfo?.form ? contractFreelanceName(resolveLegalStatus(contractInfo.form, contractInfo.contract)) : ""} email={contractInfo?.form?.freelanceEmail} />
 
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:12 }}>AVENANT À SIGNER</div>
-          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#FAF8F3", padding:"16px", borderRadius:8, border:"1px solid #E8E0D0" }}>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
+          <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#4F46E5", fontWeight:700, marginBottom:12 }}>AVENANT À SIGNER</div>
+          <div style={{ maxHeight:340, overflowY:"auto", fontSize:12.5, color:"#2C3E50", lineHeight:1.7, whiteSpace:"pre-wrap", background:"#F7F7FB", padding:"16px", borderRadius:10, border:"1px solid #E2E2EC" }}>
             {avenantText || "Contenu de l'avenant indisponible."}
           </div>
         </div>
 
         {avenantData?.freelanceSignature && (
-          <div style={{ background:"#fff", borderRadius:14, padding:"18px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-            <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#B8965A", fontWeight:700, marginBottom:10 }}>SIGNATURE DU PRESTATAIRE</div>
+          <div style={{ background:"#fff", borderRadius:16, padding:"18px 20px", marginBottom:16, boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
+            <div style={{ fontSize:11, letterSpacing:"0.1em", color:"#4F46E5", fontWeight:700, marginBottom:10 }}>SIGNATURE DU PRESTATAIRE</div>
             <img src={avenantData.freelanceSignature} alt="Signature prestataire" style={{ maxWidth:200, height:56, objectFit:"contain" }} />
           </div>
         )}
 
-        <div style={{ background:"#fff", borderRadius:14, padding:"22px 20px", boxShadow:"0 4px 24px rgba(27,46,75,0.08)" }}>
-          <div style={{ fontSize:13, fontWeight:700, color:"#1B2E4B", marginBottom:6 }}>Votre signature</div>
-          <div style={{ fontSize:12, color:"#5A6B80", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de cet avenant.</div>
+        <div style={{ background:"#fff", borderRadius:16, padding:"22px 20px", boxShadow:"0 4px 24px rgba(30,27,75,0.08)" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1E1B4B", marginBottom:6 }}>Votre signature</div>
+          <div style={{ fontSize:12, color:"#5B5A6E", marginBottom:12, lineHeight:1.5 }}>Signez ci-dessous avec votre doigt (ou votre souris) pour accepter les termes de cet avenant.</div>
           <canvas
             ref={canvasRef}
             width={520} height={180}
             onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
             onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
-            style={{ width:"100%", height:180, border:"2px dashed #C9A961", borderRadius:10, background:"#FFFDF9", touchAction:"none", cursor:"crosshair" }}
+            style={{ width:"100%", height:180, border:"2px dashed #6366F1", borderRadius:12, background:"#FFFFFF", touchAction:"none", cursor:"crosshair" }}
           />
           <div style={{ display:"flex", gap:10, marginTop:14 }}>
-            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F5F1E8", border:"1.5px solid #E8E0D0", borderRadius:10, cursor:"pointer", fontSize:13, color:"#5A6B80", fontWeight:500 }}>Effacer</button>
+            <button onClick={clearCanvas} style={{ flex:"0 0 auto", padding:"12px 18px", background:"#F7F7FB", border:"1.5px solid #E2E2EC", borderRadius:12, cursor:"pointer", fontSize:13, color:"#5B5A6E", fontWeight:500 }}>Effacer</button>
             <button
               onClick={handleSign}
               disabled={!hasStrokes || signing}
-              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:10, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
+              style={{ flex:1, padding:"12px 18px", background: (hasStrokes && !signing) ? "linear-gradient(135deg, #15803D 0%, #22C55E 100%)" : "#D1D5DB", border:"none", borderRadius:12, cursor: (hasStrokes && !signing) ? "pointer" : "not-allowed", fontSize:14, fontWeight:700, color:"#fff" }}
             >{signing ? "Enregistrement…" : (avWithPayment ? "✓ Signer l'avenant avec obligation de paiement" : "✓ Signer l'avenant")}</button>
           </div>
           <div style={{ fontSize:10.5, color:"#9CA3AF", marginTop:14, lineHeight:1.5, textAlign:"center" }}>
@@ -22636,11 +22709,11 @@ function LegalPageLayout({ title, children, onBack }) {
   useEffect(() => { try { window.scrollTo(0, 0); } catch (e) {} }, []);
   return (
     <div style={{ minHeight:"100vh", background:C.cream, padding:"40px 20px" }}>
-      <div style={{ maxWidth:720, margin:"0 auto", background:C.white, borderRadius:16, padding:"40px 32px", boxShadow:"0 2px 20px #1B2E4B10" }}>
+      <div style={{ maxWidth:720, margin:"0 auto", background:C.white, borderRadius:16, padding:"40px 32px", boxShadow:"0 2px 20px #4338CA10" }}>
         {/* Version 243 : dans l'application, le lien ramène à l'écran principal (avant : la page se rechargeait et
             rouvrait les conditions d'utilisation) */}
         <a href="/" onClick={onBack ? (e) => { e.preventDefault(); onBack(); } : undefined} style={{ fontFamily:T.body, fontSize:13, color:C.gold, textDecoration:"none", fontWeight:700 }}>← Retour à Freeley</a>
-        <h1 style={{ fontFamily:T.display, fontSize:28, color:C.navy, margin:"20px 0 24px" }}>{title}</h1>
+        <h1 style={{ fontFamily:T.display, fontSize:28, color:C.ink, margin:"20px 0 24px" }}>{title}</h1>
         <div style={{ fontFamily:T.body, fontSize:14, color:C.textM, lineHeight:1.75 }}>
           {children}
         </div>
@@ -22662,42 +22735,42 @@ function LandingPage({ onStart }) {
     meta.setAttribute("content", "Freeley génère tes contrats freelance, factures et NDA. Signature électronique, vérification d'entreprise, facturation électronique. Gratuit.");
   }, []);
   const features = [
-    { icon: "📝", title: "Contrats en 2 minutes", text: "Décris ta mission, ton contrat complet et clair est prêt aussitôt." },
-    { icon: "✍️", title: "Signature électronique", text: "Toi et ton client signez directement depuis votre téléphone, sans papier." },
-    { icon: "💳", title: "Paiements sécurisés", text: "Lien de paiement automatique, suivi des acomptes et des soldes." },
-    { icon: "🛡️", title: "Vérification client", text: "Vérifie en 30 secondes qu'une entreprise existe vraiment, avant de signer." },
-    { icon: "🧾", title: "Facturation électronique", text: "Déjà prête pour l'obligation de 2027, incluse gratuitement." },
+    { icon: "invoice", title: "Contrats en 2 minutes", text: "Décris ta mission, ton contrat complet et clair est prêt aussitôt." },
+    { icon: "pen", title: "Signature électronique", text: "Toi et ton client signez directement depuis votre téléphone, sans papier." },
+    { icon: "card", title: "Paiements sécurisés", text: "Lien de paiement automatique, suivi des acomptes et des soldes." },
+    { icon: "shield", title: "Vérification client", text: "Vérifie en 30 secondes qu'une entreprise existe vraiment, avant de signer." },
+    { icon: "receipt", title: "Facturation électronique", text: "Déjà prête pour l'obligation de 2027, incluse gratuitement." },
   ];
   return (
     <div style={{ minHeight:"100vh", background:C.cream }}>
       <div style={{ maxWidth:640, margin:"0 auto", padding:"48px 24px 40px" }}>
         <div style={{ textAlign:"center", marginBottom:36 }}>
-          <div style={{ fontFamily:T.display, fontSize:34, color:C.navy, fontWeight:700, marginBottom:10 }}>Freeley</div>
+          <div style={{ fontFamily:LOGO_FONT, fontSize:34, color:LOGO_NAVY, fontWeight:700, marginBottom:10 }}>Freeley</div>
           <div style={{ fontFamily:T.body, fontSize:16, color:C.textM, lineHeight:1.5 }}>
             L'outil gratuit qui gère tes contrats freelance, tes signatures, et tes factures — du début à la fin.
           </div>
         </div>
 
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, padding:"11px 16px", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, marginBottom:24, fontFamily:T.body, fontSize:13, color:"#166534", lineHeight:1.5, textAlign:"center" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, padding:"11px 16px", background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:12, marginBottom:24, fontFamily:T.body, fontSize:13, color:"#166534", lineHeight:1.5, textAlign:"center" }}>
           <span style={{ fontSize:16 }}>✓</span>
           Les clauses de protection, ainsi que les clauses relatives à la propriété intellectuelle et aux garanties, ont fait l'objet d'une revue juridique par une juriste en droit des affaires et du numérique.
         </div>
 
         <button onClick={onStart} style={{
           display:"block", width:"100%", padding:"16px", marginBottom:36,
-          background:C.navy, color:C.white, border:"none", borderRadius:12,
+          background:C.navy, color:C.white, border:"none", borderRadius:14,
           fontFamily:T.body, fontSize:16, fontWeight:700, cursor:"pointer",
         }}>Commencer gratuitement</button>
 
         <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
           {features.map((f, i) => (
             <div key={i} style={{
-              background:C.white, border:`1px solid ${C.border}`, borderRadius:14,
+              background:C.white, border:`1px solid ${C.border}`, borderRadius:16,
               padding:"18px 20px", display:"flex", gap:14, alignItems:"flex-start",
             }}>
-              <div style={{ fontSize:26 }}>{f.icon}</div>
+              <div style={{ width:44, height:44, borderRadius:12, background:"#EEF0FF", color:"#4338CA", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><Ico name={f.icon} size={22} /></div>
               <div>
-                <div style={{ fontFamily:T.body, fontSize:14.5, fontWeight:700, color:C.navy, marginBottom:3 }}>{f.title}</div>
+                <div style={{ fontFamily:T.body, fontSize:14.5, fontWeight:700, color:C.ink, marginBottom:3 }}>{f.title}</div>
                 <div style={{ fontFamily:T.body, fontSize:13, color:C.textM, lineHeight:1.5 }}>{f.text}</div>
               </div>
             </div>
@@ -22706,7 +22779,7 @@ function LandingPage({ onStart }) {
 
         <button onClick={onStart} style={{
           display:"block", width:"100%", padding:"16px", marginTop:36,
-          background:C.navy, color:C.white, border:"none", borderRadius:12,
+          background:C.navy, color:C.white, border:"none", borderRadius:14,
           fontFamily:T.body, fontSize:16, fontWeight:700, cursor:"pointer",
         }}>Commencer gratuitement</button>
 
@@ -22724,7 +22797,7 @@ function LandingPage({ onStart }) {
 function MentionsLegalesPage({ onBack }) {
   const Section = ({ title, children }) => (
     <>
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.ink, marginTop:24 }}>{title}</h3>
       {children}
     </>
   );
@@ -22798,7 +22871,7 @@ function MentionsLegalesPage({ onBack }) {
 function PolitiqueConfidentialitePage({ onBack }) {
   const Section = ({ title, children }) => (
     <>
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.ink, marginTop:24 }}>{title}</h3>
       {children}
     </>
   );
@@ -22831,7 +22904,7 @@ function PolitiqueConfidentialitePage({ onBack }) {
           <li>Documents et photos lus automatiquement : le contrat que tu fais analyser, et les photos ou fichiers qui servent à remplir les cases (carte de visite, devis, RIB, justificatif). Ils sont transmis pour en tirer les informations utiles. Freeley ne conserve pas ces fichiers.</li>
           <li>Paiements : traités par Stripe. Freeley ne stocke aucun numéro de carte bancaire. Si tu connectes ton compte Stripe, Freeley garde son identifiant. Pour chaque lien de paiement par carte, Freeley garde le montant, le libellé, l'email du client s'il est connu et la date du paiement, pour que le lien reste valable et ne puisse pas être payé deux fois.</li>
           <li>Facturation électronique : si tu connectes ton compte Super PDP, Freeley garde les identifiants que tu lui donnes, pour transmettre tes factures.</li>
-          <li>Messages : ceux que tu envoies avec la bulle 💬 (le message, l'adresse de la page concernée et, si tu la donnes, ton adresse email), et tes échanges avec le support.</li>
+          <li>Messages : ceux que tu envoies avec la bulle <IcoI name="message" />(le message, l'adresse de la page concernée et, si tu la donnes, ton adresse email), et tes échanges avec le support.</li>
           <li>Utilisation du service : les alertes déjà lues, et le nombre d'utilisations de la rédaction automatique dans la journée, qui est limité.</li>
           <li>Données techniques : journaux de connexion et de fonctionnement produits par nos prestataires d'hébergement.</li>
         </ul>
@@ -22893,7 +22966,7 @@ function PolitiqueConfidentialitePage({ onBack }) {
         <ul>
           <li>Compte, profil et données d'utilisation : tant que ton compte est actif. Ils sont supprimés quand tu supprimes ton compte. Un compte inactif depuis trois ans peut être supprimé, après un avertissement par email.</li>
           <li>Documents, signatures et preuves : tant que ton compte est actif, pour que tu puisses les retrouver et prouver tes accords. Tu peux les supprimer à tout moment. Avant de supprimer ton compte, télécharge-les : tu dois toi-même conserver tes contrats et tes factures pendant les durées légales qui s'appliquent à ton activité, par exemple dix ans pour les factures.</li>
-          <li>Échanges avec le support, y compris les messages de la bulle 💬 : trois ans après le dernier échange.</li>
+          <li>Échanges avec le support, y compris les messages de la bulle <IcoI name="message" />: trois ans après le dernier échange.</li>
           <li>Emails automatiques : Resend en garde une copie trente (30) jours, et ses sauvegardes sept (7) jours.</li>
           <li>Contenus soumis à la rédaction et à l'analyse automatiques : Anthropic les supprime dans les trente (30) jours, sauf si la loi impose de les garder ou s'ils sont signalés pour un manquement à ses règles d'utilisation (jusqu'à deux ans). Freeley ne conserve pas les photos et les fichiers lus automatiquement.</li>
           <li>Journaux techniques (connexions, erreurs, sécurité) : Supabase et Vercel les conservent pendant la durée prévue par l'offre utilisée par Freeley, le temps nécessaire à la sécurité et au diagnostic des erreurs. Freeley ne les conserve pas lui-même au-delà d'un an.</li>
@@ -22992,7 +23065,7 @@ function PolitiqueConfidentialitePage({ onBack }) {
 function ClientsInfoPage({ onBack }) {
   const Section = ({ title, children }) => (
     <>
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.ink, marginTop:24 }}>{title}</h3>
       {children}
     </>
   );
@@ -23035,7 +23108,7 @@ function ClientsInfoPage({ onBack }) {
 function CguPage({ onBack }) {
   const Section = ({ title, children }) => (
     <>
-      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.navy, marginTop:24 }}>{title}</h3>
+      <h3 style={{ fontFamily:T.display, fontSize:17, color:C.ink, marginTop:24 }}>{title}</h3>
       {children}
     </>
   );
