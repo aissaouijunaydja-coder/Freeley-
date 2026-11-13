@@ -780,6 +780,7 @@ const drawSignatureProofPdf = (doc, proof, { x, y, width, docLabel = "du contrat
 // Version 247 : contrat signé hors établissement, moins de 7 jours après la signature. Les boutons de paiement sont
 // bloqués (art. L221-10 C. conso) : un clic ouvre cette fenêtre, qui explique pourquoi et jusqu'à quand.
 function EarlyPaymentBlockedModal({ payNotBefore, onClose }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   return createPortal(
     <div
       onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) onClose(); }}
@@ -805,6 +806,7 @@ function EarlyPaymentBlockedModal({ payNotBefore, onClose }) {
 
 // Contenu numérique (version 221) : le freelance confirme qu'il vient de fournir le contenu à son client
 function ContentDeliveredModal({ saving, error, onCancel, onConfirm }) {
+  useBackClose(onCancel); // version 267 : bouton retour et touche Échap
   return createPortal(
     <div
       onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget && !saving) onCancel(); }}
@@ -1129,7 +1131,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "266";
+const APP_VERSION = "267";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -2947,6 +2949,7 @@ function useHideFloatingBubbles() {
 
 /* ══════════════════════════════════════════════════════════ CLIENT RATING MODAL ══ */
 function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, onSave }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [stars, setStars]   = useState(0);
   const [hovered, setHovered] = useState(0);
@@ -3089,6 +3092,7 @@ function ClientRatingModal({ clientName, clientEmail, clientCompany, onClose, on
 
 /* ══════════════════════════════════════════════════════════ RELANCE MODAL ══ */
 function RelanceModal({ msg, setMsg, onClose, onSend }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   return (
     <div
@@ -3223,6 +3227,7 @@ const HELP_FAQ = [
 ];
 
 function HelpModal({ onClose }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [expanded, setExpanded] = useState(null);
 
@@ -4780,6 +4785,11 @@ function AppInner() {
   const [scanResultsToShow, setScanResultsToShow] = useState(null);
   const [hasScanResults, setHasScanResults] = useState(!!localStorage.getItem("freeley_scan_results"));
 
+  // Version 267 : le bouton retour revient à la page précédente de Freeley (et à l'étape précédente du contrat)
+  const navStackRef = useRef([]);
+  const navExpectRef = useRef(null);
+  const navBackRef = useRef(null);
+
   const goToScreen = (s) => {
     localStorage.setItem("freeley_screen", s);
     if (s !== "app") { try { localStorage.removeItem("freeley_result_contract_id"); } catch(e) {} }
@@ -5646,6 +5656,76 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     rememberResultContract(null);
     setHasScanResults(false);
   };
+  // Version 267 : on note chaque page visitée, pour que le bouton retour y revienne
+  useEffect(() => {
+    const cur = { screen, step: screen === "app" && typeof step === "number" ? step : 0, hv: historyView?.id || null };
+    const same = (a, b) => !!a && !!b && a.screen === b.screen && a.step === b.step && a.hv === b.hv;
+    const stack = navStackRef.current;
+    const expected = navExpectRef.current;
+    navExpectRef.current = null;
+    if (expected && same(expected, cur)) return;
+    const top = stack[stack.length - 1];
+    if (same(top, cur)) return;
+    if (stack.length >= 2 && same(stack[stack.length - 2], cur)) { stack.pop(); return; }          // bouton « retour » de la page
+    if (top && top.screen === cur.screen && ((top.hv && !cur.hv) || (cur.screen === "app" && cur.step < top.step && cur.step < 3))) {
+      stack[stack.length - 1] = cur;                                                                  // on recule dans la même page
+      return;
+    }
+    if (cur.screen === "app" && cur.step === 3) {
+      // Contrat créé : les étapes du formulaire ne servent plus, le retour mène à un nouveau contrat
+      while (stack.length && stack[stack.length - 1].screen === "app" && stack[stack.length - 1].step > 0 && stack[stack.length - 1].step < 3) stack.pop();
+    }
+    stack.push(cur);
+    if (stack.length > 60) stack.shift();
+    if (stack.length > 1) BACK_NAV.ensureArmed();
+  }, [screen, step, historyView?.id]);
+
+  navBackRef.current = () => {
+    const stack = navStackRef.current;
+    if (stack.length < 2) {
+      // Contrat repris en cours de route (brouillon) : le retour remonte quand même les étapes du formulaire
+      if (screen === "app" && typeof step === "number" && step > 0 && step < 3) {
+        const prevStep = step - 1;
+        navExpectRef.current = { screen: "app", step: prevStep, hv: historyView?.id || null };
+        stack[0] = { ...navExpectRef.current };
+        setStep(prevStep); setErrors({});
+        return true;
+      }
+      return false;
+    }
+    const cur = stack.pop();
+    const prev = stack[stack.length - 1];
+    if (cur.screen === "app" && cur.step === 3 && prev.screen === "app") {
+      // Retour depuis le contrat créé (déjà enregistré dans Mes contrats) : on repart sur un nouveau contrat
+      navExpectRef.current = { screen: "app", step: 0, hv: null };
+      resetLocalWork();
+      return true;
+    }
+    navExpectRef.current = { ...prev };
+    if (prev.screen !== screen) goToScreen(prev.screen);
+    if (prev.screen === "app" && prev.step !== step) { setStep(prev.step); setErrors({}); }
+    const hv = prev.hv ? (history.find((h) => h.id === prev.hv) || null) : null;
+    if ((historyView?.id || null) !== (hv?.id || null)) setHistoryView(hv);
+    return true;
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.history || !window.history.pushState) return;
+    BACK_NAV.enabled = true;
+    BACK_NAV.arm();
+    const onPop = () => {
+      BACK_NAV.armed = false;
+      if (BACK_NAV.leaving) return;
+      if (BACK_NAV.closeTop()) { BACK_NAV.arm(); return; }                                   // une fenêtre ouverte : on la ferme
+      if (navBackRef.current && navBackRef.current()) { BACK_NAV.arm(); return; }            // page précédente de Freeley
+      BACK_NAV.leaving = true;                                                               // déjà au début : on quitte Freeley
+      setTimeout(() => { BACK_NAV.leaving = false; }, 1500);
+      try { window.history.back(); } catch (e) {}
+    };
+    window.addEventListener("popstate", onPop);
+    return () => { window.removeEventListener("popstate", onPop); BACK_NAV.enabled = false; };
+  }, []);
+
   // Déconnexion dans cette page : le même compte retrouve son brouillon en se reconnectant
   const signedOutWorkRef = useRef(false);
   // À chaque connexion : les données gardées dans ce navigateur pour un autre compte sont effacées (jamais montrées),
@@ -5758,13 +5838,16 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
             <button onClick={() => setAccountDeletedNotice(false)} aria-label="Fermer" style={{ position:"absolute", top:6, right:8, background:"none", border:"none", fontSize:18, color:"#166534", cursor:"pointer", padding:4, lineHeight:1 }}>×</button>
           </div>
         )}
-        <LandingPage onStart={() => { setShowLanding(false); setShowAuthModal(true); setAuthMode("signup"); }} />
+        <LandingPage
+          onStart={() => { setShowLanding(false); setShowAuthModal(true); setAuthMode("signup"); }}
+          onLogin={() => { setShowLanding(false); setShowAuthModal(true); setAuthMode("login"); }}
+        />
       </>
     );
   }
 
   const AuthModalEl = showAuthModal
-    ? <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuthModal(false)} onSuccess={handleAuthSuccess} />
+    ? <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => { setShowAuthModal(false); if (!authUser) setShowLanding(true); }} onSuccess={handleAuthSuccess} />
     : null;
 
   const liveAlerts = (() => {
@@ -8346,6 +8429,7 @@ function RecetteNoteLines({ entry, rows, profile, onAdd }) {
 // Fenêtre « Paiement reçu » (date d'encaissement, moyen, montant, note). Mode « libre » ou « remboursement » : une
 // recette faite hors de Freeley, ou une somme rendue à un client (client et nature à écrire).
 function RecetteDialog({ mode = "paiement", info = {}, initial = null, dateRequired = false, saving = false, error = "", onCancel, onConfirm }) {
+  useBackClose(onCancel); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles();
   const today = localTodayIso();
   const libre = mode !== "paiement";
@@ -8867,6 +8951,7 @@ function DownloadAllDocumentsButton({ profile, compact = false }) {
 }
 
 function AvenantModal({ form, contract, avenantCount, contractId, onClose, onCreated, stripeConnectAccountId, stripeConnectReady, onGoToProfile, onGoToProfileTva, onConnectStripe, connectingStripe, profile }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [mode, setMode]               = useState("magic"); // "magic" | "manuel"
   const [clientMessage, setClientMessage] = useState("");
@@ -10608,6 +10693,50 @@ const ICON_PATHS = {
   key: <><circle cx="8" cy="15" r="4" /><path d="M10.8 12.2L20 3" /><path d="M16 7l3 3" /></>,
   save: <><path d="M5 3h11l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /><path d="M8 3v5h7V3" /><rect x="8" y="13" width="8" height="6" rx="1" /></>,
 };
+/* ══════════════════════════════════════════ BOUTON RETOUR (version 267) ══
+   Freeley est une seule page : sans aide, le bouton retour du téléphone ou du navigateur quittait le site.
+   On garde une « marche » dans l'historique du navigateur. Quand on appuie sur retour, la fenêtre ouverte
+   du dessus se ferme d'abord ; sinon on revient à la page précédente de Freeley ; sinon on quitte le site.
+   La touche Échap ferme aussi la fenêtre du dessus. */
+const BACK_NAV = {
+  stack: [],          // fenêtres ouvertes, de la plus ancienne à celle du dessus
+  armed: false,       // une marche est posée dans l'historique du navigateur
+  enabled: false,     // l'application principale est affichée (pas les pages de signature du client)
+  leaving: false,
+  arm() {
+    if (typeof window === "undefined" || !window.history || !window.history.pushState) return;
+    try { window.history.pushState({ freeleyStep: true }, ""); BACK_NAV.armed = true; } catch (e) {}
+  },
+  ensureArmed() { if (BACK_NAV.enabled && !BACK_NAV.armed) BACK_NAV.arm(); },
+  closeTop() {
+    const top = BACK_NAV.stack[BACK_NAV.stack.length - 1];
+    if (!top) return false;
+    top.close();
+    return true;
+  },
+};
+// À appeler en premier dans chaque fenêtre : le bouton retour et la touche Échap la ferment
+function useBackClose(onClose) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const entry = { close: () => { if (typeof closeRef.current === "function") closeRef.current(); } };
+    BACK_NAV.stack.push(entry);
+    BACK_NAV.ensureArmed();
+    const onKey = (e) => {
+      if (e.key !== "Escape" || BACK_NAV.stack[BACK_NAV.stack.length - 1] !== entry) return;
+      e.preventDefault();
+      entry.close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      const i = BACK_NAV.stack.indexOf(entry);
+      if (i >= 0) BACK_NAV.stack.splice(i, 1);
+    };
+  }, []);
+}
+
 function Ico({ name, size = 18, stroke = 1.8, style }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke}
@@ -11062,6 +11191,7 @@ const radarAge = (iso) => {
 };
 const radarAgeLabel = (age) => `${age.toFixed(1).replace(".", ",")} an${age >= 2 ? "s" : ""}`;
 function RadarClientModal({ onClose, onSelectCompany, useLabel = "Utiliser cette entreprise pour la facture", unavailableNote = "" }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [query, setQuery] = useState("");
   const [searchedSiret, setSearchedSiret] = useState(""); // SIRET tapé (14 chiffres) : on garde cet établissement
@@ -11741,6 +11871,7 @@ function buildAvenantAlerts(history) {
 }
 
 function AlertCenter({ onOpenRecouvrement, onOpenNda, onOpenMission, onOpenMyNdas, onClose, initialAlerts = [], onAlertsChanged }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   const panelRef = useRef(null);
   const [alerts, setAlerts] = useState(initialAlerts);
   // Version 238 : sur téléphone, la bulle d'aide cachait « Tout marquer comme lu » : les bulles se cachent, comme pour
@@ -12519,6 +12650,7 @@ function NdaSignatureCertificate({ partieA, partieB, freelanceSignature, clientS
 }
 
 function NdaExpressModal({ onClose, profile, authUser }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [step, setStep]           = useState("form"); // "form" | "loading" | "result"
   const [partieA, setPartieA]     = useState(() => {
@@ -13388,6 +13520,7 @@ function FormalNoticeForm({ profile, mode, initial = {}, invoices = [], rateRef 
   );
 }
 function RecouvrementFermeModal({ onClose, profile, initialCase, history, stripeConnectAccountId, stripeConnectReady, onGoToProfileTva }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   /* ── State global ── */
   const [manualOpen, setManualOpen] = useState(false); // le mode manuel démarre toujours fermé et vide
@@ -14349,6 +14482,7 @@ function ResetPasswordForm({ onSuccess }) {
 }
 
 function AuthModal({ mode, setMode, onClose, onSuccess }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   const [email, setEmail]         = useState("");
   const [password, setPassword]   = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
@@ -17958,6 +18092,7 @@ function SendElectronicInvoiceButton({
 }
 
 function InvoiceModal({ form, setForm, profile, setProfile, onClose, depositPctProp, onDepositPctChange, onGoToProfileTva, authUser, contractId, stripeConnectAccountId, stripeConnectReady, onConnectStripe, connectingStripe }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [downloaded, setDownloaded] = useState(false);
   const [standaloneEntryId, setStandaloneEntryId] = useState(null);
@@ -19223,6 +19358,7 @@ function CameraCapture({ onCapture, onClose }) {
 }
 
 function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [phase, setPhase] = useState(initialResults?.aiFindings?.length ? "result" : "upload"); // upload | loading | error | result
   // Document à analyser : { kind: "pdf", name, data } | { kind: "text", name, text } | { kind: "images", pages: [base64] }
@@ -19852,6 +19988,7 @@ function ScannerModal({ onClose, onRequestCamera, initialResults, onScanSaved })
 
 /* ══════════════════════════════════════════ TACTILE SIGNATURE MODAL ══ */
 function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, onGoToProfile, onGoToProfileTva, depositPct: depositPctProp, contractId, contractText, authUser, onGoToHistory, stripeConnectAccountId, stripeConnectReady, onConnectStripe, connectingStripe }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   // step: 0 = freelance signs, 1 = client simulation, 2 = sealed
   const [step, setStep] = useState(0);
@@ -20860,6 +20997,7 @@ function TactileSignatureModal({ form, setForm, profile, setProfile, onClose, on
   );
 }
 function SubscriptionModal({ onClose, onSubscribe }) {
+  useBackClose(onClose); // version 267 : bouton retour et touche Échap
   useHideFloatingBubbles(); // les bulles flottantes ne recouvrent plus cette fenêtre
   const [hovered, setHovered] = useState(null);
   return (
@@ -22723,7 +22861,7 @@ function LegalPageLayout({ title, children, onBack }) {
 }
 
 /* ══════════════════════════════════════════ VITRINE (LANDING) ══ */
-function LandingPage({ onStart }) {
+function LandingPage({ onStart, onLogin }) {
   useEffect(() => {
     document.title = "Freeley — Générateur de contrats freelance et facturation électronique gratuit";
     let meta = document.querySelector('meta[name="description"]');
@@ -22743,8 +22881,20 @@ function LandingPage({ onStart }) {
   ];
   return (
     <div style={{ minHeight:"100vh", background:C.cream }}>
-      <div style={{ maxWidth:640, margin:"0 auto", padding:"48px 24px 40px" }}>
+      <div style={{ maxWidth:640, margin:"0 auto", padding:"20px 24px 40px" }}>
+        {/* Version 267 : le logo, et un vrai bouton pour se connecter quand on a déjà un compte */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:28 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:9 }}>
+            <img src={FREELEY_LOGO} alt="" style={{ width:32, height:32, objectFit:"contain" }} />
+            <span style={{ fontFamily:LOGO_FONT, fontSize:22, color:LOGO_NAVY, fontWeight:700 }}>Freeley</span>
+          </div>
+          <button data-testid="landing-login" onClick={onLogin} style={{
+            padding:"10px 18px", background:C.white, color:C.navy, border:`1.5px solid ${C.navy}`, borderRadius:12,
+            fontFamily:T.body, fontSize:14, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
+          }}>Se connecter</button>
+        </div>
         <div style={{ textAlign:"center", marginBottom:36 }}>
+          <img src={FREELEY_LOGO} alt="Freeley" style={{ width:64, height:64, objectFit:"contain", marginBottom:12 }} />
           <div style={{ fontFamily:LOGO_FONT, fontSize:34, color:LOGO_NAVY, fontWeight:700, marginBottom:10 }}>Freeley</div>
           <div style={{ fontFamily:T.body, fontSize:16, color:C.textM, lineHeight:1.5 }}>
             L'outil gratuit qui gère tes contrats freelance, tes signatures, et tes factures — du début à la fin.
@@ -22781,7 +22931,11 @@ function LandingPage({ onStart }) {
           display:"block", width:"100%", padding:"16px", marginTop:36,
           background:C.navy, color:C.white, border:"none", borderRadius:14,
           fontFamily:T.body, fontSize:16, fontWeight:700, cursor:"pointer",
-        }}>Commencer gratuitement</button>
+        }}>Créer mon premier contrat</button>
+        <div style={{ textAlign:"center", marginTop:14, fontFamily:T.body, fontSize:13.5, color:C.textM }}>
+          Déjà un compte ?{" "}
+          <button data-testid="landing-login-bottom" onClick={onLogin} style={{ background:"none", border:"none", padding:0, color:C.navy, fontFamily:T.body, fontSize:13.5, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}>Se connecter</button>
+        </div>
 
         <div style={{ textAlign:"center", marginTop:28 }}>
           <a href="/?legal=mentions" style={{ fontFamily:T.body, fontSize:11, color:C.textL, textDecoration:"none", marginRight:14 }}>Mentions légales</a>
