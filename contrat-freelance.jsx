@@ -1131,7 +1131,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "267";
+const APP_VERSION = "268";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -4650,7 +4650,7 @@ function AppInner() {
       }
       const url = new URL(window.location.href);
       url.searchParams.delete("draft");
-      window.history.replaceState({}, "", url.toString());
+      window.history.replaceState(window.history.state, "", url.toString()); // version 268 : garde la place du bouton retour
     }
   }, []);
 
@@ -4785,10 +4785,8 @@ function AppInner() {
   const [scanResultsToShow, setScanResultsToShow] = useState(null);
   const [hasScanResults, setHasScanResults] = useState(!!localStorage.getItem("freeley_scan_results"));
 
-  // Version 267 : le bouton retour revient à la page précédente de Freeley (et à l'étape précédente du contrat)
-  const navStackRef = useRef([]);
-  const navExpectRef = useRef(null);
-  const navBackRef = useRef(null);
+  // Version 268 : le bouton retour revient à la page précédente de Freeley (et à l'étape précédente du contrat)
+  const navPopRef = useRef(null);
 
   const goToScreen = (s) => {
     localStorage.setItem("freeley_screen", s);
@@ -5644,7 +5642,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
         if (res.ok && typeof data.ready === "boolean") setStripeConnectReady(data.ready);
       } catch(e) { console.error("Erreur vérification Stripe Connect:", e); }
       // Nettoie l'URL pour ne pas re-vérifier à chaque rafraîchissement
-      if (backFromStripe) window.history.replaceState({}, "", window.location.pathname);
+      if (backFromStripe) window.history.replaceState(window.history.state, "", window.location.pathname); // version 268 : garde la place du bouton retour
     })();
   }, [authUser?.id, stripeConnectAccountId]);
 
@@ -5656,74 +5654,84 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     rememberResultContract(null);
     setHasScanResults(false);
   };
-  // Version 267 : on note chaque page visitée, pour que le bouton retour y revienne
+  // Version 268 : chaque page ouverte d'un geste a sa place dans l'historique du navigateur (voir BACK_NAV)
   useEffect(() => {
     const cur = { screen, step: screen === "app" && typeof step === "number" ? step : 0, hv: historyView?.id || null };
-    const same = (a, b) => !!a && !!b && a.screen === b.screen && a.step === b.step && a.hv === b.hv;
-    const stack = navStackRef.current;
-    const expected = navExpectRef.current;
-    navExpectRef.current = null;
-    if (expected && same(expected, cur)) return;
-    const top = stack[stack.length - 1];
-    if (same(top, cur)) return;
-    if (stack.length >= 2 && same(stack[stack.length - 2], cur)) { stack.pop(); return; }          // bouton « retour » de la page
-    if (top && top.screen === cur.screen && ((top.hv && !cur.hv) || (cur.screen === "app" && cur.step < top.step && cur.step < 3))) {
-      stack[stack.length - 1] = cur;                                                                  // on recule dans la même page
-      return;
-    }
-    if (cur.screen === "app" && cur.step === 3) {
-      // Contrat créé : les étapes du formulaire ne servent plus, le retour mène à un nouveau contrat
-      while (stack.length && stack[stack.length - 1].screen === "app" && stack[stack.length - 1].step > 0 && stack[stack.length - 1].step < 3) stack.pop();
-    }
-    stack.push(cur);
-    if (stack.length > 60) stack.shift();
-    if (stack.length > 1) BACK_NAV.ensureArmed();
+    BACK_NAV.pageSnap = cur;
+    if (!BACK_NAV.enabled) return;
+    const here = BACK_NAV.info[BACK_NAV.curK] || null;
+    const top = here ? here.snap : null;
+    if (navSameSnap(top, cur)) return;
+    const prev = BACK_NAV.prevInfo();
+    // Bouton « retour » de la page, détail fermé ou étape précédente : on met à jour la place, sans en ajouter
+    const backInPage = !!top && top.screen === cur.screen && ((!!top.hv && !cur.hv) || (cur.screen === "app" && cur.step < top.step));
+    const backToPrev = !!prev && !(here && here.modal) && navSameSnap(prev.snap, cur);
+    if (!backInPage && !backToPrev && BACK_NAV.canPush()) BACK_NAV.push(cur, null);
+    else BACK_NAV.replace(cur, here ? here.modal : null);
   }, [screen, step, historyView?.id]);
 
-  navBackRef.current = () => {
-    const stack = navStackRef.current;
-    if (stack.length < 2) {
-      // Contrat repris en cours de route (brouillon) : le retour remonte quand même les étapes du formulaire
-      if (screen === "app" && typeof step === "number" && step > 0 && step < 3) {
-        const prevStep = step - 1;
-        navExpectRef.current = { screen: "app", step: prevStep, hv: historyView?.id || null };
-        stack[0] = { ...navExpectRef.current };
-        setStep(prevStep); setErrors({});
-        return true;
-      }
-      return false;
+  // Bouton retour (ou avance) du téléphone ou du navigateur : on arrive sur une place de l'historique
+  navPopRef.current = (e) => {
+    const st = e && e.state && typeof e.state === "object" && e.state.freeley === 1 && typeof e.state.k === "number" ? e.state : null;
+    const fromK = BACK_NAV.curK;
+    const toK = st ? st.k : null;
+    BACK_NAV.arrived(toK);
+    if (st) BACK_NAV.info[toK] = { snap: st.snap || null, modal: st.modal || null };
+    const expected = BACK_NAV.expectK;
+    BACK_NAV.expectK = null;
+    if (expected !== null && toK === expected) return;                 // Freeley revient lui-même sur la place d'avant
+    const backward = toK === null || fromK === null || toK < fromK;
+    const go = (n) => { if (BACK_NAV.skips++ > 40) return; try { window.history.go(n); } catch (err) {} };
+    // 1) Les fenêtres ouvertes au-dessus de la place atteinte se ferment
+    let closedPlaced = false, closedLoose = false;
+    for (let i = BACK_NAV.stack.length - 1; i >= 0; i--) {
+      const w = BACK_NAV.stack[i];
+      if (w.k !== null && toK !== null && w.k <= toK) break;
+      if (w.k === null && closedPlaced) break;
+      w.close();
+      if (w.k === null) closedLoose = true; else closedPlaced = true;
     }
-    const cur = stack.pop();
-    const prev = stack[stack.length - 1];
-    if (cur.screen === "app" && cur.step === 3 && prev.screen === "app") {
+    if (closedLoose && !closedPlaced && backward && fromK !== null) {
+      // Fenêtre ouverte toute seule (sans place à elle) : on la ferme et on reste sur la même page
+      BACK_NAV.expectK = fromK;
+      go(1);
+      return;
+    }
+    const closedSome = closedPlaced || closedLoose;
+    // 2) La page de cette place
+    const snap = st ? st.snap : null;
+    const shown = BACK_NAV.pageSnap;
+    if (!snap) { if (!closedSome) go(backward ? -1 : 1); return; }
+    // Étape d'un formulaire déjà recommencé : elle ne sert plus
+    const stale = backward && !!shown && shown.screen === "app" && snap.screen === "app" && shown.step < 3 && snap.step > 0 && snap.step < 3 && snap.step > shown.step;
+    if (navSameSnap(snap, shown) || stale) {
+      if (!closedSome) go(backward ? -1 : 1);                          // rien ne changerait à l'écran : place suivante
+      return;
+    }
+    if (backward && !!shown && shown.screen === "app" && shown.step === 3 && snap.screen === "app" && snap.step < 3) {
       // Retour depuis le contrat créé (déjà enregistré dans Mes contrats) : on repart sur un nouveau contrat
-      navExpectRef.current = { screen: "app", step: 0, hv: null };
       resetLocalWork();
-      return true;
+      return;
     }
-    navExpectRef.current = { ...prev };
-    if (prev.screen !== screen) goToScreen(prev.screen);
-    if (prev.screen === "app" && prev.step !== step) { setStep(prev.step); setErrors({}); }
-    const hv = prev.hv ? (history.find((h) => h.id === prev.hv) || null) : null;
+    if (snap.screen !== screen) goToScreen(snap.screen);
+    if (snap.screen === "app" && typeof step === "number" && snap.step !== step) { setStep(snap.step); setErrors({}); }
+    const hv = snap.hv ? (history.find((h) => h.id === snap.hv) || null) : null;
     if ((historyView?.id || null) !== (hv?.id || null)) setHistoryView(hv);
-    return true;
   };
 
   useEffect(() => {
-    if (typeof window === "undefined" || !window.history || !window.history.pushState) return;
-    BACK_NAV.enabled = true;
-    BACK_NAV.arm();
-    const onPop = () => {
-      BACK_NAV.armed = false;
-      if (BACK_NAV.leaving) return;
-      if (BACK_NAV.closeTop()) { BACK_NAV.arm(); return; }                                   // une fenêtre ouverte : on la ferme
-      if (navBackRef.current && navBackRef.current()) { BACK_NAV.arm(); return; }            // page précédente de Freeley
-      BACK_NAV.leaving = true;                                                               // déjà au début : on quitte Freeley
-      setTimeout(() => { BACK_NAV.leaving = false; }, 1500);
-      try { window.history.back(); } catch (e) {}
-    };
+    if (typeof window === "undefined" || !window.history || !window.history.replaceState) return undefined;
+    const onInput = (e) => BACK_NAV.noteInput(e);
+    const inputEvents = ["pointerup", "click", "keydown"];
+    inputEvents.forEach((t) => window.addEventListener(t, onInput, true));
+    const onPop = (e) => { if (navPopRef.current) navPopRef.current(e); };
     window.addEventListener("popstate", onPop);
-    return () => { window.removeEventListener("popstate", onPop); BACK_NAV.enabled = false; };
+    BACK_NAV.start();
+    return () => {
+      inputEvents.forEach((t) => window.removeEventListener(t, onInput, true));
+      window.removeEventListener("popstate", onPop);
+      BACK_NAV.enabled = false;
+    };
   }, []);
 
   // Déconnexion dans cette page : le même compte retrouve son brouillon en se reconnectant
@@ -10693,21 +10701,95 @@ const ICON_PATHS = {
   key: <><circle cx="8" cy="15" r="4" /><path d="M10.8 12.2L20 3" /><path d="M16 7l3 3" /></>,
   save: <><path d="M5 3h11l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /><path d="M8 3v5h7V3" /><rect x="8" y="13" width="8" height="6" rx="1" /></>,
 };
-/* ══════════════════════════════════════════ BOUTON RETOUR (version 267) ══
-   Freeley est une seule page : sans aide, le bouton retour du téléphone ou du navigateur quittait le site.
-   On garde une « marche » dans l'historique du navigateur. Quand on appuie sur retour, la fenêtre ouverte
-   du dessus se ferme d'abord ; sinon on revient à la page précédente de Freeley ; sinon on quitte le site.
+/* ══════════════════════════════════════════ BOUTON RETOUR (version 268) ══
+   Freeley est une seule page. Chaque page ouverte d'un geste (toucher, clic, touche du clavier), et chaque fenêtre,
+   a sa propre place dans l'historique du navigateur, comme sur un site classique. Le bouton retour du téléphone ou
+   du navigateur revient sur ces places, sans jamais en ajouter.
+   Pourquoi : Chrome saute les places ajoutées sans geste de la personne, par exemple juste après un retour (pour
+   empêcher les sites de bloquer le bouton retour). Et il saute alors aussi toutes les places d'avant de ce site.
+   La version 267 en ajoutait une après chaque retour : au deuxième retour, Chrome quittait Freeley (page Google).
+   Règles :
+   - une place n'est ajoutée qu'après un vrai geste, et une seule par geste ; sinon la place actuelle est mise à jour ;
+   - revenir en arrière dans une page (détail fermé, étape précédente) met à jour la place, sans en ajouter ;
+   - une fenêtre fermée par sa croix, Échap ou un bouton laisse une place en double : le retour la saute tout seul ;
+   - au début de Freeley, le retour quitte le site.
    La touche Échap ferme aussi la fenêtre du dessus. */
+const navSameSnap = (a, b) => !!a && !!b && a.screen === b.screen && a.step === b.step && (a.hv || null) === (b.hv || null);
 const BACK_NAV = {
-  stack: [],          // fenêtres ouvertes, de la plus ancienne à celle du dessus
-  armed: false,       // une marche est posée dans l'historique du navigateur
   enabled: false,     // l'application principale est affichée (pas les pages de signature du client)
-  leaving: false,
-  arm() {
-    if (typeof window === "undefined" || !window.history || !window.history.pushState) return;
-    try { window.history.pushState({ freeleyStep: true }, ""); BACK_NAV.armed = true; } catch (e) {}
+  stack: [],          // fenêtres ouvertes, de la plus ancienne à celle du dessus : { k, close }
+  pageSnap: null,     // page affichée : { screen, step, hv }
+  curK: null,         // clé de la place actuelle dans l'historique du navigateur
+  lastK: 0,
+  order: [],          // clés des places de Freeley connues, dans l'ordre
+  info: {},           // clé → { snap, modal }
+  lastInputAt: -1,    // dernier vrai geste de la personne
+  lastPopAt: 0,       // dernier retour (ou avance) dans l'historique
+  lastPushAt: 0,      // dernière place ajoutée
+  expectK: null,      // place où Freeley revient lui-même (fenêtre ouverte toute seule, fermée par le retour)
+  skips: 0,
+  now() { try { return performance.now(); } catch (e) { return Date.now(); } },
+  nextK() { const k = Math.max(Date.now(), BACK_NAV.lastK + 1); BACK_NAV.lastK = k; return k; },
+  // Une place ne peut être ajoutée qu'après un geste de la personne, et une seule par geste
+  canPush() {
+    if (!BACK_NAV.enabled || typeof window === "undefined" || !window.history || !window.history.pushState) return false;
+    try { const ua = navigator.userActivation; if (ua && ua.isActive === false) return false; } catch (e) {}
+    return BACK_NAV.lastInputAt > BACK_NAV.lastPopAt && BACK_NAV.lastInputAt > BACK_NAV.lastPushAt;
   },
-  ensureArmed() { if (BACK_NAV.enabled && !BACK_NAV.armed) BACK_NAV.arm(); },
+  save(push, k, snap, modal) {
+    const old = window.history.state;
+    const st = { ...(!push && old && typeof old === "object" ? old : {}), freeley: 1, k, snap: snap || null, modal: modal || null };
+    try { if (push) window.history.pushState(st, ""); else window.history.replaceState(st, ""); } catch (e) { return false; }
+    BACK_NAV.info[k] = { snap: snap || null, modal: modal || null };
+    BACK_NAV.curK = k;
+    return true;
+  },
+  push(snap, modal) {
+    const prevK = BACK_NAV.curK;
+    const k = BACK_NAV.nextK();
+    if (!BACK_NAV.save(true, k, snap, modal)) return null;
+    const i = BACK_NAV.order.indexOf(prevK);
+    BACK_NAV.order = (i >= 0 ? BACK_NAV.order.slice(0, i + 1) : (prevK !== null ? [prevK] : [])).concat(k);
+    BACK_NAV.lastPushAt = BACK_NAV.now();
+    return k;
+  },
+  replace(snap, modal) {
+    if (typeof window === "undefined" || !window.history || !window.history.replaceState) return null;
+    const k = BACK_NAV.curK !== null ? BACK_NAV.curK : BACK_NAV.nextK();
+    if (!BACK_NAV.save(false, k, snap, modal)) return null;
+    if (BACK_NAV.order.indexOf(k) < 0) BACK_NAV.order = [k];
+    return k;
+  },
+  // Place juste avant la place actuelle, si on la connaît
+  prevInfo() {
+    const i = BACK_NAV.order.indexOf(BACK_NAV.curK);
+    return i > 0 ? (BACK_NAV.info[BACK_NAV.order[i - 1]] || null) : null;
+  },
+  // On vient d'arriver sur une place par le bouton retour (ou avance)
+  arrived(k) {
+    BACK_NAV.lastPopAt = BACK_NAV.now();
+    if (k === null) { BACK_NAV.curK = null; return; }
+    if (BACK_NAV.order.indexOf(k) < 0) BACK_NAV.order = [k];
+    BACK_NAV.curK = k;
+    if (k > BACK_NAV.lastK) BACK_NAV.lastK = k;
+  },
+  noteInput(e) {
+    if (!e || e.isTrusted === false) return;
+    if (e.type === "keydown" && (e.key === "Escape" || e.key === "Esc")) return; // Échap ne compte pas comme un geste pour Chrome
+    BACK_NAV.lastInputAt = BACK_NAV.now();
+    BACK_NAV.skips = 0;
+  },
+  // Ouverture de Freeley : la place actuelle reçoit la page affichée (aucune place ajoutée)
+  start() {
+    const st = window.history.state;
+    const k = st && typeof st === "object" && st.freeley === 1 && typeof st.k === "number" ? st.k : BACK_NAV.nextK();
+    if (k > BACK_NAV.lastK) BACK_NAV.lastK = k;
+    BACK_NAV.curK = k;
+    BACK_NAV.order = [k];
+    BACK_NAV.info = {};
+    BACK_NAV.enabled = true;
+    BACK_NAV.save(false, k, BACK_NAV.pageSnap, null);
+  },
   closeTop() {
     const top = BACK_NAV.stack[BACK_NAV.stack.length - 1];
     if (!top) return false;
@@ -10720,9 +10802,10 @@ function useBackClose(onClose) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
-    const entry = { close: () => { if (typeof closeRef.current === "function") closeRef.current(); } };
+    const entry = { k: null, close: () => { if (typeof closeRef.current === "function") closeRef.current(); } };
     BACK_NAV.stack.push(entry);
-    BACK_NAV.ensureArmed();
+    // Fenêtre ouverte d'un geste : elle a sa place dans l'historique, le retour la ferme
+    if (BACK_NAV.canPush()) entry.k = BACK_NAV.push(BACK_NAV.pageSnap, "fenetre");
     const onKey = (e) => {
       if (e.key !== "Escape" || BACK_NAV.stack[BACK_NAV.stack.length - 1] !== entry) return;
       e.preventDefault();
@@ -10733,6 +10816,8 @@ function useBackClose(onClose) {
       window.removeEventListener("keydown", onKey);
       const i = BACK_NAV.stack.indexOf(entry);
       if (i >= 0) BACK_NAV.stack.splice(i, 1);
+      // Fermée par sa croix, Échap ou un bouton : sa place devient une copie de la page (le retour la sautera)
+      if (entry.k !== null && BACK_NAV.enabled && BACK_NAV.curK === entry.k) BACK_NAV.replace(BACK_NAV.pageSnap, null);
     };
   }, []);
 }

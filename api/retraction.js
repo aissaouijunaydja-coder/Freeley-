@@ -63,6 +63,11 @@
 // client s'il vit dans un territoire français, jamais plus court qu'à l'heure de Paris ; rappel au freelance :
 // rembourser par le même moyen de paiement que le client, sans frais pour lui (art. L221-24).
 //
+// Version 250 : deuxième passage officiel sur la déclaration en ligne ; textes plus précis pour l'absence de droit ;
+// exemplaire papier signé à la main ; contenu numérique : case (titre, « sans support matériel », renoncement exprès) et
+// confirmation (date, heure, prestataire) proposées par Ordalie, l'ancien texte restant accepté ; demande après la
+// livraison : accusé qui ne vaut pas résiliation, conseils au freelance nuancés.
+//
 // Version 249 : on suit la loi. Pas de droit de rétractation pour un contrat signé en face à face dans les locaux du
 // freelance, ni pour une réparation urgente demandée par le client (art. L221-28, 8°) : l'appli l'envoie avec la
 // signature en présence (« retractationExcluded »), le serveur vérifie le lieu ; les contrats déjà signés gardent leurs
@@ -187,6 +192,7 @@ function buildNotice(f = {}, where) {
     "Le délai de rétractation expire quatorze jours après le jour de la conclusion du contrat.",
     `Pour exercer le droit de rétractation, vous devez nous notifier (${coords(f)}) votre décision de rétractation du présent contrat au moyen d'une déclaration dénuée d'ambiguïté (par exemple, lettre envoyée par la poste ou courrier électronique). Vous pouvez utiliser le modèle de formulaire de rétractation mais ce n'est pas obligatoire.`,
     `Vous pouvez également exercer votre droit de rétractation en ligne sur ${where}. Si vous utilisez cette fonctionnalité en ligne, nous vous enverrons, dans les meilleurs délais, un accusé de réception de la rétractation sur un support durable (par exemple, par courriel), y compris son contenu ainsi que la date et l'heure de sa soumission.`,
+    `Vous pouvez également remplir et transmettre le modèle de formulaire de rétractation ou toute autre déclaration dénuée d'ambiguïté sur notre site internet : ${where}. Si vous utilisez cette option, nous vous enverrons dans les meilleurs délais un accusé de réception de la rétractation sur un support durable (par exemple, par courriel).`,
     "Pour que le délai de rétractation soit respecté, il suffit que vous transmettiez votre communication relative à l'exercice du droit de rétractation avant l'expiration du délai de rétractation.",
     "Effets de rétractation",
     "En cas de rétractation de votre part du présent contrat, nous vous rembourserons tous les paiements reçus de vous, y compris les frais de livraison (à l'exception des frais supplémentaires découlant du fait que vous avez choisi, le cas échéant, un mode de livraison autre que le mode moins coûteux de livraison standard proposé par nous) sans retard excessif et, en tout état de cause, au plus tard quatorze jours à compter du jour où nous sommes informés de votre décision de rétractation du présent contrat. Nous procéderons au remboursement en utilisant le même moyen de paiement que celui que vous aurez utilisé pour la transaction initiale, sauf si vous convenez expressément d'un moyen différent ; en tout état de cause, ce remboursement n'occasionnera pas de frais pour vous.",
@@ -381,6 +387,24 @@ function retractationDeadline(signedIso, tz) {
 }
 
 // Textes exacts des cases que le client peut cocher (copie de contrat-freelance.jsx)
+// Version 250 : contenu numérique, formule complète (titre du contenu, « sans support matériel », renoncement exprès :
+// art. L221-28, 13°, L221-13 et L221-9). Le titre est au milieu ; tout le reste est vérifié mot pour mot. Même texte que
+// retractationWaiverTextDigital() dans contrat-freelance.jsx. L'ancien texte (WAIVER_TEXT_DIGITAL) reste accepté.
+const DIGITAL_WAIVER_PREFIX = "Je consens expressément à ce que la fourniture du contenu numérique sans support matériel « ";
+const DIGITAL_WAIVER_SUFFIX = " » commence avant l'expiration du délai de rétractation de quatorze (14) jours. Je reconnais expressément qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution et renonce expressément à exercer ce droit à compter de ce commencement.";
+function digitalTitleFromWaiver(t) {
+  const s = String(t || "");
+  if (!s.startsWith(DIGITAL_WAIVER_PREFIX) || !s.endsWith(DIGITAL_WAIVER_SUFFIX)) return "";
+  const title = s.slice(DIGITAL_WAIVER_PREFIX.length, s.length - DIGITAL_WAIVER_SUFFIX.length);
+  return title.length > 0 && title.length <= 200 && !/[\r\n]/.test(title) ? title : "";
+}
+// Confirmation de l'accord (contenu numérique), avec la date, l'heure et le nom du prestataire
+function digitalWaiverConfirmation(waivedIso, freelanceName, title) {
+  const d = new Date(waivedIso);
+  const date = d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" });
+  const time = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
+  return `À la suite de votre accord exprès donné le ${date} à ${time}, ${freelanceName || "votre prestataire"} vous confirme que vous avez expressément consenti à ce que la fourniture du contenu numérique sans support matériel « ${title || "objet du contrat"} » commence avant l'expiration du délai de rétractation de quatorze (14) jours, que vous avez expressément reconnu qu'en conséquence vous perdrez votre droit de rétractation dès le commencement de cette exécution et que vous avez expressément renoncé à exercer ce droit à compter de ce commencement.`;
+}
 const WAIVER_TEXT_DIGITAL = "Je consens expressément à ce que la fourniture du contenu numérique commence avant l'expiration du délai de rétractation de quatorze (14) jours et je reconnais qu'en conséquence je perdrai mon droit de rétractation dès le commencement de cette exécution.";
 // Version 247 : formule officielle du montant dû (proportionnel, art. L221-25). L'ancien texte reste accepté : un client
 // sur un onglet resté ouvert l'a vu et coché, c'est donc lui qui est enregistré.
@@ -399,8 +423,8 @@ function isConsumerLike(form = {}, content = {}) {
 // Version 249 : pas de droit de rétractation (signé dans les locaux du freelance, ou réparation urgente). Mêmes textes que
 // RETRACTATION_EXCLUDED_TEXT dans contrat-freelance.jsx.
 const EXCLUDED_TEXT = {
-  locaux: "Contrat signé dans les locaux du prestataire, en face à face : la loi ne prévoit pas de droit de rétractation dans ce cas.",
-  urgence: "Réparation urgente demandée par le client à son domicile : la loi ne prévoit pas de droit de rétractation pour les pièces et le travail strictement nécessaires pour répondre à l'urgence (article L221-28, 8°, du Code de la consommation).",
+  locaux: "Le contrat est conclu en présence des parties dans les locaux habituels du prestataire et n'a pas été conclu immédiatement après une sollicitation personnelle et individuelle du consommateur dans un autre lieu. Dans ces conditions, il ne s'agit ni d'un contrat à distance ni d'un contrat hors établissement au sens de l'article L. 221-1 du Code de la consommation, et le droit légal de rétractation prévu aux articles L. 221-18 et suivants ne s'applique pas.",
+  urgence: "Pour les travaux d'entretien ou de réparation à réaliser en urgence à votre domicile et que vous avez expressément sollicités, le droit de rétractation ne peut être exercé pour les pièces de rechange et les travaux strictement nécessaires pour répondre à l'urgence (article L. 221-28, 8°, du Code de la consommation).",
 };
 const excludedKey = (form = {}, content = {}) => (isConsumerLike(form, content) && EXCLUDED_TEXT[content.retractationExcluded] ? content.retractationExcluded : null);
 // Accord du client pour l'email au lieu du papier (même texte que COPY_MEDIUM_TEXT.email dans contrat-freelance.jsx)
@@ -530,9 +554,10 @@ async function handleConfirm(contractId, tz, declared = {}) {
     if (!savedLate) return { status: 500, body: { error: "save_failed" } };
     const deliveredStr = fmtParis(ended.deliveredAt);
     const waivedStr = fmtParis(ended.waivedAt);
+    const confirmedStr = fmtParis(ended.confirmationSentAt);
     const lateResults = await sendAck(
       `Accusé de réception de votre demande de rétractation — ${missionTitle}`,
-      `Bonjour${declaredName ? " " + declaredName : ""},\n\nNous accusons réception de votre demande de rétractation, déclarée en ligne le ${dateStr} (heure de Paris).\n\n${declarationText}\n\n${freelanceName} a indiqué vous avoir fourni le contenu numérique le ${deliveredStr}, après votre accord du ${waivedStr}. Dans ce cas, la loi prévoit que le droit de rétractation prend fin au début de la fourniture (article L221-28, 13°, du Code de la consommation). Votre demande est transmise à ${freelanceName}, qui vous répondra.\n\nCet email constitue votre accusé de réception sur un support durable. Gardez-le.\n\n${signOff}`
+      `Bonjour${declaredName ? " " + declaredName : ""},\n\nNous accusons réception de votre déclaration, transmise en ligne le ${dateStr} (heure de Paris).\n\n${declarationText}\n\nSelon les indications de ${freelanceName}, le contenu « ${missionTitle} » a été mis à votre disposition le ${deliveredStr}, après votre accord exprès du ${waivedStr} et la confirmation qui vous a été envoyée le ${confirmedStr}. Votre droit légal de rétractation a donc pris fin à ce moment, sous réserve de l'exactitude de ces éléments (article L221-28, 13°, du Code de la consommation).\n\nCet accusé confirme la réception de votre déclaration. Il ne signifie pas que le contrat est résilié. Votre demande est transmise à ${freelanceName}, qui vous répondra.\n\nCet email constitue votre accusé de réception sur un support durable. Gardez-le.\n\n${signOff}`
     );
     lateResults.freelanceEmailSent = false;
     const freelanceEmailLate = (await getFreelanceAuthEmail(row.user_id)) || form.freelanceEmail || null;
@@ -541,7 +566,7 @@ async function handleConfirm(contractId, tz, declared = {}) {
         await sendMail({
           from: FROM, to: freelanceEmailLate,
           subject: `Demande de rétractation à examiner — ${missionTitle}`,
-          text: `Bonjour,\n\n${clientName || "Ton client"} a envoyé une demande de rétractation le ${dateStr} pour la mission « ${missionTitle} ».\n${declarationForFreelance}\n\nTu avais indiqué dans Freeley lui avoir fourni le contenu numérique le ${deliveredStr}, après son accord du ${waivedStr} et l'envoi de la confirmation. Dans ce cas, son droit de rétractation a pris fin au début de la fourniture (article L221-28, 13°, du Code de la consommation). Le contrat n'est donc pas annulé automatiquement : c'est toi qui décides, et tu n'es pas obligé d'accepter.\n\nRéponds-lui par email. Si le contenu lui a bien été fourni à cette date, joins la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement). Si tu acceptes sa demande, ou si le contenu ne lui avait pas vraiment été fourni, rembourse-lui les sommes reçues dans les 14 jours, ${REFUND_HOW}.\n\n${ackLine(lateResults, "sa demande")}\n\nCordialement,\nFreeley`,
+          text: `Bonjour,\n\n${clientName || "Ton client"} a envoyé une demande de rétractation le ${dateStr} pour la mission « ${missionTitle} ».\n${declarationForFreelance}\n\nTu avais indiqué dans Freeley lui avoir fourni le contenu numérique le ${deliveredStr}, après son accord du ${waivedStr} et l'envoi de la confirmation le ${confirmedStr}. Si c'est exact, son droit de rétractation a pris fin au moment où le contenu a été mis à sa disposition (article L221-28, 13°, du Code de la consommation). Le contrat n'est donc pas annulé automatiquement.\n\nVérifie d'abord ces faits, puis réponds-lui par email. Si le contenu lui a bien été fourni à cette date, joins la preuve de ton envoi (date et heure de l'email ou du lien de téléchargement) : tu n'es alors pas obligé d'accepter sa demande. Si le contenu ne lui avait pas vraiment été fourni à cette date, ou en cas de doute, traite sa demande comme une rétractation : rembourse-lui les sommes reçues dans les 14 jours, ${REFUND_HOW}. Si tu acceptes quand même d'annuler alors que son droit avait pris fin, mettez-vous d'accord par écrit sur le remboursement.\n\n${ackLine(lateResults, "sa demande")}\n\nCordialement,\nFreeley`,
         });
         lateResults.freelanceEmailSent = true;
       } catch (e) { console.error("retraction/confirm: échec email freelance (demande après fourniture)", e); }
@@ -641,7 +666,7 @@ async function handleClientWaive(contractId, waiverText) {
   if (error || !row) return { status: 404, body: { error: "Contrat introuvable" } };
   const content = parseContent(row.content);
   if (!isConsumerLike(content.form || {}, content)) return { status: 400, body: { error: "not_particulier" } };
-  if (![WAIVER_TEXT_DIGITAL, WAIVER_TEXT_SERVICE, WAIVER_TEXT_SERVICE_V246].includes(waiverText)) return { status: 400, body: { error: "invalid_text" } };
+  if (![WAIVER_TEXT_DIGITAL, WAIVER_TEXT_SERVICE, WAIVER_TEXT_SERVICE_V246].includes(waiverText) && !digitalTitleFromWaiver(waiverText)) return { status: 400, body: { error: "invalid_text" } };
   if (content.retractationWaivedAt) return { status: 200, body: { ok: true, alreadyWaived: true } };
   if (row.status === "signed") return { status: 400, body: { error: "already_signed" } };
   const nowIso = new Date().toISOString();
@@ -773,7 +798,8 @@ async function handlePrecontractInfo(contractId, token, body) {
   const link = `${SITE_URL}/?sign=${contractId}`;
   const nowIso = new Date().toISOString();
   const consentText = copyEmailConsentText(clientEmail);
-  const who = coords(form);
+  // Version 250 : coordonnées sans le nom, déjà écrit juste avant (il apparaissait deux fois)
+  const who = [form.freelanceAddress, fmtPhone(form.freelancePhone), form.freelanceEmail].map((s) => String(s || "").trim()).filter(Boolean).join(", ");
   const blocks = [
     `Bonjour${clientName ? " " + clientName : ""},`,
     `Vous avez accepté, le ${fmtParis(nowIso)} (heure de Paris), de recevoir par email plutôt que sur papier les informations sur ce contrat et votre exemplaire signé :\n« ${consentText} »`,
@@ -979,7 +1005,7 @@ async function handleSendLink(contractId) {
     if (content.copyMedium === "email") {
       blocks.push(`Comme vous l'avez accepté${content.copyMediumConsentAt ? " le " + fmt(content.copyMediumConsentAt) : ""}, cet email vous est envoyé à la place de l'exemplaire papier : gardez-le.`);
     } else if (content.copyMedium === "papier") {
-      blocks.push("Vous avez choisi de recevoir votre exemplaire sur papier : le prestataire vous le remet. Cet email vous donne en plus le lien vers votre contrat.");
+      blocks.push("Vous avez choisi de recevoir votre exemplaire sur papier : le prestataire vous remet un exemplaire que vous signez tous les deux à la main. Cet email vous donne en plus le lien vers votre contrat.");
     }
   }
   // Version 249 : pas de droit de rétractation (signé dans les locaux du freelance, ou réparation urgente)
@@ -989,9 +1015,9 @@ async function handleSendLink(contractId) {
     // Contenu numérique : le client a donné son accord (version 208) ; prestation : il l'a demandé
     blocks.push(`${isDigital ? "Votre accord" : "Votre demande"} du ${fmt(waivedAt)} (texte que vous avez coché) :\n« ${content.retractationWaiverText} »`);
     if (isDigital) {
-      // Confirmation exigée pour un contenu numérique (texte relu par une juriste)
-      const waivedDate = new Date(waivedAt).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" });
-      blocks.push(`À la suite de votre accord exprès donné le ${waivedDate}, nous vous confirmons que vous avez consenti à ce que la fourniture du contenu numérique “${missionTitle}” commence avant l'expiration du délai de rétractation de quatorze (14) jours et que vous avez reconnu qu'en conséquence vous perdrez votre droit de rétractation dès le commencement de cette exécution.`);
+      // Confirmation exigée pour un contenu numérique (art. L221-13). Version 250 : formule d'Ordalie (date et heure,
+      // prestataire, « sans support matériel », renoncement exprès), à faire valider par la juriste
+      blocks.push(digitalWaiverConfirmation(waivedAt, freelanceName, digitalTitleFromWaiver(content.retractationWaiverText) || missionTitle));
     }
   }
 
