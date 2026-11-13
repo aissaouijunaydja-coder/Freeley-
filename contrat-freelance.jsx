@@ -1131,7 +1131,7 @@ const withEI = (name, legalStatus) => {
 };
 // Version de l'appli. Elle est écrite dans les propriétés de chaque PDF : on sait toujours quelle version
 // a produit un document (un onglet resté ouvert peut encore faire tourner une ancienne version).
-const APP_VERSION = "268";
+const APP_VERSION = "269";
 
 // ─── QR code fabriqué par Freeley (version 231) ───
 // Avant, l'image du QR code était demandée au site api.qrserver.com, à qui Freeley envoyait le lien de paiement.
@@ -5673,6 +5673,8 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
   // Bouton retour (ou avance) du téléphone ou du navigateur : on arrive sur une place de l'historique
   navPopRef.current = (e) => {
     const st = e && e.state && typeof e.state === "object" && e.state.freeley === 1 && typeof e.state.k === "number" ? e.state : null;
+    // Version 269 : place qui ne vient pas de Freeley (retour de Google, lien d'un email) : on la garde, sans naviguer
+    if (!st) { BACK_NAV.adopt(); return; }
     const fromK = BACK_NAV.curK;
     const toK = st ? st.k : null;
     BACK_NAV.arrived(toK);
@@ -5701,7 +5703,7 @@ Pour chaque champ non trouvé dans le document, mets une chaîne vide "". N'inve
     // 2) La page de cette place
     const snap = st ? st.snap : null;
     const shown = BACK_NAV.pageSnap;
-    if (!snap) { if (!closedSome) go(backward ? -1 : 1); return; }
+    if (!snap) return;                                                  // version 269 : jamais de saut vers une place inconnue
     // Étape d'un formulaire déjà recommencé : elle ne sert plus
     const stale = backward && !!shown && shown.screen === "app" && snap.screen === "app" && shown.step < 3 && snap.step > 0 && snap.step < 3 && snap.step > shown.step;
     if (navSameSnap(snap, shown) || stale) {
@@ -10712,7 +10714,10 @@ const ICON_PATHS = {
    - une place n'est ajoutée qu'après un vrai geste, et une seule par geste ; sinon la place actuelle est mise à jour ;
    - revenir en arrière dans une page (détail fermé, étape précédente) met à jour la place, sans en ajouter ;
    - une fenêtre fermée par sa croix, Échap ou un bouton laisse une place en double : le retour la saute tout seul ;
-   - au début de Freeley, le retour quitte le site.
+   - au début de Freeley, le retour quitte le site ;
+   - version 269 : une place qui ne vient pas de Freeley est gardée telle quelle, sans jamais naviguer. Au retour de
+     Google (et des liens reçus par email), Supabase efface la clé de connexion après « # » dans l'adresse, ce qui crée
+     une place vide. La version 268 la sautait comme un retour : on repartait sur la page de connexion Google.
    La touche Échap ferme aussi la fenêtre du dessus. */
 const navSameSnap = (a, b) => !!a && !!b && a.screen === b.screen && a.step === b.step && (a.hv || null) === (b.hv || null);
 const BACK_NAV = {
@@ -10759,6 +10764,15 @@ const BACK_NAV = {
     if (!BACK_NAV.save(false, k, snap, modal)) return null;
     if (BACK_NAV.order.indexOf(k) < 0) BACK_NAV.order = [k];
     return k;
+  },
+  // Version 269 : une place créée par quelqu'un d'autre (adresse changée après « # ») devient la page affichée
+  adopt() {
+    BACK_NAV.lastPopAt = BACK_NAV.now();
+    const prevK = BACK_NAV.curK;
+    const k = BACK_NAV.nextK();
+    if (!BACK_NAV.save(false, k, BACK_NAV.pageSnap, null)) return;
+    const i = BACK_NAV.order.indexOf(prevK);
+    BACK_NAV.order = (i >= 0 ? BACK_NAV.order.slice(0, i + 1) : (prevK !== null ? [prevK] : [])).concat(k);
   },
   // Place juste avant la place actuelle, si on la connaît
   prevInfo() {
